@@ -3,42 +3,77 @@
 # variables when constructing A(x,y,z), i.e, A(x,y) produces an error
 
 (x,y,z) = var('x,y,z')
-(A,B,r,Psi) = function('A,B,r,Psi')
+(A,B,expB,r,Psi) = function('A,B,expB,r,Psi')
 (a,b,c,d,e) = var('a,b,c,d,e')
 (f,g,h,i,j) = var('f,g,h,i,j')
 var('E')
 
 parameters = [a,b,c,d,e,  f,g,h,i,j,  E]
 
-from sage.calculus.DifferentialAlgebra import DifferentialRing
+from sage.calculus.DifferentialAlgebra import DifferentialRing, BaseFieldExtension
 DR = DifferentialRing(derivations = [x,y,z],
-                      blocks = [[A,B,Psi,r], parameters],
+                      blocks = [[A,B,expB,Psi,r], parameters],
 	              parameters = parameters)
 
 def H(Psi):
    return -diff(Psi,x,2)-diff(Psi,y,2)-diff(Psi,z,2)-(1/r(x,y,z))*Psi
 
-rels = [A(x,y,z) == a*x + b*y + c*z + d*r(x,y,z) + e,
-        B(x,y,z) == f*x + g*y + h*z + i*r(x,y,z) + j,
+# timings for various trial functions:
+# all used [[A,B,expB,Psi,r], parameters] for block ordering
+#
+#  5 sec: Psi = e * exp(i*r)
+# 45 sec: Psi = (a*x + e) * exp(i*r)
+# 52 sec: Psi = (a*x + b*y + e) * exp(i*r)
+# >13 hr: Psi = (d*r + e) * exp(i*r)
+
+#rels = [A(x,y,z) == a*x + b*y + c*z + d*r(x,y,z) + e,
+#        B(x,y,z) == f*x + g*y + h*z + i*r(x,y,z) + j,
+#rels = [A(x,y,z) == d*r(x,y,z) + e,
+rels = [A(x,y,z) == e,
+        B(x,y,z) == i*r(x,y,z),
 	r(x,y,z)^2 == x^2 + y^2 + z^2,
+	Psi(x,y,z) != 0,
+	Psi(x,y,z) == A(x,y,z)*expB(x,y,z),
+	diff(expB(x,y,z),x) == diff(B(x,y,z), x) * expB(x,y,z),
+	diff(expB(x,y,z),y) == diff(B(x,y,z), y) * expB(x,y,z),
+	diff(expB(x,y,z),z) == diff(B(x,y,z), z) * expB(x,y,z),
 	H(Psi(x,y,z)) == E*Psi(x,y,z)]
+
+# expanding H and dividing out expB helps (a little):
+#
+#  8 sec: Psi = (a*x + e) * exp(i*r)
+#  8 sec: Psi = (a*x + b*y + e) * exp(i*r)
+# >1 min: Psi = (d*r + e) * exp(i*r)
+
+Psi = A(x,y,z)*exp(B(x,y,z))
+rels = [A(x,y,z) == (e),
+        B(x,y,z) == i*r(x,y,z),
+	r(x,y,z)^2 == x^2 + y^2 + z^2,
+	expand(H(Psi)/Psi - E)]
 
 RDC = DR.RosenfeldGroebner(rels)
 
-print RDC
+#Field = BaseFieldExtension (generators = parameters)
+#RDC = DR.RosenfeldGroebner (rels, basefield = Field)
+
+#print RDC
+
+for i in RDC: print i
 
 #exit()
+print
+print
 
 
 var('x,y,z')
 
 r = sqrt(x^2+y^2+z^2)
 
-var('a,b,c,d,u')
-A = a*x+b*y+c*z+u*r+d
+var('a,b,c,d,e')
+A = a*x+b*y+c*z+d*r+e
 
-var('e,f,g,h,v')
-B = e*x+f*y+g*z+v*r+h
+var('f,g,h,i,j')
+B = f*x+g*y+h*z+i*r+j
 
 Psi = A*exp(B)
 #Psi = a*exp(b*r)
@@ -58,7 +93,7 @@ def bwb(expr):
 
 # print numerator(expand(bwb(eq)/exp(B)))
 
-BWB = QQ['a,b,c,d,u, e,f,g,h,v, E']
+BWB = QQ['a,b,c,d,e, f,g,h,i,j, E']
 BWB2 = BWB['x,y,z,r']
 
 #bwb2 = BWB2(numerator(expand(bwb(eq/exp(B)))))
@@ -66,7 +101,7 @@ bwb2 = BWB2(numerator(expand(bwb(eq/exp(B)))).subs({r^2:x^2+y^2+z^2, r^3:r*(x^2+
 
 #print bwb2.coefficients()
 
-# result = solve([SR(i) == 0 for i in bwb2.coefficients()], [E,a,b,c,d,u,e,f,g,h,v])
+# result = solve([SR(i) == 0 for i in bwb2.coefficients()], [E,a,b,c,d,e,f,g,h,i,j])
 # print result
 
 primes = ideal(bwb2.coefficients()).associated_primes()
