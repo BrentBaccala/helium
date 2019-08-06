@@ -82,7 +82,10 @@ Psi = A*exp(B)
 
 var('E')
 
-eq = -diff(Psi,x,2)-diff(Psi,y,2)-diff(Psi,z,2)-(1/r)*Psi-E*Psi
+def H(Psi):
+   return -diff(Psi,x,2)-diff(Psi,y,2)-diff(Psi,z,2)-(1/r)*Psi
+
+eq = H(Psi) - E*Psi
 
 def bwb(expr):
     if isinstance(expr, Expression) and expr.operator():
@@ -96,17 +99,13 @@ def bwb(expr):
 # print numerator(expand(bwb(eq)/exp(B)))
 
 BWB = QQ['a,b,c,d,e, f,g,h,i,j, E']
-BWB2 = BWB['x,y,z,r']
+BWB2.<x,y,z,r> = Frac(BWB)[]
+BWB3 = BWB2.quo(r^2-(x^2+y^2+z^2))
 
-#bwb2 = BWB2(numerator(expand(bwb(eq/exp(B)))))
-bwb2 = BWB2(numerator(expand(bwb(eq/exp(B)))).subs({r^2:x^2+y^2+z^2, r^3:r*(x^2+y^2+z^2)}))
+bwb3 = BWB3(numerator(expand(bwb(eq/exp(B)))))
+bwbI = ideal(map(numerator, bwb3.lift().coefficients()))
 
-#print bwb2.coefficients()
-
-# result = solve([SR(i) == 0 for i in bwb2.coefficients()], [E,a,b,c,d,e,f,g,h,i,j])
-# print result
-
-primes = ideal(bwb2.coefficients()).associated_primes()
+primes = bwbI.associated_primes()
 
 for prime in primes:
     print prime._repr_short()
