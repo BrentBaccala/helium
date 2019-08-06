@@ -58,9 +58,8 @@ RDC = DR.RosenfeldGroebner(rels)
 
 #print RDC
 
-for i in RDC: print i
+for id in RDC: print id
 
-#exit()
 print
 print
 
