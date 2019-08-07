@@ -107,9 +107,10 @@ def bwb(expr):
 
 # print numerator(expand(bwb(eq)/exp(B)))
 
-#order = TermOrder('deglex(1),degrevlex({})'.format(len(Avars)+len(Bvars)))
-#BWB = PolynomialRing(QQ, (var('E'),) + Avars + Bvars, order=order)
-BWB = PolynomialRing(QQ, (var('E'),) + Avars + Bvars)
+# use custom term ordering to prioritize elimination of 'E' variable
+order = TermOrder('deglex(1),degrevlex({})'.format(len(Avars)+len(Bvars)))
+BWB = PolynomialRing(QQ, (var('E'),) + Avars + Bvars, order=order)
+#BWB = PolynomialRing(QQ, (var('E'),) + Avars + Bvars)
 
 BWB2.<x,y,z,r> = Frac(BWB)[]
 BWB3 = BWB2.quo(r^2-(x^2+y^2+z^2))
