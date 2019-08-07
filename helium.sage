@@ -116,7 +116,18 @@ BWB2.<x,y,z,r> = Frac(BWB)[]
 BWB3 = BWB2.quo(r^2-(x^2+y^2+z^2))
 
 bwb3 = BWB3(numerator(expand(bwb(eq/exp(B)))))
-bwbI = ideal(map(numerator, bwb3.lift().coefficients()))
+eqns = map(numerator, bwb3.lift().coefficients())
+bwbI = ideal(eqns)
+
+for poly in eqns:
+    print poly
+
+print
+print
+
+#Ss = solve (map(SR, eqns), *((E,) + Avars + Bvars), algorithm='sympy')
+#for s in Ss: print s
+#exit()
 
 # Tried with a finite field.  Same performance issues
 # (BWB's coefficient fields needs to be changed to ZZ)
