@@ -71,11 +71,20 @@ var('x,y,z')
 
 r = sqrt(x^2+y^2+z^2)
 
-var('a,b,c,d,e')
-A = a*x+b*y+c*z+d*r+e
+from itertools import *
 
-var('f,g,h,i,j')
-B = f*x+g*y+h*z+i*r+j
+def flatten(listOfLists):
+    "Flatten one level of nesting"
+    return chain.from_iterable(listOfLists)
+
+def trial_polynomial(base, vars, degree):
+    terms = tuple(flatten([combinations_with_replacement(vars, d) for d in range(degree+1)]))
+    coefficients = tuple(var(base+str(c)) for c in range(len(terms)))
+    poly = sum([var(base+str(c))*mul(v) for c,v in enumerate(terms)])
+    return (coefficients, poly)
+
+(Avars, A) = trial_polynomial('a', [x,y,z,r], 1)
+(Bvars, B) = trial_polynomial('b', [x,y,z,r], 1)
 
 Psi = A*exp(B)
 #Psi = a*exp(b*r)
@@ -98,12 +107,22 @@ def bwb(expr):
 
 # print numerator(expand(bwb(eq)/exp(B)))
 
-BWB = QQ['a,b,c,d,e, f,g,h,i,j, E']
+#order = TermOrder('deglex(1),degrevlex({})'.format(len(Avars)+len(Bvars)))
+#BWB = PolynomialRing(QQ, (var('E'),) + Avars + Bvars, order=order)
+BWB = PolynomialRing(QQ, (var('E'),) + Avars + Bvars)
+
 BWB2.<x,y,z,r> = Frac(BWB)[]
 BWB3 = BWB2.quo(r^2-(x^2+y^2+z^2))
 
 bwb3 = BWB3(numerator(expand(bwb(eq/exp(B)))))
 bwbI = ideal(map(numerator, bwb3.lift().coefficients()))
+
+# Tried with a finite field.  Same performance issues
+# (BWB's coefficient fields needs to be changed to ZZ)
+#BWBff = PolynomialRing(GF(3), (var('E'),) + Avars + Bvars)
+#BWB2ff.<x,y,z,r> = Frac(BWBff)[]
+#hom = BWB.hom(BWBff)
+#bwbIf = ideal(map(hom, bwbI.gens()))
 
 primes = bwbI.associated_primes()
 
