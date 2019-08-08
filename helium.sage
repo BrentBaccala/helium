@@ -171,3 +171,37 @@ if SciMin.success:
     for pair in zip(BWB.gens(), SciMin.x): print pair
 else:
     print SciMin.message
+
+
+# search for integer relations among the approximate solutions
+
+#ints = [ZZ(round(v)) for v in 2^26 / sqrt(sum(SciMin.x * SciMin.x)) * SciMin.x]
+norm = 2^26 / sqrt(sum(SciMin.x * SciMin.x))
+ints = [ZZ(round(v)) for v in  norm * SciMin.x] + [ZZ(round(norm))]
+
+print ints
+
+def find_relation():
+
+    L = matrix(list(matrix.identity(len(ints))) + [tuple(ints)]).transpose().LLL()
+
+    print L
+
+    for Lrow in L:
+
+        rel = matrix(BWB.gens() + (1,)) * Lrow[0:-1]
+
+        print rel
+
+        V = Lrow[0:-1]
+
+        # len(V)-1 so as to drop the "1" term at the end
+        for i in range(len(V)-1):
+            if V[i] == 1:
+                print i,Lrow
+	        V[i] = 0
+	        ints[i] = - (matrix(V) * matrix(ints).transpose())[0,0]
+	        break
+
+        if Lrow[-1] != 0:
+            break
