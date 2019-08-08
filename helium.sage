@@ -136,10 +136,12 @@ print
 #hom = BWB.hom(BWBff)
 #bwbIf = ideal(map(hom, bwbI.gens()))
 
-primes = bwbI.associated_primes()
+def associated_primes():
 
-for prime in primes:
-    print prime._repr_short()
+    primes = bwbI.associated_primes()
+
+    for prime in primes:
+        print prime._repr_short()
 
 
 # Look for solutions using an approximate numerical technique
