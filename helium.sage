@@ -178,7 +178,8 @@ else:
 # search for integer relations among the approximate solutions
 
 #ints = [ZZ(round(v)) for v in 2^26 / sqrt(sum(SciMin.x * SciMin.x)) * SciMin.x]
-norm = 2^26 / sqrt(sum(SciMin.x * SciMin.x))
+#norm = 2^26 / sqrt(sum(SciMin.x * SciMin.x))
+norm = 1/min(abs(SciMin.x))
 ints = [ZZ(round(v)) for v in  norm * SciMin.x] + [ZZ(round(norm))]
 
 print ints
