@@ -140,3 +140,34 @@ primes = bwbI.associated_primes()
 
 for prime in primes:
     print prime._repr_short()
+
+
+# Look for solutions using an approximate numerical technique
+
+import scipy.optimize
+
+# eqns.append(E+1/4)
+# eqns.append(BWB.gen(1) - 1)
+minpoly = sum([poly*poly for poly in eqns])
+
+nvars = len(BWB.gens())
+
+iv = [random() for i in range(nvars)]
+
+def square(x):
+    return x*x
+
+def minfunc(v):
+    return sqrt(minpoly.subs(dict(zip(BWB.gens(), v))) / sum(map(square, v)))
+
+SciMin = scipy.optimize.minimize(minfunc, iv, method='Nelder-Mead')
+
+#print SciMin
+
+print
+print
+
+if SciMin.success:
+    for pair in zip(BWB.gens(), SciMin.x): print pair
+else:
+    print SciMin.message
