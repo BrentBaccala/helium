@@ -231,3 +231,23 @@ def find_relation():
 
         if Lrow[-1] != 0:
             break
+
+# print an input file for Bertini to numerically find all irreducible components
+
+def bertini():
+    print '''
+CONFIG
+  TrackType:1;
+END;
+
+INPUT
+
+'''
+    print 'variable_group ', ','.join(map(str, BWB.gens())), ';'
+
+    print 'function ', ','.join(['f{}'.format(i) for i in range(len(eqns))]), ';'
+
+    for i in range(len(eqns)):
+        print 'f{} = '.format(i), eqns[i], ';'
+
+    print 'END;'
