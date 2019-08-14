@@ -67,9 +67,9 @@ def rosenfeld_groebner():
 #print
 
 
-var('x,y,z')
+var('x1,y1,z1')
 
-r = sqrt(x^2+y^2+z^2)
+r1 = sqrt(x1^2+y1^2+z1^2)
 
 from itertools import *
 
@@ -83,15 +83,18 @@ def trial_polynomial(base, vars, degree):
     poly = sum([var(base+str(c))*mul(v) for c,v in enumerate(terms)])
     return (coefficients, poly)
 
-(Avars, A) = trial_polynomial('a', [x,y,z,r], 1)
-(Bvars, B) = trial_polynomial('b', [x,y,z,r], 1)
+vars = [x1,y1,z1,r1]
+(Avars, A) = trial_polynomial('a', vars, 1)
+(Bvars, B) = trial_polynomial('b', vars, 1)
 
 Psi = A*exp(B)
 
 var('E')
 
+def Del(Psi,vars):
+    return sum([diff(Psi,v,2) for v in vars])
 def H(Psi):
-   return -diff(Psi,x,2)-diff(Psi,y,2)-diff(Psi,z,2)-(1/r)*Psi
+   return -Del(Psi,[x1,y1,z1])-(1/r1)*Psi
 
 eq = H(Psi) - E*Psi
 
@@ -121,7 +124,7 @@ def bwb(expr):
     else:
        return expr
 
-maps = mk_maps(r)
+maps = mk_maps(r1)
 
 # print maps
 
@@ -133,8 +136,10 @@ order = TermOrder('deglex(1),degrevlex({})'.format(len(Avars)+len(Bvars)))
 BWB = PolynomialRing(QQ, (var('E'),) + Avars + Bvars, order=order)
 #BWB = PolynomialRing(QQ, (var('E'),) + Avars + Bvars)
 
-BWB2.<x,y,z,r> = Frac(BWB)[]
-BWB3 = BWB2.quo(r^2-(x^2+y^2+z^2))
+#BWB2.<x,y,z,r> = Frac(BWB)[]
+BWB2 = PolynomialRing(Frac(BWB), [maps.get(v^2, v) for v in vars])
+#BWB3 = BWB2.quo(r^2-(x^2+y^2+z^2))
+BWB3 = BWB2.quo([k - v^2 for k,v in maps.items()])
 
 bwb3 = BWB3(numerator(expand(bwb(eq/exp(B)))))
 eqns = map(numerator, bwb3.lift().coefficients())
