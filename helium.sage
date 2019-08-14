@@ -167,45 +167,47 @@ def associated_primes():
 
 # Look for solutions using an approximate numerical technique
 
-import scipy.optimize
+def random_numerical():
 
-# eqns.append(E+1/4)
-# eqns.append(BWB.gen(1) - 1)
-minpoly = sum([poly*poly for poly in eqns])
+    import scipy.optimize
 
-nvars = len(BWB.gens())
+    # eqns.append(E+1/4)
+    # eqns.append(BWB.gen(1) - 1)
+    minpoly = sum([poly*poly for poly in eqns])
 
-iv = [random() for i in range(nvars)]
+    nvars = len(BWB.gens())
 
-def square(x):
-    return x*x
+    iv = [random() for i in range(nvars)]
 
-def minfunc(v):
-    return sqrt(minpoly.subs(dict(zip(BWB.gens(), v))) / sum(map(square, v)))
+    def square(x):
+        return x*x
 
-SciMin = scipy.optimize.minimize(minfunc, iv, method='Nelder-Mead')
+    def minfunc(v):
+        return sqrt(minpoly.subs(dict(zip(BWB.gens(), v))) / sum(map(square, v)))
 
-#print SciMin
+    SciMin = scipy.optimize.minimize(minfunc, iv, method='Nelder-Mead')
 
-print
-print
+    #print SciMin
 
-if SciMin.success:
-    for pair in zip(BWB.gens(), SciMin.x): print pair
-else:
-    print SciMin.message
+    print
+    print
 
+    if SciMin.success:
+        for pair in zip(BWB.gens(), SciMin.x): print pair
+    else:
+        print SciMin.message
 
-# search for integer relations among the approximate solutions
-
-#ints = [ZZ(round(v)) for v in 2^26 / sqrt(sum(SciMin.x * SciMin.x)) * SciMin.x]
-#norm = 2^26 / sqrt(sum(SciMin.x * SciMin.x))
-norm = 1/min(abs(SciMin.x))
-ints = [ZZ(round(v)) for v in  norm * SciMin.x] + [ZZ(round(norm))]
-
-print ints
 
 def find_relation():
+
+    # search for integer relations among the approximate solutions
+
+    #ints = [ZZ(round(v)) for v in 2^26 / sqrt(sum(SciMin.x * SciMin.x)) * SciMin.x]
+    #norm = 2^26 / sqrt(sum(SciMin.x * SciMin.x))
+    norm = 1/min(abs(SciMin.x))
+    ints = [ZZ(round(v)) for v in  norm * SciMin.x] + [ZZ(round(norm))]
+
+    print ints
 
     L = matrix(list(matrix.identity(len(ints))) + [tuple(ints)]).transpose().LLL()
 
