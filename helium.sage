@@ -87,7 +87,6 @@ def trial_polynomial(base, vars, degree):
 (Bvars, B) = trial_polynomial('b', [x,y,z,r], 1)
 
 Psi = A*exp(B)
-#Psi = a*exp(b*r)
 
 var('E')
 
@@ -96,18 +95,40 @@ def H(Psi):
 
 eq = H(Psi) - E*Psi
 
+# Now we want to replace all of the sqrt(...) factors with 'r',
+# and we use a clever Python trick to build a dictionary
+# that maps expressions to variable names.
+
+import inspect
+
+# need to use [3] instead of [2] because we're using this in a dict comprehension (I guess)
+def varName(var):
+    lcls = inspect.stack()[3][0].f_locals
+    for name in lcls:
+        if id(var) == id(lcls[name]):
+            return name
+    return None
+
+def mk_maps(*vars):
+    return {v.operands()[0] : var(varName(v)) for v in vars}
+
 def bwb(expr):
     if isinstance(expr, Expression) and expr.operator():
-       if expr.operator() == operator.pow and bool(expr.operands()[0] == (x^2+y^2+z^2)):
-           return var('r')^(expr.operands()[1] * 2)
+       if expr.operator() == operator.pow and bool(expr.operands()[0] in maps):
+           return maps[expr.operands()[0]]^(expr.operands()[1] * 2)
        else:
            return expr.operator()(*map(bwb, expr.operands()))
     else:
        return expr
 
+maps = mk_maps(r)
+
+# print maps
+
 # print numerator(expand(bwb(eq)/exp(B)))
 
 # use custom term ordering to prioritize elimination of 'E' variable
+# if Sage's Groebner basis-based techniques are used
 order = TermOrder('deglex(1),degrevlex({})'.format(len(Avars)+len(Bvars)))
 BWB = PolynomialRing(QQ, (var('E'),) + Avars + Bvars, order=order)
 #BWB = PolynomialRing(QQ, (var('E'),) + Avars + Bvars)
