@@ -67,9 +67,11 @@ def rosenfeld_groebner():
 #print
 
 
-var('x1,y1,z1')
+var('x1,y1,z1,x2,y2,z2')
 
 r1 = sqrt(x1^2+y1^2+z1^2)
+r2 = sqrt(x2^2+y2^2+z2^2)
+r12 = sqrt((x2-x1)^2 + (y2-y1)^2 + (z2-z1)^2)
 
 from itertools import *
 
@@ -83,7 +85,7 @@ def trial_polynomial(base, vars, degree):
     poly = sum([var(base+str(c))*mul(v) for c,v in enumerate(terms)])
     return (coefficients, poly)
 
-vars = [x1,y1,z1,r1]
+vars = [x1,y1,z1, x2,y2,z2, r1,r2,r12]
 (Avars, A) = trial_polynomial('a', vars, 1)
 (Bvars, B) = trial_polynomial('b', vars, 1)
 
@@ -94,7 +96,7 @@ var('E')
 def Del(Psi,vars):
     return sum([diff(Psi,v,2) for v in vars])
 def H(Psi):
-   return -Del(Psi,[x1,y1,z1])-(1/r1)*Psi
+   return - Del(Psi,[x1,y1,z1]) - Del(Psi,[x2,y2,z2]) - (2/r1)*Psi - (2/r2)*Psi + (1/r12)*Psi
 
 eq = H(Psi) - E*Psi
 
@@ -124,7 +126,7 @@ def bwb(expr):
     else:
        return expr
 
-maps = mk_maps(r1)
+maps = mk_maps(r1, r2, r12)
 
 # print maps
 
