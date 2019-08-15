@@ -189,8 +189,18 @@ def random_numerical():
     def square(x):
         return x*x
 
+    # We know the zero variety (all Avar's zero, so Psi is zero) will be
+    # a "solution", but we want to avoid it
+
+    zero_variety = sum(map(square, Avars))
+
+    # The function we're trying to minimize: the sum of squares of the polys
+    # that define the solution variety, divided by two factors we're trying
+    # to avoid: the norm of 'v' (avoid the origin), and zero_variety (which
+    # includes the origin).
+
     def minfunc(v):
-        return sqrt(minpoly.subs(dict(zip(BWB.gens(), v))) / sum(map(square, v)))
+        return minpoly.subs(dict(zip(BWB.gens(), v))) / sum(map(square, v)) / zero_variety.subs(dict(zip(BWB.gens(), v)))
 
     SciMin = scipy.optimize.minimize(minfunc, iv, method='Nelder-Mead')
 
