@@ -75,19 +75,28 @@ r12 = sqrt((x2-x1)^2 + (y2-y1)^2 + (z2-z1)^2)
 
 from itertools import *
 
+# from python docs
 def flatten(listOfLists):
     "Flatten one level of nesting"
     return chain.from_iterable(listOfLists)
 
-def trial_polynomial(base, vars, degree):
-    terms = tuple(flatten([combinations_with_replacement(vars, d) for d in range(degree+1)]))
+# from python docs
+def powerset(iterable):
+    "powerset([1,2,3]) --> () (1,) (2,) (3,) (1,2) (1,3) (2,3) (1,2,3)"
+    s = list(iterable)
+    return chain.from_iterable(combinations(s, r) for r in range(len(s)+1))
+
+def trial_polynomial(base, cvars, rvars, degree):
+    cterms = flatten([combinations_with_replacement(cvars, d) for d in range(degree+1)])
+    terms = list(map(mul, (product(map(mul, cterms), map(mul, powerset(rvars))))))
     coefficients = tuple(var(base+str(c)) for c in range(len(terms)))
-    poly = sum([var(base+str(c))*mul(v) for c,v in enumerate(terms)])
+    poly = sum([var(base+str(c))*v for c,v in enumerate(terms)])
     return (coefficients, poly)
 
-vars = [x1,y1,z1, x2,y2,z2, r1,r2,r12]
-(Avars, A) = trial_polynomial('a', vars, 1)
-(Bvars, B) = trial_polynomial('b', vars, 1)
+cvars = [x1,y1,z1, x2,y2,z2]
+rvars = [r1,r2,r12]
+(Avars, A) = trial_polynomial('a', cvars, rvars, 1)
+(Bvars, B) = trial_polynomial('b', cvars, rvars, 1)
 
 Psi = A*exp(B)
 
@@ -95,6 +104,8 @@ var('E')
 
 def Del(Psi,vars):
     return sum([diff(Psi,v,2) for v in vars])
+#def H(Psi):
+#   return - Del(Psi,[x1,y1,z1]) - (1/r1)*Psi
 def H(Psi):
    return - Del(Psi,[x1,y1,z1]) - Del(Psi,[x2,y2,z2]) - (2/r1)*Psi - (2/r2)*Psi + (1/r12)*Psi
 
@@ -115,7 +126,7 @@ def varName(var):
     return None
 
 def mk_maps(*vars):
-    return {v.operands()[0] : var(varName(v)) for v in vars}
+    return {v.operands()[0] : SR.var(varName(v)) for v in vars}
 
 def bwb(expr):
     if isinstance(expr, Expression) and expr.operator():
@@ -139,16 +150,76 @@ BWB = PolynomialRing(QQ, (var('E'),) + Avars + Bvars, order=order)
 #BWB = PolynomialRing(QQ, (var('E'),) + Avars + Bvars)
 
 #BWB2.<x,y,z,r> = Frac(BWB)[]
-BWB2 = PolynomialRing(Frac(BWB), [maps.get(v^2, v) for v in vars])
+BWB2 = PolynomialRing(Frac(BWB), cvars + [maps.get(v^2, v) for v in rvars])
 #BWB3 = BWB2.quo(r^2-(x^2+y^2+z^2))
 BWB3 = BWB2.quo([k - v^2 for k,v in maps.items()])
 
-bwb3 = BWB3(numerator(expand(bwb(eq/exp(B)))))
-eqns = map(numerator, bwb3.lift().coefficients())
-bwbI = ideal(eqns)
+c_s = (x1,y1,z1, x2,y2,z2)
+r_s = [r1,r2,r12]
+BWB5 = PolynomialRing(QQ, (var('E'),) + Avars + Bvars + c_s + tuple([maps.get(v^2, v) for v in r_s]))
 
-for poly in eqns:
-    print poly
+
+#bwb4 = expand(bwb(eq/exp(B)))
+bwb4 = expand(bwb(eq/exp(B)*r1^3*r2^3*r12^3))
+#assert bwb4a.operator() is operator.add
+
+# Next... convert powers of r's to x,y,z's and collect like x,y,z's terms together
+# to get a system of polynomials
+
+bwb3 = 0
+eqns = []
+
+def native_expand():
+
+    #bwb3 = BWB3(numerator(expand(bwb(eq/exp(B)))))
+    bwb3 = BWB3(bwb4)
+    eqns = map(numerator, bwb3.lift().coefficients())
+    #bwbI = ideal(eqns)
+
+    #for poly in eqns:
+    #    print poly
+
+# native_expand() runs very slowly on helium, so I've tried to wrap my own version of it...
+
+SRr_s = (SR.var('r1'), SR.var('r2'), SR.var('r12'))
+v_s = c_s + SRr_s
+
+# probably doesn't work - more work has gone into numpy_expand
+def bwb_expand():
+  for count,monomial in enumerate(bwb4.operands()):
+    index = [monomial.degree(c) for c in c_s]
+    map(operator.add, index, [1,1,1,0,0,0] * monomial.degree(SR.var('r1'))/2)
+    map(operator.add, index, [0,0,0,1,1,1] * monomial.degree(SR.var('r2'))/2)
+    map(operator.add, index, [1,1,1,-1,-1,-1] * monomial.degree(SR.var('r12'))/2)
+    index = index + [monomial.degree(SR.var('r1')) % 2, monomial.degree(SR.var('r2')) % 2, monomial.degree(SR.var('r12')) % 2]
+    print count, monomial, index, monomial.coefficient(map(operator.mul, v_s, index))
+
+import numpy as np
+term_expansion = dict()
+equations = dict()
+
+def numpy_expand():
+  for count,monomial in enumerate(bwb4.operands()):
+    index = np.array([int(monomial.degree(c)) for c in c_s] + [0,0,0])
+    index2 = np.array([int(monomial.degree(c)) for c in v_s])
+    index3 = np.array([int(monomial.degree(c)) for c in SRr_s])
+    try:
+        terms = term_expansion[tuple(index3/2)]
+    except KeyError:
+        expansion = expand(mul(map(operator.pow, r_s, 2*(index3/2))))
+        assert expansion.operator() is sage.symbolic.operators.add_vararg
+        terms = [np.array([int(term.degree(c)) for c in c_s] + [0,0,0]) for term in expansion.operands()]
+        term_expansion[tuple(index3/2)] = terms
+
+    index = index + np.array([0,0,0,0,0,0, int(monomial.degree(SR.var('r1'))) % 2, int(monomial.degree(SR.var('r2'))) % 2, int(monomial.degree(SR.var('r12'))) % 2])
+    #for term in terms:
+    #    print count, monomial, index + term, monomial.coefficient(mul(map(operator.pow, v_s, index2)))
+    multiplier = monomial.coefficient(mul(map(operator.pow, v_s, index2)))
+    for term in terms:
+        equations[tuple(index + term)] = equations.get(tuple(index + term), 0) + multiplier
+    if count % 100 == 0: print count
+
+#raise(None)
 
 print
 print
