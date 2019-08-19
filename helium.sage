@@ -1,4 +1,26 @@
+#
+# Python code to search for solutions of Hydrogen and Helium
+# non-relativistic time-invariant Schrodinger equation
+#
+# by Brent Baccala
+# August 2019
 
+from itertools import *
+
+# from python docs
+def flatten(listOfLists):
+    "Flatten one level of nesting"
+    return chain.from_iterable(listOfLists)
+
+# from python docs
+def powerset(iterable):
+    "powerset([1,2,3]) --> () (1,) (2,) (3,) (1,2) (1,3) (2,3) (1,2,3)"
+    s = list(iterable)
+    return chain.from_iterable(combinations(s, r) for r in range(len(s)+1))
+
+# Rosenfeld-Groebner runs very slowly, even on Hydrogen first excited state
+#
+# I don't use it anymore.
 
 def rosenfeld_groebner():
     # If I specify derivations=[x,y,z], then I have to use all three
@@ -62,9 +84,6 @@ def rosenfeld_groebner():
 
     for id in RDC: print id
 
-#rosenfeld_groebner()
-#print
-#print
 
 
 var('x1,y1,z1,x2,y2,z2')
@@ -73,28 +92,22 @@ r1 = sqrt(x1^2+y1^2+z1^2)
 r2 = sqrt(x2^2+y2^2+z2^2)
 r12 = sqrt((x2-x1)^2 + (y2-y1)^2 + (z2-z1)^2)
 
-from itertools import *
-
-# from python docs
-def flatten(listOfLists):
-    "Flatten one level of nesting"
-    return chain.from_iterable(listOfLists)
-
-# from python docs
-def powerset(iterable):
-    "powerset([1,2,3]) --> () (1,) (2,) (3,) (1,2) (1,3) (2,3) (1,2,3)"
-    s = list(iterable)
-    return chain.from_iterable(combinations(s, r) for r in range(len(s)+1))
-
 def trial_polynomial(base, cvars, rvars, degree):
+    # cterms are coefficient terms
+    # rterms are radius terms
     cterms = flatten([combinations_with_replacement(cvars, d) for d in range(degree+1)])
+    # use this 'terms' for real
     terms = list(map(mul, (product(map(mul, cterms), map(mul, powerset(rvars))))))
+    # use this 'terms' for testing
+    # terms = list(map(mul,cterms)) + list(rvars)
     coefficients = tuple(var(base+str(c)) for c in range(len(terms)))
     poly = sum([var(base+str(c))*v for c,v in enumerate(terms)])
     return (coefficients, poly)
 
-cvars = [x1,y1,z1, x2,y2,z2]
-rvars = [r1,r2,r12]
+#cvars = [x1,y1,z1, x2,y2,z2]
+#rvars = [r1,r2,r12]
+cvars = (x1,y1,z1)
+rvars = (r1,)
 (Avars, A) = trial_polynomial('a', cvars, rvars, 1)
 (Bvars, B) = trial_polynomial('b', cvars, rvars, 1)
 
@@ -104,10 +117,10 @@ var('E')
 
 def Del(Psi,vars):
     return sum([diff(Psi,v,2) for v in vars])
-#def H(Psi):
-#   return - Del(Psi,[x1,y1,z1]) - (1/r1)*Psi
 def H(Psi):
-   return - Del(Psi,[x1,y1,z1]) - Del(Psi,[x2,y2,z2]) - (2/r1)*Psi - (2/r2)*Psi + (1/r12)*Psi
+   return - Del(Psi,[x1,y1,z1]) - (1/r1)*Psi
+#def H(Psi):
+#   return - Del(Psi,[x1,y1,z1]) - Del(Psi,[x2,y2,z2]) - (2/r1)*Psi - (2/r2)*Psi + (1/r12)*Psi
 
 eq = H(Psi) - E*Psi
 
@@ -125,9 +138,10 @@ def varName(var):
             return name
     return None
 
-def mk_maps(*vars):
-    return {v.operands()[0] : SR.var(varName(v)) for v in vars}
+def mk_maps(rvars):
+    return {v.operands()[0] : SR.var(varName(v)) for v in rvars}
 
+# convert all (x^2+y^2+z^2)^(n/2) expressions to r^n
 def bwb(expr):
     if isinstance(expr, Expression) and expr.operator():
        if expr.operator() == operator.pow and bool(expr.operands()[0] in maps):
@@ -137,40 +151,42 @@ def bwb(expr):
     else:
        return expr
 
-maps = mk_maps(r1, r2, r12)
+maps = mk_maps(rvars)
 
 # print maps
 
 # print numerator(expand(bwb(eq)/exp(B)))
 
-# use custom term ordering to prioritize elimination of 'E' variable
-# if Sage's Groebner basis-based techniques are used
-order = TermOrder('deglex(1),degrevlex({})'.format(len(Avars)+len(Bvars)))
-BWB = PolynomialRing(QQ, (var('E'),) + Avars + Bvars, order=order)
-#BWB = PolynomialRing(QQ, (var('E'),) + Avars + Bvars)
-
-#BWB2.<x,y,z,r> = Frac(BWB)[]
-BWB2 = PolynomialRing(Frac(BWB), cvars + [maps.get(v^2, v) for v in rvars])
-#BWB3 = BWB2.quo(r^2-(x^2+y^2+z^2))
-BWB3 = BWB2.quo([k - v^2 for k,v in maps.items()])
-
-c_s = (x1,y1,z1, x2,y2,z2)
-r_s = [r1,r2,r12]
-BWB5 = PolynomialRing(QQ, (var('E'),) + Avars + Bvars + c_s + tuple([maps.get(v^2, v) for v in r_s]))
 
 
 #bwb4 = expand(bwb(eq/exp(B)))
-bwb4 = expand(bwb(eq/exp(B)*r1^3*r2^3*r12^3))
+#bwb4 = expand(bwb(eq/exp(B)*r1^3*r2^3*r12^3))
+lcm_denominator = lcm(map(denominator, eq.operands()))
+bwb4 = expand(bwb(eq/exp(B)*lcm_denominator))
 #assert bwb4a.operator() is operator.add
 
 # Next... convert powers of r's to x,y,z's and collect like x,y,z's terms together
 # to get a system of polynomials
+#
+# This is a slow step, so I've tried several different ways to do it.
 
-bwb3 = 0
-eqns = []
+def PolynomialRing_expand():
 
-def native_expand():
+    global BWB, BWB2, BWB3
 
+    # use custom term ordering to prioritize elimination of 'E' variable
+    # if Sage's Groebner basis-based techniques are used
+    order = TermOrder('deglex(1),degrevlex({})'.format(len(Avars)+len(Bvars)))
+    BWB = PolynomialRing(QQ, (var('E'),) + Avars + Bvars, order=order)
+    #BWB = PolynomialRing(QQ, (var('E'),) + Avars + Bvars)
+
+    #BWB2.<x,y,z,r> = Frac(BWB)[]
+    BWB2 = PolynomialRing(Frac(BWB), cvars + tuple(maps.get(v^2, v) for v in rvars))
+    #BWB3 = BWB2.quo(r^2-(x^2+y^2+z^2))
+    BWB3 = BWB2.quo([k - v^2 for k,v in maps.items()])
+
+    global bwb3
+    global eqns
     #bwb3 = BWB3(numerator(expand(bwb(eq/exp(B)))))
     bwb3 = BWB3(bwb4)
     eqns = map(numerator, bwb3.lift().coefficients())
@@ -179,15 +195,15 @@ def native_expand():
     #for poly in eqns:
     #    print poly
 
-# native_expand() runs very slowly on helium, so I've tried to wrap my own version of it...
+# PolynomialRing_expand() runs very slowly on helium, so I've tried to wrap my own version of it...
 
 SRr_s = (SR.var('r1'), SR.var('r2'), SR.var('r12'))
-v_s = c_s + SRr_s
+v_s = cvars + SRr_s
 
 # probably doesn't work - more work has gone into numpy_expand
 def bwb_expand():
   for count,monomial in enumerate(bwb4.operands()):
-    index = [monomial.degree(c) for c in c_s]
+    index = [monomial.degree(c) for c in cvars]
     map(operator.add, index, [1,1,1,0,0,0] * monomial.degree(SR.var('r1'))/2)
     map(operator.add, index, [0,0,0,1,1,1] * monomial.degree(SR.var('r2'))/2)
     map(operator.add, index, [1,1,1,-1,-1,-1] * monomial.degree(SR.var('r12'))/2)
@@ -200,15 +216,15 @@ equations = dict()
 
 def numpy_expand():
   for count,monomial in enumerate(bwb4.operands()):
-    index = np.array([int(monomial.degree(c)) for c in c_s] + [0,0,0])
+    index = np.array([int(monomial.degree(c)) for c in cvars] + [0,0,0])
     index2 = np.array([int(monomial.degree(c)) for c in v_s])
     index3 = np.array([int(monomial.degree(c)) for c in SRr_s])
     try:
         terms = term_expansion[tuple(index3/2)]
     except KeyError:
-        expansion = expand(mul(map(operator.pow, r_s, 2*(index3/2))))
+        expansion = expand(mul(map(operator.pow, rvars, 2*(index3/2))))
         assert expansion.operator() is sage.symbolic.operators.add_vararg
-        terms = [np.array([int(term.degree(c)) for c in c_s] + [0,0,0]) for term in expansion.operands()]
+        terms = [np.array([int(term.degree(c)) for c in cvars] + [0,0,0]) for term in expansion.operands()]
         term_expansion[tuple(index3/2)] = terms
 
     index = index + np.array([0,0,0,0,0,0, int(monomial.degree(SR.var('r1'))) % 2, int(monomial.degree(SR.var('r2'))) % 2, int(monomial.degree(SR.var('r12'))) % 2])
@@ -245,6 +261,32 @@ def associated_primes():
 
 # Look for solutions using an approximate numerical technique
 
+# Standard operator overloading lets us use Sage's multi-precision
+# floating point numbers for most numpy operations, but a few need to
+# be overridden to use Sage tests.  Use some Python magic to achieve
+# this.
+
+if 'np_isfinite' not in vars():
+    np_isfinite = np.isfinite
+def bwb_isfinite(x):
+    if isinstance(x, SageObject) and isinstance(x.parent(), Field):
+        return not x.is_infinity()
+    else:
+        return np_isfinite(x)
+np.isfinite = bwb_isfinite
+
+if 'np_isnan' not in vars():
+    np_isnan = np.isnan
+def bwb_isnan(x):
+    if isinstance(x, SageObject) and isinstance(x.parent(), Field):
+        return x.is_NaN()
+    else:
+        return np_isnan(x)
+np.isnan = bwb_isnan
+
+
+import random
+
 def random_numerical():
 
     import scipy.optimize
@@ -255,7 +297,14 @@ def random_numerical():
 
     nvars = len(BWB.gens())
 
-    iv = [random() for i in range(nvars)]
+    # even though we're using numpy, we don't need to set its PRNG
+    # seed, (which would require calling numpy.random.seed()), since
+    # the algorithm is deterministic after the iv is picked
+    random.seed(0)        # for random
+    set_random_seed(0)    # for RR.random_element()
+
+    global iv
+    iv = [random.random() for i in range(nvars)]
 
     def square(x):
         return x*x
@@ -270,10 +319,23 @@ def random_numerical():
     # to avoid: the norm of 'v' (avoid the origin), and zero_variety (which
     # includes the origin).
 
-    def minfunc(v):
-        return minpoly.subs(dict(zip(BWB.gens(), v))) / sum(map(square, v)) / zero_variety.subs(dict(zip(BWB.gens(), v)))
+    real_type = np.float64
+    #real_type = RR
+    #real_type = RealField(100)
 
-    SciMin = scipy.optimize.minimize(minfunc, iv, method='Nelder-Mead')
+    global minfunc
+    def minfunc(v):
+        #return minpoly.subs(dict(zip(BWB.gens(), v))) / sum(map(square, v)) / zero_variety.subs(dict(zip(BWB.gens(), v)))
+        return real_type(minpoly.subs(dict(zip(BWB.gens(), v))) / zero_variety.subs(dict(zip(BWB.gens(), v))))
+        #return minpoly.subs(dict(zip(BWB.gens(), v)))
+
+    minpoly_derivatives = [diff(minpoly / zero_variety, v) for v in BWB.gens()]
+    global jac
+    def jac(v):
+        return np.array([real_type(d.subs(dict(zip(BWB.gens(), v)))) for d in minpoly_derivatives])
+
+    global SciMin
+    SciMin = scipy.optimize.minimize(minfunc, iv, jac=jac, method='BFGS', options={'return_all':True})
 
     #print SciMin
 
