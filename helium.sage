@@ -115,6 +115,8 @@ Psi = A*exp(B)
 
 var('E')
 
+coeff_vars = (E,) + Avars + Bvars
+
 def Del(Psi,vars):
     return sum([diff(Psi,v,2) for v in vars])
 def H(Psi):
@@ -203,6 +205,7 @@ def SR_expander(expr, vars = v_s):
         return [expr]
 
 def SR_expand():
+    global eqns
     eqns = SR_expander(bwb2(bwb4))
 
 
@@ -235,6 +238,8 @@ def PolynomialRing_expand():
     global eqns
     #bwb3 = BWB3(numerator(expand(bwb(eq/exp(B)))))
     bwb3 = BWB3(bwb4)
+
+    global eqns
     eqns = map(numerator, bwb3.lift().coefficients())
 
     #for poly in eqns:
@@ -341,7 +346,7 @@ def random_numerical(seed=0):
     # eqns.append(BWB.gen(1) - 1)
     minpoly = sum([poly*poly for poly in eqns])
 
-    nvars = len(BWB.gens())
+    nvars = len(coeff_vars)
 
     # even though we're using numpy, we don't need to set its PRNG
     # seed, (which would require calling numpy.random.seed()), since
@@ -372,13 +377,13 @@ def random_numerical(seed=0):
     global minfunc
     def minfunc(v):
         #return minpoly.subs(dict(zip(BWB.gens(), v))) / sum(map(square, v)) / zero_variety.subs(dict(zip(BWB.gens(), v)))
-        return real_type(minpoly.subs(dict(zip(BWB.gens(), v))) / zero_variety.subs(dict(zip(BWB.gens(), v))))
+        return real_type(minpoly.subs(dict(zip(coeff_vars, v))) / zero_variety.subs(dict(zip(coeff_vars, v))))
         #return minpoly.subs(dict(zip(BWB.gens(), v)))
 
-    minpoly_derivatives = [diff(minpoly / zero_variety, v) for v in BWB.gens()]
+    minpoly_derivatives = [diff(minpoly / zero_variety, v) for v in coeff_vars]
     global jac
     def jac(v):
-        return np.array([real_type(d.subs(dict(zip(BWB.gens(), v)))) for d in minpoly_derivatives])
+        return np.array([real_type(d.subs(dict(zip(coeff_vars, v)))) for d in minpoly_derivatives])
 
     global SciMin
     SciMin = scipy.optimize.minimize(minfunc, iv, jac=jac, method='BFGS', options={'return_all':True})
@@ -389,7 +394,7 @@ def random_numerical(seed=0):
     print
 
     if SciMin.success:
-        for pair in zip(BWB.gens(), SciMin.x): print pair
+        for pair in zip(coeff_vars, SciMin.x): print pair
     else:
         print SciMin.message
 
