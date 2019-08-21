@@ -191,7 +191,7 @@ def bwb2(expr):
            var = expr.operands()[0]
            num = int(expr.operands()[1])
            #return ((x1^2+y1^2+z1^2)^(int(num/2))) * (expr.operands()[0]^(int(num%2)))
-           return (globals()[str(var)])^(int(num/2)) * (var^(int(num%2)))
+           return (globals()[str(var)])^(2*int(num/2)) * (var^(int(num%2)))
        else:
            return expr.operator()(*map(bwb2, expr.operands()))
     else:
