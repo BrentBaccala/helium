@@ -104,8 +104,8 @@ def trial_polynomial(base, cvars, rvars, degree):
     poly = sum([var(base+str(c))*v for c,v in enumerate(terms)])
     return (coefficients, poly)
 
-#cvars = [x1,y1,z1, x2,y2,z2]
-#rvars = [r1,r2,r12]
+#cvars = (x1,y1,z1, x2,y2,z2)
+#rvars = (r1,r2,r12)
 cvars = (x1,y1,z1)
 rvars = (r1,)
 (Avars, A) = trial_polynomial('a', cvars, rvars, 1)
@@ -157,23 +157,16 @@ def bwb(expr):
 
 maps = mk_maps(rvars)
 
-# print maps
+def create_bwb4():
+    lcm_denominator = lcm(map(denominator, eq.operands()))
+    bwb4 = expand(bwb(eq/exp(B)*lcm_denominator))
+    # bwb4 is now a polynomial, but it's got higher powers of r's in it
+    assert bwb4.numerator() == bwb4
+    return bwb4
 
-# print numerator(expand(bwb(eq)/exp(B)))
-
-
-
-#bwb4 = expand(bwb(eq/exp(B)))
-#bwb4 = expand(bwb(eq/exp(B)*r1^3*r2^3*r12^3))
-lcm_denominator = lcm(map(denominator, eq.operands()))
-bwb4 = expand(bwb(eq/exp(B)*lcm_denominator))
-#assert bwb4a.operator() is operator.add
 
 SRr_s = (SR.var('r1'), SR.var('r2'), SR.var('r12'))
 v_s = cvars + SRr_s
-
-# bwb4 is now a polynomial, but it's got higher powers of r's in it
-assert bwb4.numerator() == bwb4
 
 
 # Next... convert powers of r's to x,y,z's and collect like x,y,z's terms together
@@ -206,7 +199,8 @@ def SR_expander(expr, vars = v_s):
 
 def SR_expand():
     global eqns
-    eqns = SR_expander(bwb2(bwb4))
+    bwb4 = create_bwb4()
+    eqns = set(SR_expander(bwb2(bwb4)))
 
 
 def PolynomialRing_expand():
@@ -234,6 +228,8 @@ def PolynomialRing_expand():
     #BWB3 = BWB2.quo(r^2-(x^2+y^2+z^2))
     BWB3 = BWB2.quo([k - v^2 for k,v in maps.items()])
 
+    bwb4 = create_bwb4()
+
     global bwb3
     global eqns
     #bwb3 = BWB3(numerator(expand(bwb(eq/exp(B)))))
@@ -249,6 +245,7 @@ def PolynomialRing_expand():
 
 # probably doesn't work - more work has gone into numpy_expand
 def bwb_expand():
+  bwb4 = create_bwb4()
   for count,monomial in enumerate(bwb4.operands()):
     index = [monomial.degree(c) for c in cvars]
     map(operator.add, index, [1,1,1,0,0,0] * monomial.degree(SR.var('r1'))/2)
@@ -262,6 +259,7 @@ term_expansion = dict()
 equations = dict()
 
 def numpy_expand():
+  bwb4 = create_bwb4()
   for count,monomial in enumerate(bwb4.operands()):
     index = np.array([int(monomial.degree(c)) for c in cvars] + [0,0,0])
     index2 = np.array([int(monomial.degree(c)) for c in v_s])
