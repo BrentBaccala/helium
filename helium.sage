@@ -92,6 +92,8 @@ r1 = sqrt(x1^2+y1^2+z1^2)
 r2 = sqrt(x2^2+y2^2+z2^2)
 r12 = sqrt((x2-x1)^2 + (y2-y1)^2 + (z2-z1)^2)
 
+SRr_s = (SR.var('r1'), SR.var('r2'), SR.var('r12'))
+
 def trial_polynomial(base, cvars, rvars, degree):
     # cterms are coefficient terms
     # rterms are radius terms
@@ -104,39 +106,52 @@ def trial_polynomial(base, cvars, rvars, degree):
     poly = sum([var(base+str(c))*v for c,v in enumerate(terms)])
     return (coefficients, poly)
 
-#cvars = (x1,y1,z1, x2,y2,z2)
-#rvars = (r1,r2,r12)
-cvars = (x1,y1,z1)
-rvars = (r1,)
-(Avars, A) = trial_polynomial('a', cvars, rvars, 1)
-(Bvars, B) = trial_polynomial('b', cvars, rvars, 1)
-
-Psi = A*exp(B)
-
 var('E')
-
-coeff_vars = (E,) + Avars + Bvars
 
 def Del(Psi,vars):
     return sum([diff(Psi,v,2) for v in vars])
-def H(Psi):
-   return - Del(Psi,[x1,y1,z1]) - (1/r1)*Psi
-#def H(Psi):
-#   return - Del(Psi,[x1,y1,z1]) - Del(Psi,[x2,y2,z2]) - (2/r1)*Psi - (2/r2)*Psi + (1/r12)*Psi
 
-eq = H(Psi) - E*Psi
+def prep_hydrogen():
+    global eq, H, Psi, coeff_vars, A, B, Avars, Bvars, cvars, rvars
+
+    cvars = (x1,y1,z1)
+    rvars = (r1,)
+    (Avars, A) = trial_polynomial('a', cvars, rvars, 1)
+    (Bvars, B) = trial_polynomial('b', cvars, rvars, 1)
+
+    coeff_vars = (E,) + Avars + Bvars
+
+    Psi = A*exp(B)
+
+    def H(Psi):
+        return - 1/2 * Del(Psi,[x1,y1,z1]) - (1/r1)*Psi
+
+    eq = H(Psi) - E*Psi
+
+def prep_helium():
+    global eq, H, Psi, A, B, Avars, Bvars, cvars, rvars
+
+    cvars = (x1,y1,z1, x2,y2,z2)
+    rvars = (r1,r2,r12)
+    (Avars, A) = trial_polynomial('a', cvars, rvars, 1)
+    (Bvars, B) = trial_polynomial('b', cvars, rvars, 1)
+
+    coeff_vars = (E,) + Avars + Bvars
+
+    Psi = A*exp(B)
+
+    def H(Psi):
+        return - 1/2 * Del(Psi,[x1,y1,z1]) - 1/2 * Del(Psi,[x2,y2,z2]) - (2/r1)*Psi - (2/r2)*Psi + (1/r12)*Psi
+
+    eq = H(Psi) - E*Psi
 
 # Now we want to replace all of the sqrt(...) factors with 'r',
 # and we use a clever Python trick to build a dictionary
 # that maps expressions to variable names.
 
-import inspect
-
-# need to use [3] instead of [2] because we're using this in a dict comprehension (I guess)
 def varName(var):
-    lcls = inspect.stack()[3][0].f_locals
-    for name in lcls:
-        if id(var) == id(lcls[name]):
+    for name,value in globals().items():
+        if id(var) == id(value):
             return name
     return None
 
@@ -155,18 +170,14 @@ def bwb(expr):
     else:
        return expr
 
-maps = mk_maps(rvars)
-
 def create_bwb4():
+    global maps
+    maps = mk_maps(rvars)
     lcm_denominator = lcm(map(denominator, eq.operands()))
     bwb4 = expand(bwb(eq/exp(B)*lcm_denominator))
     # bwb4 is now a polynomial, but it's got higher powers of r's in it
     assert bwb4.numerator() == bwb4
     return bwb4
-
-
-SRr_s = (SR.var('r1'), SR.var('r2'), SR.var('r12'))
-v_s = cvars + SRr_s
 
 
 # Next... convert powers of r's to x,y,z's and collect like x,y,z's terms together
@@ -190,7 +201,7 @@ def bwb2(expr):
     else:
        return expr
 
-def SR_expander(expr, vars = v_s):
+def SR_expander(expr, vars):
     if isinstance(expr, Expression) and len(vars) > 1:
         l = map(lambda x: SR_expander(x, vars[1:]), expr.coefficients(vars[0], sparse=False))
         return list(flatten(l))
@@ -200,7 +211,7 @@ def SR_expander(expr, vars = v_s):
 def SR_expand():
     global eqns
     bwb4 = create_bwb4()
-    eqns = set(SR_expander(bwb2(bwb4)))
+    eqns = set(SR_expander(bwb2(bwb4), cvars + SRr_s))
 
 
 def PolynomialRing_expand():
