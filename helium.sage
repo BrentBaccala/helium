@@ -121,12 +121,33 @@ def prep_hydrogen():
 
     coeff_vars = (E,) + Avars + Bvars
 
-    Psi = A*exp(B)
+    global Phi
+    Phi = function('Phi')(*cvars)
+
+    Psi = A*Phi
 
     def H(Psi):
         return - 1/2 * Del(Psi,[x1,y1,z1]) - (1/r1)*Psi
 
     eq = H(Psi) - E*Psi
+
+    # Phi = e^B
+    # diff(Phi,B) = Phi
+    # diff(Phi,t) = diff(Phi,B) * diff(B,t)
+    # diff(Phi,t) = diff(B,t) * e^B = diff(B,t) * Phi
+    # diff(Phi,t,2) = diff(B,t,2) * Phi + diff(B,t) * diff(Phi,t) = diff(B,t,2) * Phi + diff(B,t)^2 * Phi
+
+    # eq = eq.subs({diff(Phi, x1):    diff(B, x1) * Phi,
+    #               diff(Phi, x1, 2): (diff(B,x1,2) + diff(B,x1)^2) * Phi,
+    #               diff(Phi, y1):    diff(B, y1) * Phi,
+    #               diff(Phi, y1, 2): (diff(B,y1,2) + diff(B,y1)^2) * Phi,
+    #               diff(Phi, z1):    diff(B, z1) * Phi,
+    #               diff(Phi, z1, 2): (diff(B,z1,2) + diff(B,z1)^2) * Phi})
+
+    dict1 = {diff(Phi,v): diff(B,v)*Phi for v in cvars}
+    dict2 = {diff(Phi,v,2): diff(dict1[diff(Phi,v)],v) for v in cvars}
+
+    eq = eq.subs(dict2).subs(dict1)
 
 def prep_helium():
     global eq, H, Psi, A, B, Avars, Bvars, cvars, rvars
@@ -138,12 +159,20 @@ def prep_helium():
 
     coeff_vars = (E,) + Avars + Bvars
 
-    Psi = A*exp(B)
+    global Phi
+    Phi = function('Phi')(*cvars)
+
+    Psi = A*Phi
 
     def H(Psi):
         return - 1/2 * Del(Psi,[x1,y1,z1]) - 1/2 * Del(Psi,[x2,y2,z2]) - (2/r1)*Psi - (2/r2)*Psi + (1/r12)*Psi
 
     eq = H(Psi) - E*Psi
+
+    dict1 = {diff(Phi,v): diff(B,v)*Phi for v in cvars}
+    dict2 = {diff(Phi,v,2): diff(dict1[diff(Phi,v)],v) for v in cvars}
+
+    eq = eq.subs(dict2).subs(dict1)
 
 # Now we want to replace all of the sqrt(...) factors with 'r',
 # and we use a clever Python trick to build a dictionary
@@ -174,7 +203,7 @@ def create_bwb4():
     global maps
     maps = mk_maps(rvars)
     lcm_denominator = lcm(map(denominator, eq.operands()))
-    bwb4 = expand(bwb(eq/exp(B)*lcm_denominator))
+    bwb4 = expand(bwb(eq*lcm_denominator))
     # bwb4 is now a polynomial, but it's got higher powers of r's in it
     assert bwb4.numerator() == bwb4
     return bwb4
@@ -202,7 +231,7 @@ def bwb2(expr):
        return expr
 
 def SR_expander(expr, vars):
-    if isinstance(expr, Expression) and len(vars) > 1:
+    if isinstance(expr, Expression) and len(vars) > 0:
         l = map(lambda x: SR_expander(x, vars[1:]), expr.coefficients(vars[0], sparse=False))
         return list(flatten(l))
     else:
@@ -211,7 +240,7 @@ def SR_expander(expr, vars):
 def SR_expand():
     global eqns
     bwb4 = create_bwb4()
-    eqns = set(SR_expander(bwb2(bwb4), cvars + SRr_s))
+    eqns = set(SR_expander(bwb2(bwb4), cvars + SRr_s + (Phi,)))
 
 
 def PolynomialRing_expand():
