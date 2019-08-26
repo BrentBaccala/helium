@@ -147,7 +147,9 @@ def prep_hydrogen():
     dict1 = {diff(Phi,v): diff(B,v)*Phi for v in cvars}
     dict2 = {diff(Phi,v,2): diff(dict1[diff(Phi,v)],v) for v in cvars}
 
-    eq = eq.subs(dict2).subs(dict1)
+    # replace Phi(x1,y1,z1) with Phi to reduce ginac's memory utilization
+    eq = eq.subs(dict2).subs(dict1).subs({Phi: SR.var('Phi')})
+    Phi = SR.var('Phi')
 
 def prep_helium():
     global eq, H, Psi, A, B, Avars, Bvars, cvars, rvars
@@ -172,7 +174,9 @@ def prep_helium():
     dict1 = {diff(Phi,v): diff(B,v)*Phi for v in cvars}
     dict2 = {diff(Phi,v,2): diff(dict1[diff(Phi,v)],v) for v in cvars}
 
-    eq = eq.subs(dict2).subs(dict1)
+    # replace Phi(x1,y1,z1) with Phi to reduce ginac's memory utilization
+    eq = eq.subs(dict2).subs(dict1).subs({Phi: SR.var('Phi')})
+    Phi = SR.var('Phi')
 
 # Now we want to replace all of the sqrt(...) factors with 'r',
 # and we use a clever Python trick to build a dictionary
