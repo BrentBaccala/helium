@@ -204,13 +204,18 @@ def bwb(expr):
        return expr
 
 def create_bwb4():
-    global maps
+    global maps, bwb4, bwb4a
+    # first, build the dictionary that maps expressions like (x1^2+y1^2+z1^2) to variables like r1
     maps = mk_maps(rvars)
-    lcm_denominator = lcm(map(denominator, eq.operands()))
-    bwb4 = expand(bwb(eq*lcm_denominator))
+    # next, convert all of the roots in the equation to use the r-variables
+    bwb4a = bwb(eq)
+    # find the least common denominator of all of the terms
+    lcm_denominator = lcm(map(denominator, bwb4a.operands()))
+    # clear the denominators and expand out all of the powers
+    bwb4 = expand(bwb4a*lcm_denominator)
     # bwb4 is now a polynomial, but it's got higher powers of r's in it
-    assert bwb4.numerator() == bwb4
-    return bwb4
+    # assert bwb4.numerator() == bwb4
+
 
 
 # Next... convert powers of r's to x,y,z's and collect like x,y,z's terms together
