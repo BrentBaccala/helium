@@ -253,6 +253,14 @@ def SR_expand():
     bwb4 = create_bwb4()
     eqns = set(SR_expander(bwb2(bwb4), cvars + SRr_s + (Phi,)))
 
+def SR_expand2a():
+    global bwb4a
+    sdict = {SR.var(v)^d : (globals()[v]^d, SR.var(v)*globals()[v]^(d-1))[d%2] for d in range(2,8) for v in ('r1','r2','r12')}
+    bwb4a = bwb4.subs(sdict)
+
+def SR_expand2b():
+    global bwb4b
+    bwb4b = expand(bwb4a)
 
 def PolynomialRing_expand():
 
