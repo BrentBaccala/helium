@@ -330,18 +330,18 @@ from multiprocessing import Pool, Queue
 q = Queue()
 
 def SRdict_thread(thousand):
-    q.put(SRdict_expander2(expand(sum(islice(ops, thousand, thousand+1000)))))
+    q.put(SRdict_expander2a(expand(sum(islice(ops, thousand, thousand+1000)))))
 
-def SRdict_multi(processes=10):
+def SRdict_multi(processes=2):
     pool = Pool(processes)
     thousands = range(0, len(ops), 1000)
     pool.map(SRdict_thread, thousands)
 
 import threading
 
-def SRdict_background(processes=10):
+def SRdict_background(processes=2):
     global th
-    th = threading.Thread(target = SRdict_multi)
+    th = threading.Thread(target = SRdict_multi, args=(processes,))
     th.start()
 
 def PolynomialRing_expand():
