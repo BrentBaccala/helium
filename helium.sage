@@ -337,6 +337,13 @@ def SRdict_multi(processes=10):
     thousands = range(0, len(ops), 1000)
     pool.map(SRdict_thread, thousands)
 
+import threading
+
+def SRdict_background(processes=10):
+    global th
+    th = threading.Thread(target = SRdict_multi)
+    th.start()
+
 def PolynomialRing_expand():
 
     # This method creates a PolynomialRing QQ(E,As,Bs)[cvars, rvars],
