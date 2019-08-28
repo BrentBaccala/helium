@@ -241,6 +241,9 @@ def bwb2(expr):
     else:
        return expr
 
+# This version expands everything using Gynac (i.e, the symbolic ring), and collects
+# all the coefficients together in a list.  It runs very slow.
+
 def SR_expander(expr, vars):
     if isinstance(expr, Expression) and len(vars) > 0:
         l = map(lambda x: SR_expander(x, vars[1:]), expr.coefficients(vars[0], sparse=False))
@@ -248,19 +251,58 @@ def SR_expander(expr, vars):
     else:
         return [expr]
 
+# This version collects coefficients together into a dictionary.  It is also very slow.
+
+def SRdict_expander(expr, vars_expanded, vars_to_expand):
+    if isinstance(expr, Expression) and len(vars_to_expand) > 0:
+        v = vars_to_expand[0]
+	map(lambda l: SRdict_expander(l[0], vars_expanded * v^l[1], vars_to_expand[1:]), expr.coefficients(v))
+    else:
+        SRdict[vars_expanded] = SRdict.get(vars_expanded, 0) + expr
+
+# This version converts each monomial into a string and then splits
+# the strings apart using Python operations.  It's pretty slow, but
+# is more amenable to parallelisation.
+
+def SRdict_expander2(expr):
+    assert expr.operator() is sage.symbolic.operators.add_vararg
+    for monomial in expr.operands():
+        s = str(monomial)
+        vs = s.split('*')
+        keys = '*'.join(ifilter(lambda x: any([x.startswith(c) for c in ('x', 'y', 'z', 'r', 'P')]), vs))
+        value = '*'.join(ifilterfalse(lambda x: any([x.startswith(c) for c in ('x', 'y', 'z', 'r', 'P')]), vs))
+        if not value.startswith('-'): value = '+' + value
+        SRdict[keys] = SRdict.get(keys, '') + value
+
 def SR_expand():
     global eqns
     bwb4 = create_bwb4()
     eqns = set(SR_expander(bwb2(bwb4), cvars + SRr_s + (Phi,)))
+
+# Runs at a reasonable speed after create_bwb4() has been called.
+# 'bwb4a' still needs to be expanded.
 
 def SR_expand2a():
     global bwb4a
     sdict = {SR.var(v)^d : (globals()[v]^d, SR.var(v)*globals()[v]^(d-1))[d%2] for d in range(2,8) for v in ('r1','r2','r12')}
     bwb4a = bwb4.subs(sdict)
 
+# Runs out of memory.
+
 def SR_expand2b():
     global bwb4b
     bwb4b = expand(bwb4a)
+
+def SRexpand2c(start, stop):
+    ops = bwb4a.operands()
+    ex = []
+    ex.append(expand(sum(islice(ops, start, stop))))
+
+def SRdict_expander4():
+    global thousands
+    for thousands in range(0, len(ops), 1000):
+        SRdict_expander2(expand(sum(islice(ops, thousands, thousands+1000))))
+
 
 def PolynomialRing_expand():
 
