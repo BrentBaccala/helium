@@ -268,11 +268,33 @@ def SRdict_expander2(expr):
     assert expr.operator() is sage.symbolic.operators.add_vararg
     for monomial in expr.operands():
         s = str(monomial)
+        if s[0] is '-':
+            sign='-'
+            s=s[1:]
+        else:
+            sign='+'
         vs = s.split('*')
-        keys = '*'.join(ifilter(lambda x: any([x.startswith(c) for c in ('x', 'y', 'z', 'r', 'P')]), vs))
+        key = '*'.join(ifilter(lambda x: any([x.startswith(c) for c in ('x', 'y', 'z', 'r', 'P')]), vs))
         value = '*'.join(ifilterfalse(lambda x: any([x.startswith(c) for c in ('x', 'y', 'z', 'r', 'P')]), vs))
-        if not value.startswith('-'): value = '+' + value
-        SRdict[keys] = SRdict.get(keys, '') + value
+        SRdict[key] = SRdict.get(key, '') + sign + value
+
+# this version returns a dictionary instead of using a global
+
+def SRdict_expander2a(expr):
+    assert expr.operator() is sage.symbolic.operators.add_vararg
+    SRdict = dict()
+    for monomial in expr.operands():
+        s = str(monomial)
+        if s[0] is '-':
+            sign='-'
+            s=s[1:]
+        else:
+            sign='+'
+        vs = s.split('*')
+        key = '*'.join(ifilter(lambda x: any([x.startswith(c) for c in ('x', 'y', 'z', 'r', 'P')]), vs))
+        value = '*'.join(ifilterfalse(lambda x: any([x.startswith(c) for c in ('x', 'y', 'z', 'r', 'P')]), vs))
+        SRdict[key] = SRdict.get(key, '') + sign + value
+    return SRdict
 
 def SR_expand():
     global eqns
@@ -303,6 +325,17 @@ def SRdict_expander4():
     for thousands in range(0, len(ops), 1000):
         SRdict_expander2(expand(sum(islice(ops, thousands, thousands+1000))))
 
+from multiprocessing import Pool, Queue
+
+q = Queue()
+
+def SRdict_thread(thousand):
+    q.put(SRdict_expander2(expand(sum(islice(ops, thousand, thousand+1000)))))
+
+def SRdict_multi(processes=10):
+    pool = Pool(processes)
+    thousands = range(0, len(ops), 1000)
+    pool.map(SRdict_thread, thousands)
 
 def PolynomialRing_expand():
 
