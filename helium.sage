@@ -333,16 +333,27 @@ def SRdict_thread(thousand):
     q.put(SRdict_expander2a(expand(sum(islice(ops, thousand, thousand+1000)))))
 
 def SRdict_multi(processes=2):
-    pool = Pool(processes)
+    global pool
+    pool = Pool(processes, maxtasksperchild=int(1))
     thousands = range(0, len(ops), 1000)
-    pool.map(SRdict_thread, thousands)
+    pool.map(SRdict_thread, thousands, 1)
 
 import threading
 
+SRdicts = []
+
+def SRdict_receive():
+    # race condition; map_thread might run for a bit after last dict received
+    while map_thread.is_alive():
+        SRdicts.append(q.get())
+
 def SRdict_background(processes=2):
-    global th
-    th = threading.Thread(target = SRdict_multi, args=(processes,))
-    th.start()
+    global map_thread
+    map_thread = threading.Thread(target = SRdict_multi, args=(processes,))
+    map_thread.start()
+    global receive_thread
+    receive_thread = threading.Thread(target = SRdict_receive)
+    receive_thread.start()
 
 def PolynomialRing_expand():
 
