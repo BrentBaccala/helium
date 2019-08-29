@@ -325,69 +325,106 @@ def SRdict_expander4():
     for thousands in range(0, len(ops), 1000):
         SRdict_expander2(expand(sum(islice(ops, thousands, thousands+1000))))
 
-from multiprocessing import Pool, Queue
+# This creates a Manager task that coordinates all of the tasks
+# working on symbolic expansion.
 
-remoteq = Queue()
+blocksize = 100
 
-def SRdict_thread(thousand):
-    remoteq.put(SRdict_expander2a(expand(sum(islice(ops, thousand, thousand+1000)))))
+import queue
+
+import multiprocessing, logging
+logger = multiprocessing.get_logger()
+logger.setLevel(logging.INFO)
+multiprocessing.log_to_stderr()
+
+class ManagerClass:
+    def __init__(self):
+        self.localq = queue.Queue()
+        self.thousands = []
+    def submit_expression(self, expr):
+        self.ops = expr.operands()
+        self.thousands = range(0, len(self.ops), blocksize)
+    # race conditions here
+    def get_next_task(self):
+        if self.localq.qsize() > 1:
+            logger.info('combine')
+            return ('combine', self.localq.get(), self.localq.get())
+        elif len(self.thousands) > 0:
+            thousand = self.thousands.pop()
+            logger.info('expand (%d,%d)', thousand, thousand+blocksize)
+            return ('expand', list(islice(self.ops, thousand, thousand+blocksize)))
+        else:
+            return ('quit',)
+    def put(self, result):
+        #logger.info('put')
+        self.localq.put(result)
+    def get(self):
+        return self.localq.get()
+    def qsize(self):
+        return self.localq.qsize()
+    def thousands_len(self):
+        #logger.info('thousands_len')
+        return len(self.thousands)
+
+# Not sure just how this works.  Basically cribbed from the Python
+# multiprocessing docs.
+
+from multiprocessing.managers import BaseManager
+MyManager = BaseManager
+MyManager.register('ManagerClass', ManagerClass)
+manager = MyManager()
+manager.start()
+mc = manager.ManagerClass()
+
+def thread_task(manager):
+    task = manager.get_next_task()
+    #logger.info(task)
+    if task[0] == 'combine':
+        SRdict = task[1]
+        SRd = task[2]
+        for key,value in SRd.items():
+            SRdict[key] = SRdict.get(key, 0) + value
+        manager.put(SRdict)
+    elif task[0] == 'expand':
+        #logger.info('expanding')
+        SRdict = SRdict_expander2a(expand(sum(task[1])))
+        manager.put({key: eval(preparse(value)) for key,value in SRdict.items()})
+    else:
+        #logger.info('terminating')
+        raise SystemExit()
+
+import time
 
 def SRdict_multi(processes=2):
     global pool
-    pool = Pool(processes, maxtasksperchild=int(1))
-    thousands = range(0, len(ops), 1000)
-    pool.map(SRdict_thread, thousands, 1)
+    pool = []
+
+    while processes > 0:
+        for i in reversed(range(len(pool))):
+            worker = pool[i]
+            if worker.exitcode is not None:
+                # worker exited
+                worker.join()
+                del pool[i]
+                if worker.exitcode == 1:
+                    processes = processes - 1
+        for i in range(processes - len(pool)):
+            w = multiprocessing.Process(target=thread_task, args=[mc])
+            pool.append(w)
+            w.name = w.name.replace('Process', 'PoolWorker')
+            w.daemon = True
+            w.start()
+        time.sleep(0.1)
 
 import threading
 
-import queue
-localq = queue.Queue()
-
-def SRdict_receive():
-    # race condition; map_thread might run for a bit after last dict received
-    while map_thread.is_alive():
-        localq.put(remoteq.get())
-
 def SRdict_background(processes=2):
-    global map_thread
-    map_thread = threading.Thread(target = SRdict_multi, args=(processes,))
-    map_thread.start()
-    global receive_thread
-    receive_thread = threading.Thread(target = SRdict_receive)
-    receive_thread.start()
+    global multi_thread
+    multi_thread = threading.Thread(target = SRdict_multi, args=(processes,))
+    multi_thread.start()
 
-SRdict = dict()
-saved_SRdicts = []
 
-def SRdict_convert(SRd):
-    global SRdict
-    saved_SRdicts.append(SRd)
-    for key,value in SRd.items():
-        SRdict[key] = SRdict.get(key, 0) + eval(preparse(value))
 
-def SRdict_convert_thread():
-    while True:
-        SRdict_convert(localq.get())
-
-def SRdict_convert_background():
-    global convert_thread
-    convert_thread = threading.Thread(target = SRdict_convert_thread)
-    convert_thread.start()
-
-def SRdict_combine(SRd):
-    global SRdict
-    saved_SRdicts.append(SRd)
-    for key,value in SRd.items():
-        SRdict[key] = SRdict.get(key, 0) + value
-
-def SRdict_combine_thread():
-    while True:
-        SRdict_combine(localq.get())
-
-def SRdict_combine_background():
-    global combine_thread
-    combine_thread = threading.Thread(target = SRdict_combine_thread)
-    combine_thread.start()
 
 def PolynomialRing_expand():
 
