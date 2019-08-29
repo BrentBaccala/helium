@@ -327,10 +327,10 @@ def SRdict_expander4():
 
 from multiprocessing import Pool, Queue
 
-q = Queue()
+remoteq = Queue()
 
 def SRdict_thread(thousand):
-    q.put(SRdict_expander2a(expand(sum(islice(ops, thousand, thousand+1000)))))
+    remoteq.put(SRdict_expander2a(expand(sum(islice(ops, thousand, thousand+1000)))))
 
 def SRdict_multi(processes=2):
     global pool
@@ -340,12 +340,13 @@ def SRdict_multi(processes=2):
 
 import threading
 
-SRdicts = []
+import queue
+localq = queue.Queue()
 
 def SRdict_receive():
     # race condition; map_thread might run for a bit after last dict received
     while map_thread.is_alive():
-        SRdicts.append(q.get())
+        localq.put(remoteq.get())
 
 def SRdict_background(processes=2):
     global map_thread
