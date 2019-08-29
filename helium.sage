@@ -220,8 +220,8 @@ def create_bwb4():
 
 
 
-# Next... convert powers of r's to x,y,z's and collect like x,y,z's terms together
-# to get a system of polynomials
+# Next... convert powers of r's to x,y,z's, expand out powers, and
+# collect like x,y,z's terms together to get a system of polynomials
 #
 # This is a slow step, so I've tried several different ways to do it.
 
@@ -355,6 +355,39 @@ def SRdict_background(processes=2):
     global receive_thread
     receive_thread = threading.Thread(target = SRdict_receive)
     receive_thread.start()
+
+SRdict = dict()
+saved_SRdicts = []
+
+def SRdict_convert(SRd):
+    global SRdict
+    saved_SRdicts.append(SRd)
+    for key,value in SRd.items():
+        SRdict[key] = SRdict.get(key, 0) + eval(preparse(value))
+
+def SRdict_convert_thread():
+    while True:
+        SRdict_convert(localq.get())
+
+def SRdict_convert_background():
+    global convert_thread
+    convert_thread = threading.Thread(target = SRdict_convert_thread)
+    convert_thread.start()
+
+def SRdict_combine(SRd):
+    global SRdict
+    saved_SRdicts.append(SRd)
+    for key,value in SRd.items():
+        SRdict[key] = SRdict.get(key, 0) + value
+
+def SRdict_combine_thread():
+    while True:
+        SRdict_combine(localq.get())
+
+def SRdict_combine_background():
+    global combine_thread
+    combine_thread = threading.Thread(target = SRdict_combine_thread)
+    combine_thread.start()
 
 def PolynomialRing_expand():
 
