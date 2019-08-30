@@ -335,33 +335,50 @@ import queue
 import multiprocessing, logging
 logger = multiprocessing.get_logger()
 logger.setLevel(logging.INFO)
-multiprocessing.log_to_stderr()
+if len(logger.handlers) == 0:
+    multiprocessing.log_to_stderr()
 
 class ManagerClass:
     def __init__(self):
         self.localq = queue.Queue()
-        self.thousands = []
-    def submit_expression(self, expr):
-        self.ops = expr.operands()
-        self.thousands = range(0, len(self.ops), blocksize)
+        self.workers = {}
+    def set_range(self, limit, blocksize):
+        self.thousands = range(0, limit, blocksize)
     # race conditions here
-    def get_next_task(self):
+    def do_register_worker(self, address):
+        remote = WorkerManager(address)
+        remote.connect()
+        logger.info('connected to remote worker')
+        workerclass = remote.WorkerClass()
+        self.workers[address] = workerclass
+        workerclass.register_manager(address)
+        
         if self.localq.qsize() > 1:
             logger.info('combine')
-            return ('combine', self.localq.get(), self.localq.get())
+            address1 = self.localq.get()
+            address2 = self.localq.get()
+            self.workers[address1].send_result_to_address_then_exit(address)
+            self.workers[address2].send_result_to_address_then_exit(address)
         elif len(self.thousands) > 0:
             thousand = self.thousands.pop()
             logger.info('expand (%d,%d)', thousand, thousand+blocksize)
-            return ('expand', list(islice(self.ops, thousand, thousand+blocksize)))
+            workerclass.start_expand(thousand, thousand+blocksize)
         else:
-            return ('quit',)
-    def put(self, result):
-        #logger.info('put')
-        self.localq.put(result)
-    def get(self):
-        return self.localq.get()
+            workerclass.exit(1)
+    def register_worker(self, address):
+        logger.info('register_worker')
+        threading.Thread(target = self.do_register_worker, args=(address,)).start()
+    def worker_addresses(self):
+        return self.workers
+    def notify_result_ready(self, worker):
+        logger.info('notify_result_ready')
+        self.localq.put(worker)
+    def notify_data_received(self, worker, datalen):
+        self.workers[worker].start_combine()
     def qsize(self):
         return self.localq.qsize()
+    def getq(self):
+        return self.localq.queue
     def thousands_len(self):
         #logger.info('thousands_len')
         return len(self.thousands)
@@ -392,24 +409,60 @@ def start_manager_thread():
     mc = m2.ManagerClass()
 
 
-def thread_task(mc):
-    task = mc.get_next_task()
-    #logger.info(task)
-    if task[0] == 'combine':
-        SRdict = task[1]
-        SRd = task[2]
-        for key,value in SRd.items():
-            SRdict[key] = SRdict.get(key, 0) + value
-        mc.put(SRdict)
-    elif task[0] == 'expand':
-        #logger.info('expanding')
-        SRdict = SRdict_expander2a(expand(sum(task[1])))
-        mc.put({key: eval(preparse(value)) for key,value in SRdict.items()})
-    else:
-        #logger.info('terminating')
-        raise SystemExit()
+class WorkerClass:
+    data = []
+    myid = ''
+    def register_manager(self, idin):
+        self.__class__.myid = idin
+    def exit(self, code):
+        sys.exit(code)
+    def do_expand(self, start, stop):
+        self.data.append(SRdict_expander2a(expand(sum(islice(ops, start, stop)))))
+        #logger.info(self.result)
+        mc.notify_result_ready(self.myid)
+    def start_expand(self, start, stop):
+        threading.Thread(target = self.do_expand, args=(start, stop)).start()
+    def do_send_result_to_address_then_exit(self, address):
+        remote = WorkerManager(address)
+        remote.connect()
+        workerclass = remote.WorkerClass()
+        workerclass.data_transfer(self.data[0])
+        sys.exit(0)
+    def send_result_to_address_then_exit(self, address):
+        threading.Thread(target = self.do_send_result_to_address_then_exit, args=(address,)).start()
+    def get_data(self):
+        return self.data
+    def data_transfer(self, datain):
+        self.data.append(datain)
+        if len(self.data) > 1:
+            mc.notify_data_received(self.myid, len(self.data))
+    def do_combine(self):
+        result = {}
+        for SRd in self.data:
+            for key,value in SRd.items():
+                if isinstance(value, str):
+                    value = eval(preparse(value))
+                result[key] = result.get(key, 0) + value
+        self.data = [result]
+        mc.notify_result_ready(self.myid)
+    def start_combine(self):
+        threading.Thread(target = self.do_combine).start()
+
+WorkerManager = BaseManager
+WorkerManager.register('WorkerClass', WorkerClass)
+
+def thread_task(mcin):
+    global mc
+    mc = mcin
+    logger.info('worker starting')
+    worker_manager = WorkerManager()
+    server = worker_manager.get_server()
+    mc.register_worker(server.address)
+    server.serve_forever()
 
 import time
+
+# 'mc' needs to exist as a global var when this function is called
 
 def SRdict_multi(processes=2):
     global pool
@@ -437,6 +490,7 @@ import threading
 def SRdict_background(processes=2):
     global multi_thread
     multi_thread = threading.Thread(target = SRdict_multi, args=(processes,))
+    multi_thread.daemon = True
     multi_thread.start()
 
 
