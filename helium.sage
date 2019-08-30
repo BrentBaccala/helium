@@ -325,8 +325,58 @@ def SRdict_expander4():
     for thousands in range(0, len(ops), 1000):
         SRdict_expander2(expand(sum(islice(ops, thousands, thousands+1000))))
 
-# This creates a Manager task that coordinates all of the tasks
-# working on symbolic expansion.
+# Perform the expansion step using multiple processes.
+#
+# Python multithreading isn't useful for parallel processing because
+# of Python's global interpreter lock.  Multiple processes are used
+# instead, but this introduces considerable overhead from
+# serialization.
+#
+# BaseManager wraps its class instances with proxy objects that
+# performs serialization and synchronization.  We use two classes -
+# ManagerClass exists on the main process and WorkerClass exists
+# on the spawned workers.
+#
+# It's possible to pass a proxy for the ManagerClass to each worker
+# when the process is started, so there's only a single ManagerClass
+# on the main process and proxies for it on each worker.
+#
+# It doesn't seem possible to pass proxy objects in method calls to
+# other proxy objects, so the workers are identified by address, and a
+# separate WorkerClass is created for each remote process that wants
+# to make calls to that worker.  This allows the workers to pass data
+# directly to other workers, avoiding turning the main process into a
+# bottleneck.
+#
+# Since every connection to a worker process has a separate
+# WorkerClass, I use global and class variables a lot in WorkerClass.
+# The proxy to the main process's ManagerClass is stored in a global
+# variable 'mc', as is the local server in a global variable
+# 'local_server' (we need to know its address to identify ourselves to
+# the main process).  The data being processes is stored in a class
+# variable 'data' (an array).
+#
+# Right now, it works like this:
+#
+# load('helium.sage')
+# prep_hydrogen()
+# create_bwb4()
+# SR_expand2a()
+# ops = bwb4a.operands()
+# start_manager_thread()
+# mc.set_range(len(ops), 100)
+# SRdict_background()
+# pool = []
+# pool = []
+# pool = []
+# pool = []
+# pool = []
+# pool = []
+# q = mc.getq()
+# remote = BaseManager(q[0])
+# remote.connect()
+# worker = remote.WorkerClass()
+# worker.get_data()
 
 blocksize = 100
 
@@ -346,12 +396,11 @@ class ManagerClass:
         self.thousands = range(0, limit, blocksize)
     # race conditions here
     def do_register_worker(self, address):
-        remote = WorkerManager(address)
+        remote = BaseManager(address)
         remote.connect()
         logger.info('connected to remote worker')
         workerclass = remote.WorkerClass()
         self.workers[address] = workerclass
-        workerclass.register_manager(address)
         
         if self.localq.qsize() > 1:
             logger.info('combine')
@@ -385,13 +434,50 @@ class ManagerClass:
     def getpid(self):
         return os.getpid()
 
+class WorkerClass:
+    data = []
+    def exit(self, code):
+        sys.exit(code)
+    def do_expand(self, start, stop):
+        self.data.append(SRdict_expander2a(expand(sum(islice(ops, start, stop)))))
+        #logger.info(self.result)
+        mc.notify_result_ready(local_server.address)
+    def start_expand(self, start, stop):
+        threading.Thread(target = self.do_expand, args=(start, stop)).start()
+    def do_send_result_to_address_then_exit(self, address):
+        remote = BaseManager(address)
+        remote.connect()
+        workerclass = remote.WorkerClass()
+        workerclass.data_transfer(self.data[0])
+        sys.exit(0)
+    def send_result_to_address_then_exit(self, address):
+        threading.Thread(target = self.do_send_result_to_address_then_exit, args=(address,)).start()
+    def get_data(self):
+        return self.data
+    def data_transfer(self, datain):
+        self.data.append(datain)
+        if len(self.data) > 1:
+            mc.notify_data_received(local_server.address, len(self.data))
+    def do_combine(self):
+        result = {}
+        for SRd in self.data:
+            for key,value in SRd.items():
+                if isinstance(value, str):
+                    value = eval(preparse(value))
+                result[key] = result.get(key, 0) + value
+        self.data = [result]
+        mc.notify_result_ready(local_server.address)
+    def start_combine(self):
+        threading.Thread(target = self.do_combine).start()
+
 # Not sure just how this works.  Basically cribbed from the Python
 # multiprocessing docs.
 
 from multiprocessing.managers import BaseManager
-MyManager = BaseManager
-MyManager.register('ManagerClass', ManagerClass)
-manager = MyManager()
+BaseManager.register('ManagerClass', ManagerClass)
+BaseManager.register('WorkerClass', WorkerClass)
+
+manager = BaseManager()
 
 def start_manager_process():
     global mc
@@ -404,61 +490,19 @@ def start_manager_thread():
     manager_thread = threading.Thread(target = server.serve_forever)
     manager_thread.start()
 
-    m2 = MyManager(address=server.address)
+    m2 = BaseManager(address=server.address)
     m2.connect()
     mc = m2.ManagerClass()
 
 
-class WorkerClass:
-    data = []
-    myid = ''
-    def register_manager(self, idin):
-        self.__class__.myid = idin
-    def exit(self, code):
-        sys.exit(code)
-    def do_expand(self, start, stop):
-        self.data.append(SRdict_expander2a(expand(sum(islice(ops, start, stop)))))
-        #logger.info(self.result)
-        mc.notify_result_ready(self.myid)
-    def start_expand(self, start, stop):
-        threading.Thread(target = self.do_expand, args=(start, stop)).start()
-    def do_send_result_to_address_then_exit(self, address):
-        remote = WorkerManager(address)
-        remote.connect()
-        workerclass = remote.WorkerClass()
-        workerclass.data_transfer(self.data[0])
-        sys.exit(0)
-    def send_result_to_address_then_exit(self, address):
-        threading.Thread(target = self.do_send_result_to_address_then_exit, args=(address,)).start()
-    def get_data(self):
-        return self.data
-    def data_transfer(self, datain):
-        self.data.append(datain)
-        if len(self.data) > 1:
-            mc.notify_data_received(self.myid, len(self.data))
-    def do_combine(self):
-        result = {}
-        for SRd in self.data:
-            for key,value in SRd.items():
-                if isinstance(value, str):
-                    value = eval(preparse(value))
-                result[key] = result.get(key, 0) + value
-        self.data = [result]
-        mc.notify_result_ready(self.myid)
-    def start_combine(self):
-        threading.Thread(target = self.do_combine).start()
-
-WorkerManager = BaseManager
-WorkerManager.register('WorkerClass', WorkerClass)
-
 def thread_task(mcin):
-    global mc
+    global mc, local_server
     mc = mcin
     logger.info('worker starting')
-    worker_manager = WorkerManager()
-    server = worker_manager.get_server()
-    mc.register_worker(server.address)
-    server.serve_forever()
+    worker_manager = BaseManager()
+    local_server = worker_manager.get_server()
+    mc.register_worker(local_server.address)
+    local_server.serve_forever()
 
 import time
 
