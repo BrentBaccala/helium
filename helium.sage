@@ -378,6 +378,35 @@ def SRdict_expander4():
 # worker = remote.WorkerClass()
 # worker.get_data()
 
+def multi_init():
+    global ops
+    prep_hydrogen()
+    create_bwb4()
+    SR_expand2a()
+    ops = bwb4a.operands()
+    start_manager_thread()
+    mc.set_range(len(ops), 100)
+    SRdict_background()
+
+
+def multi_shutdown():
+    global ops
+    prep_hydrogen()
+    create_bwb4()
+    SR_expand2a()
+    ops = bwb4a.operands()
+    start_manager_thread()
+    mc.set_range(len(ops), 100)
+    SRdict_background()
+
+    import time
+    time.sleep(1)
+    (waddr, wmc) = mc.worker_addresses().items()[0]
+    print wmc.getpid()
+    mc.shutdown_worker(waddr)
+    del wmc
+
+
 blocksize = 100
 
 import queue
@@ -413,10 +442,14 @@ class ManagerClass:
             logger.info('expand (%d,%d)', thousand, thousand+blocksize)
             workerclass.start_expand(thousand, thousand+blocksize)
         else:
-            workerclass.exit(1)
+            workerclass.shutdown()
+            del self.workers[address]
     def register_worker(self, address):
         logger.info('register_worker')
         threading.Thread(target = self.do_register_worker, args=(address,)).start()
+    def shutdown_worker(self, address):
+        self.workers[address].shutdown()
+        del self.workers[address]
     def worker_addresses(self):
         return self.workers
     def notify_result_ready(self, worker):
@@ -434,10 +467,21 @@ class ManagerClass:
     def getpid(self):
         return os.getpid()
 
+import time
+
 class WorkerClass:
     data = []
-    def exit(self, code):
-        sys.exit(code)
+    def do_shutdown(self):
+        while True:
+            if len(local_server.id_to_refcount) == 0:
+                os.kill(os.getpid(), 15)
+            time.sleep(1)
+    def shutdown(self):
+        # shutdown this worker, but only after we've answered this
+        # RPC and all remote references have been dropped
+        threading.Thread(target = self.do_shutdown).start()
+    def getpid(self):
+        return os.getpid()
     def do_expand(self, start, stop):
         self.data.append(SRdict_expander2a(expand(sum(islice(ops, start, stop)))))
         #logger.info(self.result)
@@ -449,7 +493,7 @@ class WorkerClass:
         remote.connect()
         workerclass = remote.WorkerClass()
         workerclass.data_transfer(self.data[0])
-        sys.exit(0)
+        self.shutdown()
     def send_result_to_address_then_exit(self, address):
         threading.Thread(target = self.do_send_result_to_address_then_exit, args=(address,)).start()
     def get_data(self):
@@ -488,6 +532,7 @@ def start_manager_thread():
     global server, m2, mc
     server = manager.get_server()
     manager_thread = threading.Thread(target = server.serve_forever)
+    manager_thread.daemon = True
     manager_thread.start()
 
     m2 = BaseManager(address=server.address)
