@@ -365,6 +365,8 @@ class ManagerClass:
     def thousands_len(self):
         #logger.info('thousands_len')
         return len(self.thousands)
+    def getpid(self):
+        return os.getpid()
 
 # Not sure just how this works.  Basically cribbed from the Python
 # multiprocessing docs.
@@ -373,22 +375,36 @@ from multiprocessing.managers import BaseManager
 MyManager = BaseManager
 MyManager.register('ManagerClass', ManagerClass)
 manager = MyManager()
-manager.start()
-mc = manager.ManagerClass()
 
-def thread_task(manager):
-    task = manager.get_next_task()
+def start_manager_process():
+    global mc
+    manager.start()
+    mc = manager.ManagerClass()
+
+def start_manager_thread():
+    global server, m2, mc
+    server = manager.get_server()
+    manager_thread = threading.Thread(target = server.serve_forever)
+    manager_thread.start()
+
+    m2 = MyManager(address=server.address)
+    m2.connect()
+    mc = m2.ManagerClass()
+
+
+def thread_task(mc):
+    task = mc.get_next_task()
     #logger.info(task)
     if task[0] == 'combine':
         SRdict = task[1]
         SRd = task[2]
         for key,value in SRd.items():
             SRdict[key] = SRdict.get(key, 0) + value
-        manager.put(SRdict)
+        mc.put(SRdict)
     elif task[0] == 'expand':
         #logger.info('expanding')
         SRdict = SRdict_expander2a(expand(sum(task[1])))
-        manager.put({key: eval(preparse(value)) for key,value in SRdict.items()})
+        mc.put({key: eval(preparse(value)) for key,value in SRdict.items()})
     else:
         #logger.info('terminating')
         raise SystemExit()
