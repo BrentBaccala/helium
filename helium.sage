@@ -363,10 +363,10 @@ def SRdict_expander4():
 # create_bwb4()
 # SR_expand2a()
 # ops = bwb4a.operands()
-# start_manager_thread()
+# start_manager_process()
 # mc.set_range(len(ops), 100)
 # mc.start_worker()  (13 times)
-# wc = mc.getq()[0]
+# wc = mc.getq()[0]  (or wc = mc.get_workers()[0])
 # wc.get_data()
 
 def multi_init():
@@ -377,7 +377,6 @@ def multi_init():
     ops = bwb4a.operands()
     start_manager_process()
     mc.set_range(len(ops), 100)
-    #SRdict_background()
 
 
 
@@ -390,8 +389,6 @@ logger = multiprocessing.get_logger()
 logger.setLevel(logging.INFO)
 if len(logger.handlers) == 0:
     multiprocessing.log_to_stderr()
-
-running_workers = 2
 
 # I want some of longer-running methods in WorkerClass to return
 # immediately after arranging to start processing in background.  This
@@ -432,23 +429,19 @@ BaseProxy.__eq__ = BaseProxy_eq
 
 
 class ManagerClass:
-    localq = queue.Queue()
-    workers = {}
+    # a list of indices waiting to be expanded
     thousands = []
+    # a dictionary mapping workers to their process managers
+    workers = {}
+    # a queue of workers that have completed their work and
+    # are waiting to transfer the result somewhere
+    localq = queue.Queue()
+    # a dictionary mapping workers to the number of data transfers
+    # remaining until this worker is ready to start a 'combine'
     worker_data_count = {}
-#    def __init__(self):
-#        self.localq = queue.Queue()
-#        self.workers = {}
-    def set_range(self, limit, blocksize):
-        self.thousands.extend(range(0, limit, blocksize))
-    # race conditions here
-    def register_manager(self, mc):
-        logger.debug('register_manager %s', mc)
-        self.mc = mc
-    def debug(self):
-        server = getattr(multiprocessing.current_process(), '_manager_server', None)
-        if server:
-            logger.debug(server.id_to_obj)
+
+    def getpid(self):
+        return os.getpid()
     def autoself(self):
         server = getattr(multiprocessing.current_process(), '_manager_server', None)
         if server:
@@ -458,76 +451,67 @@ class ManagerClass:
                     proxy = multiprocessing.managers.AutoProxy(token, 'pickle', authkey=server.authkey)
                     return proxy
         return None
+    def set_range(self, limit, blocksize):
+        self.thousands.extend(range(0, limit, blocksize))
     def start_worker(self):
         worker_manager = BaseManager()
         worker_manager.start()
-        workerclass = worker_manager.WorkerClass()
-        workerclass.register_manager(self.autoself())
+        wc = worker_manager.WorkerClass()
+        wc.register_manager(self.autoself())
 
-        logger.debug('start_worker %s %s', workerclass, workerclass._token)
-        #self.workers[workerclass] = worker_manager
-        self.workers[workerclass] = (workerclass, worker_manager)
-        #self.workers[0] = worker_manager
+        # Destroying worker_manager would terminate the worker process
+        # when this method finishes, so we save a copy in a dictionary
+        # and only delete the dictionary entry when we're ready to
+        # terminate the worker process.
 
-        global running_workers
+        logger.debug('start_worker %s', wc._token)
+        self.workers[wc] = worker_manager
 
         if self.localq.qsize() > 1:
             logger.debug('combine')
-            self.worker_data_count[workerclass] = 2
+            self.worker_data_count[wc] = 2
             wc1 = self.localq.get()
             wc2 = self.localq.get()
             logger.debug('wc1 %s', wc1._token)
             logger.debug('wc2 %s', wc2._token)
-            workerclass.get_data_from_worker(wc1)
-            workerclass.get_data_from_worker(wc2)
-            #del self.workers[wc1]
-            #del self.workers[wc2]
-            running_workers = running_workers - 2
+            wc.get_data_from_worker(wc1)
+            wc.get_data_from_worker(wc2)
         elif len(self.thousands) > 0:
             thousand = self.thousands.pop()
             logger.debug('%s expand (%d,%d)', self, thousand, thousand+blocksize)
-            workerclass.start_expand(thousand, thousand+blocksize)
+            wc.start_expand(thousand, thousand+blocksize)
         else:
-            running_workers = running_workers - 1
-            self.shutdown_worker(workerclass)
-            #workerclass.shutdown()
-            #del self.workers[address]
+            self.shutdown_worker(wc)
     def shutdown_worker(self, wc):
-        logger.debug('shutdown_worker %s %s', repr(wc), wc._token)
-        #self.workers[wc][1].shutdown()
+        logger.debug('shutdown_worker %s', wc._token)
         wc.join_threads()
+        # Destroying the manager in this dictionary entry terminates
+        # the worker process.
         del self.workers[wc]
-    def worker_addresses(self):
+    def get_workers(self):
         return self.workers.keys()
-    def release_all_workers(self):
-        for addr in self.workers.keys():
-            logger.debug('droping %s', addr)
-            del self.workers[addr]
-    def notify_result_ready(self, worker):
-        logger.debug('notify_result_ready %s', worker._token)
-        global running_workers
-        #running_workers = running_workers + 1
-        self.localq.put(worker)
-    def notify_data_received(self, worker):
+    def shutdown_all_workers(self):
+        for wc in self.workers.keys():
+            del self.workers[wc]
+    def notify_result_ready(self, wc):
+        logger.debug('notify_result_ready %s', wc._token)
+        self.localq.put(wc)
+    def notify_data_received(self, wc):
         # thread safe because RPC messages are processed on a single thread
-        logger.debug('notify_data_received %s', worker._token)
-        self.worker_data_count[worker] = self.worker_data_count[worker] - 1
-        if (self.worker_data_count[worker] == 0):
+        logger.debug('notify_data_received %s', wc._token)
+        self.worker_data_count[wc] = self.worker_data_count[wc] - 1
+        if (self.worker_data_count[wc] == 0):
             # We do need to delete this dictionary item, otherwise the
-            # reference associated with the key will prevent the
+            # reference associated with the key will later prevent the
             # worker process from terminating.
-            del self.worker_data_count[worker]
-            worker.start_combine()
+            del self.worker_data_count[wc]
+            wc.start_combine()
     def qsize(self):
         return self.localq.qsize()
     def getq(self):
         return self.localq.queue
     def thousands_len(self):
-        #logger.debug('thousands_len')
         return len(self.thousands)
-    def getpid(self):
-        logger.debug('getpid')
-        return os.getpid()
 
 import time
 
@@ -559,9 +543,6 @@ class WorkerClass:
         self.data.append(SRdict_expander2a(expand(sum(islice(ops, start, stop)))))
         self.mc.notify_result_ready(self.autoself())
     @async_method
-    def send_result_to_worker(self, wc):
-        wc.data_transfer(self.data[0])
-    @async_method
     def get_data_from_worker(self, wc):
         logger.debug('get_data_from_worker %s', wc._token)
         self.data.extend(wc.get_data())
@@ -569,18 +550,13 @@ class WorkerClass:
         self.mc.notify_data_received(self.autoself())
     def get_data(self):
         return self.data
-    def data_transfer(self, datain):
-        self.data.append(datain)
-        self.mc.notify_data_received(self.autoself())
     @async_method
     def start_combine(self):
         logger.debug('start_combine')
         result = {}
         for SRd in self.data:
             for key,value in SRd.items():
-                if isinstance(value, str):
-                    value = eval(preparse(value))
-                result[key] = result.get(key, 0) + value
+                result[key] = result.get(key, '') + value
         self.data = [result]
         self.mc.notify_result_ready(self.autoself())
 
