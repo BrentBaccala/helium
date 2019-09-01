@@ -427,8 +427,35 @@ from multiprocessing.managers import BaseProxy
 BaseProxy.__hash__ = BaseProxy_hash
 BaseProxy.__eq__ = BaseProxy_eq
 
+# Shared objects in Python's multiprocessing library are usually
+# wrapped in proxy objects, but `self` is never a proxy, so how do we
+# pass `self` to another shared object?  `autoself` creates a proxy
+# object that refers to `self` and can be passed to another shared
+# object.
+#
+# It's a bit inefficient since a multiprocessing server only maintains
+# an id-to-obj mapping and now we need to perform an obj-to-id lookup.
+# It also assumes that our serializer is 'pickle' (the default), since
+# the server doesn't save the name of serializer, though we could
+# reverse lookup the type of server.Listener in the listener_client
+# table to figure out what the serializer name was.
+#
+# https://stackoverflow.com/a/55303121/1493790 suggests that this
+# might not be needed in newer versions of Python.
 
-class ManagerClass:
+class Autoself:
+    def autoself(self):
+        server = getattr(multiprocessing.current_process(), '_manager_server', None)
+        classname = self.__class__.__name__
+        if server:
+            for key,value in server.id_to_obj.items():
+                if value[0] == self:
+                    token = multiprocessing.managers.Token(typeid=classname, address=server.address, id=key)
+                    proxy = multiprocessing.managers.AutoProxy(token, 'pickle', authkey=server.authkey)
+                    return proxy
+        return None
+
+class ManagerClass(Autoself):
     # a list of indices waiting to be expanded
     thousands = []
     # a dictionary mapping workers to their process managers
@@ -442,15 +469,6 @@ class ManagerClass:
 
     def getpid(self):
         return os.getpid()
-    def autoself(self):
-        server = getattr(multiprocessing.current_process(), '_manager_server', None)
-        if server:
-            for key,value in server.id_to_obj.items():
-                if value[0] == self:
-                    token = multiprocessing.managers.Token(typeid='ManagerClass', address=server.address, id=key)
-                    proxy = multiprocessing.managers.AutoProxy(token, 'pickle', authkey=server.authkey)
-                    return proxy
-        return None
     def set_range(self, limit, blocksize):
         self.thousands.extend(range(0, limit, blocksize))
     def start_worker(self):
@@ -513,9 +531,7 @@ class ManagerClass:
     def thousands_len(self):
         return len(self.thousands)
 
-import time
-
-class WorkerClass:
+class WorkerClass(Autoself):
     data = []
     def getpid(self):
         return os.getpid()
@@ -524,16 +540,6 @@ class WorkerClass:
             for th in self.threads:
                 logger.debug('join %s', th)
                 th.join()
-    def autoself(self):
-        server = getattr(multiprocessing.current_process(), '_manager_server', None)
-        if server:
-            for key,value in server.id_to_obj.items():
-                if value[0] == self:
-                    token = multiprocessing.managers.Token(typeid='WorkerClass', address=server.address, id=key)
-                    proxy = multiprocessing.managers.AutoProxy(token, 'pickle', authkey=server.authkey)
-                    logger.debug('autoself %s', token)
-                    return proxy
-        return None
     def register_manager(self, mc):
         self.mc = mc
     def get_mc(self):
@@ -560,8 +566,13 @@ class WorkerClass:
         self.data = [result]
         self.mc.notify_result_ready(self.autoself())
 
-# Not sure just how this works.  Basically cribbed from the Python
-# multiprocessing docs.
+# Register both of these classes with BaseManager.  After this step,
+# instantiating BaseManager will start a new process in which we can
+# request the creation of ManagerClass or WorkerClass objects and
+# receive back proxy objects referring to them.  In fact, we'll only
+# create a single ManagerClass or a single WorkerClass in each
+# process, and actually only a single process with a ManagerClass, as
+# all of the other processes will be workers.
 
 from multiprocessing.managers import BaseManager
 BaseManager.register('ManagerClass', ManagerClass)
