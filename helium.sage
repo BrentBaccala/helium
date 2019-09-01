@@ -397,13 +397,19 @@ import threading
 
 def async_method(method):
     def inner(self, *args):
-        threading.Thread(target = method, args=(self,) + args).start()
+        th = threading.Thread(target = method, args=(self,) + args)
+        th.start()
+        if hasattr(self, 'threads'):
+            self.threads.append(th)
+        else:
+            self.threads = [th]
     return inner
 
 class ManagerClass:
     localq = queue.Queue()
     workers = {}
     thousands = []
+    worker_data_count = {}
 #    def __init__(self):
 #        self.localq = queue.Queue()
 #        self.workers = {}
@@ -411,12 +417,12 @@ class ManagerClass:
         self.thousands.extend(range(0, limit, blocksize))
     # race conditions here
     def register_manager(self, mc):
-        logger.info('register_manager %s', mc)
+        logger.debug('register_manager %s', mc)
         self.mc = mc
     def debug(self):
         server = getattr(multiprocessing.current_process(), '_manager_server', None)
         if server:
-            logger.info(server.id_to_obj)
+            logger.debug(server.id_to_obj)
     def autoself(self):
         server = getattr(multiprocessing.current_process(), '_manager_server', None)
         if server:
@@ -432,53 +438,65 @@ class ManagerClass:
         workerclass = worker_manager.WorkerClass()
         workerclass.register_manager(self.autoself())
 
-        self.workers[workerclass] = worker_manager
+        logger.debug('start_worker %s %s', workerclass, workerclass._token)
+        #self.workers[workerclass] = worker_manager
+        self.workers[(workerclass._token.address, workerclass._token.id)] = (workerclass, worker_manager)
+        #self.workers[0] = worker_manager
 
         global running_workers
 
         if self.localq.qsize() > 1:
-            logger.info('combine')
+            logger.debug('combine')
+            self.worker_data_count[(workerclass._token.address, workerclass._token.id)] = 2
             wc1 = self.localq.get()
             wc2 = self.localq.get()
-            wc1.send_result_to_worker(workerclass)
-            wc2.send_result_to_worker(workerclass)
+            logger.debug('wc1 %s', wc1._token)
+            logger.debug('wc2 %s', wc2._token)
+            workerclass.get_data_from_worker(wc1)
+            workerclass.get_data_from_worker(wc2)
             #del self.workers[wc1]
             #del self.workers[wc2]
             running_workers = running_workers - 2
         elif len(self.thousands) > 0:
             thousand = self.thousands.pop()
-            logger.info('%s expand (%d,%d)', self, thousand, thousand+blocksize)
+            logger.debug('%s expand (%d,%d)', self, thousand, thousand+blocksize)
             workerclass.start_expand(thousand, thousand+blocksize)
         else:
             running_workers = running_workers - 1
+            self.shutdown_worker(workerclass)
             #workerclass.shutdown()
             #del self.workers[address]
-    def shutdown_worker(self, address):
-        self.workers[address].shutdown()
-        del self.workers[address]
+    def shutdown_worker(self, wc):
+        logger.debug('shutdown_worker %s %s', repr(wc), wc._token)
+        #self.workers[wc][1].shutdown()
+        wc.join_threads()
+        del self.workers[(wc._token.address, wc._token.id)]
     def worker_addresses(self):
-        logger.info(id(self.workers))
         return self.workers.keys()
     def release_all_workers(self):
         for addr in self.workers.keys():
-            logger.info('droping %s', addr)
+            logger.debug('droping %s', addr)
             del self.workers[addr]
     def notify_result_ready(self, worker):
-        logger.info('%s notify_result_ready %s', self, worker)
+        logger.debug('notify_result_ready %s', worker._token)
         global running_workers
         #running_workers = running_workers + 1
         self.localq.put(worker)
-    def notify_data_received(self, worker, datalen):
-        worker.start_combine()
+    def notify_data_received(self, worker):
+        # thread safe because RPC messages are processed on a single thread
+        logger.debug('notify_data_received %s', worker._token)
+        self.worker_data_count[(worker._token.address, worker._token.id)] = self.worker_data_count[(worker._token.address, worker._token.id)] - 1
+        if (self.worker_data_count[(worker._token.address, worker._token.id)] == 0):
+            worker.start_combine()
     def qsize(self):
         return self.localq.qsize()
     def getq(self):
         return self.localq.queue
     def thousands_len(self):
-        #logger.info('thousands_len')
+        #logger.debug('thousands_len')
         return len(self.thousands)
     def getpid(self):
-        logger.info('getpid')
+        logger.debug('getpid')
         return os.getpid()
 
 import time
@@ -487,6 +505,11 @@ class WorkerClass:
     data = []
     def getpid(self):
         return os.getpid()
+    def join_threads(self):
+        if hasattr(self, 'threads'):
+            for th in self.threads:
+                logger.debug('join %s', th)
+                th.join()
     def autoself(self):
         server = getattr(multiprocessing.current_process(), '_manager_server', None)
         if server:
@@ -494,6 +517,7 @@ class WorkerClass:
                 if value[0] == self:
                     token = multiprocessing.managers.Token(typeid='WorkerClass', address=server.address, id=key)
                     proxy = multiprocessing.managers.AutoProxy(token, 'pickle', authkey=server.authkey)
+                    logger.debug('autoself %s', token)
                     return proxy
         return None
     def register_manager(self, mc):
@@ -507,14 +531,20 @@ class WorkerClass:
     @async_method
     def send_result_to_worker(self, wc):
         wc.data_transfer(self.data[0])
+    @async_method
+    def get_data_from_worker(self, wc):
+        logger.debug('get_data_from_worker %s', wc._token)
+        self.data.extend(wc.get_data())
+        self.mc.shutdown_worker(wc)
+        self.mc.notify_data_received(self.autoself())
     def get_data(self):
         return self.data
     def data_transfer(self, datain):
         self.data.append(datain)
-        if len(self.data) > 1:
-            self.mc.notify_data_received(self.autoself(), len(self.data))
+        self.mc.notify_data_received(self.autoself())
     @async_method
     def start_combine(self):
+        logger.debug('start_combine')
         result = {}
         for SRd in self.data:
             for key,value in SRd.items():
