@@ -365,18 +365,9 @@ def SRdict_expander4():
 # ops = bwb4a.operands()
 # start_manager_thread()
 # mc.set_range(len(ops), 100)
-# SRdict_background()
-# pool = []
-# pool = []
-# pool = []
-# pool = []
-# pool = []
-# pool = []
-# q = mc.getq()
-# remote = BaseManager(q[0])
-# remote.connect()
-# worker = remote.WorkerClass()
-# worker.get_data()
+# mc.start_worker()  (13 times)
+# wc = mc.getq()[0]
+# wc.get_data()
 
 def multi_init():
     global ops
@@ -384,27 +375,10 @@ def multi_init():
     create_bwb4()
     SR_expand2a()
     ops = bwb4a.operands()
-    start_manager_thread()
+    start_manager_process()
     mc.set_range(len(ops), 100)
-    SRdict_background()
+    #SRdict_background()
 
-
-def multi_shutdown():
-    global ops
-    prep_hydrogen()
-    create_bwb4()
-    SR_expand2a()
-    ops = bwb4a.operands()
-    start_manager_thread()
-    mc.set_range(len(ops), 100)
-    SRdict_background()
-
-    import time
-    time.sleep(1)
-    (waddr, wmc) = mc.worker_addresses().items()[0]
-    print wmc.getpid()
-    mc.shutdown_worker(waddr)
-    del wmc
 
 
 blocksize = 100
@@ -417,46 +391,80 @@ logger.setLevel(logging.INFO)
 if len(logger.handlers) == 0:
     multiprocessing.log_to_stderr()
 
+running_workers = 2
+
+import threading
+
 class ManagerClass:
-    def __init__(self):
-        self.localq = queue.Queue()
-        self.workers = {}
+    localq = queue.Queue()
+    workers = {}
+    thousands = []
+#    def __init__(self):
+#        self.localq = queue.Queue()
+#        self.workers = {}
     def set_range(self, limit, blocksize):
-        self.thousands = range(0, limit, blocksize)
+        self.thousands.extend(range(0, limit, blocksize))
     # race conditions here
-    def do_register_worker(self, address):
-        remote = BaseManager(address)
-        remote.connect()
-        logger.info('connected to remote worker')
-        workerclass = remote.WorkerClass()
-        self.workers[address] = workerclass
-        
+    def register_manager(self, mc):
+        logger.info('register_manager %s', mc)
+        self.mc = mc
+    def debug(self):
+        server = getattr(multiprocessing.current_process(), '_manager_server', None)
+        if server:
+            logger.info(server.id_to_obj)
+    def autoself(self):
+        server = getattr(multiprocessing.current_process(), '_manager_server', None)
+        if server:
+            for key,value in server.id_to_obj.items():
+                if value[0] == self:
+                    token = multiprocessing.managers.Token(typeid='ManagerClass', address=server.address, id=key)
+                    proxy = multiprocessing.managers.AutoProxy(token, 'pickle', authkey=server.authkey)
+                    return proxy
+        return None
+    def start_worker(self):
+        worker_manager = BaseManager()
+        worker_manager.start()
+        workerclass = worker_manager.WorkerClass()
+        workerclass.register_manager(self.autoself())
+
+        self.workers[workerclass] = worker_manager
+
+        global running_workers
+
         if self.localq.qsize() > 1:
             logger.info('combine')
-            address1 = self.localq.get()
-            address2 = self.localq.get()
-            self.workers[address1].send_result_to_address_then_exit(address)
-            self.workers[address2].send_result_to_address_then_exit(address)
+            wc1 = self.localq.get()
+            wc2 = self.localq.get()
+            wc1.send_result_to_worker_then_exit(workerclass)
+            wc2.send_result_to_worker_then_exit(workerclass)
+            #del self.workers[wc1]
+            #del self.workers[wc2]
+            running_workers = running_workers - 2
         elif len(self.thousands) > 0:
             thousand = self.thousands.pop()
-            logger.info('expand (%d,%d)', thousand, thousand+blocksize)
+            logger.info('%s expand (%d,%d)', self, thousand, thousand+blocksize)
             workerclass.start_expand(thousand, thousand+blocksize)
         else:
-            workerclass.shutdown()
-            del self.workers[address]
-    def register_worker(self, address):
-        logger.info('register_worker')
-        threading.Thread(target = self.do_register_worker, args=(address,)).start()
+            running_workers = running_workers - 1
+            #workerclass.shutdown()
+            #del self.workers[address]
     def shutdown_worker(self, address):
         self.workers[address].shutdown()
         del self.workers[address]
     def worker_addresses(self):
-        return self.workers
+        logger.info(id(self.workers))
+        return self.workers.keys()
+    def release_all_workers(self):
+        for addr in self.workers.keys():
+            logger.info('droping %s', addr)
+            del self.workers[addr]
     def notify_result_ready(self, worker):
-        logger.info('notify_result_ready')
+        logger.info('%s notify_result_ready %s', self, worker)
+        global running_workers
+        #running_workers = running_workers + 1
         self.localq.put(worker)
     def notify_data_received(self, worker, datalen):
-        self.workers[worker].start_combine()
+        worker.start_combine()
     def qsize(self):
         return self.localq.qsize()
     def getq(self):
@@ -465,43 +473,45 @@ class ManagerClass:
         #logger.info('thousands_len')
         return len(self.thousands)
     def getpid(self):
+        logger.info('getpid')
         return os.getpid()
 
 import time
 
 class WorkerClass:
     data = []
-    def do_shutdown(self):
-        while True:
-            if len(local_server.id_to_refcount) == 0:
-                os.kill(os.getpid(), 15)
-            time.sleep(1)
-    def shutdown(self):
-        # shutdown this worker, but only after we've answered this
-        # RPC and all remote references have been dropped
-        threading.Thread(target = self.do_shutdown).start()
     def getpid(self):
         return os.getpid()
+    def autoself(self):
+        server = getattr(multiprocessing.current_process(), '_manager_server', None)
+        if server:
+            for key,value in server.id_to_obj.items():
+                if value[0] == self:
+                    token = multiprocessing.managers.Token(typeid='WorkerClass', address=server.address, id=key)
+                    proxy = multiprocessing.managers.AutoProxy(token, 'pickle', authkey=server.authkey)
+                    return proxy
+        return None
+    def register_manager(self, mc):
+        self.mc = mc
+    def get_mc(self):
+        return self.mc
     def do_expand(self, start, stop):
         self.data.append(SRdict_expander2a(expand(sum(islice(ops, start, stop)))))
         #logger.info(self.result)
-        mc.notify_result_ready(local_server.address)
+        self.mc.notify_result_ready(self.autoself())
     def start_expand(self, start, stop):
         threading.Thread(target = self.do_expand, args=(start, stop)).start()
-    def do_send_result_to_address_then_exit(self, address):
-        remote = BaseManager(address)
-        remote.connect()
-        workerclass = remote.WorkerClass()
-        workerclass.data_transfer(self.data[0])
-        self.shutdown()
-    def send_result_to_address_then_exit(self, address):
-        threading.Thread(target = self.do_send_result_to_address_then_exit, args=(address,)).start()
+    def do_send_result_to_worker_then_exit(self, wc):
+        wc.data_transfer(self.data[0])
+        #self.shutdown()
+    def send_result_to_worker_then_exit(self, wc):
+        threading.Thread(target = self.do_send_result_to_worker_then_exit, args=(wc,)).start()
     def get_data(self):
         return self.data
     def data_transfer(self, datain):
         self.data.append(datain)
         if len(self.data) > 1:
-            mc.notify_data_received(local_server.address, len(self.data))
+            self.mc.notify_data_received(self.autoself(), len(self.data))
     def do_combine(self):
         result = {}
         for SRd in self.data:
@@ -510,7 +520,7 @@ class WorkerClass:
                     value = eval(preparse(value))
                 result[key] = result.get(key, 0) + value
         self.data = [result]
-        mc.notify_result_ready(local_server.address)
+        self.mc.notify_result_ready(self.autoself())
     def start_combine(self):
         threading.Thread(target = self.do_combine).start()
 
@@ -521,66 +531,12 @@ from multiprocessing.managers import BaseManager
 BaseManager.register('ManagerClass', ManagerClass)
 BaseManager.register('WorkerClass', WorkerClass)
 
-manager = BaseManager()
-
 def start_manager_process():
-    global mc
+    global manager, mc
+    manager = BaseManager()
     manager.start()
     mc = manager.ManagerClass()
 
-def start_manager_thread():
-    global server, m2, mc
-    server = manager.get_server()
-    manager_thread = threading.Thread(target = server.serve_forever)
-    manager_thread.daemon = True
-    manager_thread.start()
-
-    m2 = BaseManager(address=server.address)
-    m2.connect()
-    mc = m2.ManagerClass()
-
-
-def thread_task(mcin):
-    global mc, local_server
-    mc = mcin
-    logger.info('worker starting')
-    worker_manager = BaseManager()
-    local_server = worker_manager.get_server()
-    mc.register_worker(local_server.address)
-    local_server.serve_forever()
-
-import time
-
-# 'mc' needs to exist as a global var when this function is called
-
-def SRdict_multi(processes=2):
-    global pool
-    pool = []
-
-    while processes > 0:
-        for i in reversed(range(len(pool))):
-            worker = pool[i]
-            if worker.exitcode is not None:
-                # worker exited
-                worker.join()
-                del pool[i]
-                if worker.exitcode == 1:
-                    processes = processes - 1
-        for i in range(processes - len(pool)):
-            w = multiprocessing.Process(target=thread_task, args=[mc])
-            pool.append(w)
-            w.name = w.name.replace('Process', 'PoolWorker')
-            w.daemon = True
-            w.start()
-        time.sleep(0.1)
-
-import threading
-
-def SRdict_background(processes=2):
-    global multi_thread
-    multi_thread = threading.Thread(target = SRdict_multi, args=(processes,))
-    multi_thread.daemon = True
-    multi_thread.start()
 
 
 
