@@ -330,31 +330,28 @@ def SRdict_expander4():
 # Python multithreading isn't useful for parallel processing because
 # of Python's global interpreter lock.  Multiple processes are used
 # instead, but this introduces considerable overhead from
-# serialization.
+# serialization.  To avoid unnecessary serialization, we handle
+# polynomials as strings as much as possible.
 #
-# BaseManager wraps its class instances with proxy objects that
-# performs serialization and synchronization.  We use two classes -
-# ManagerClass exists on the main process and WorkerClass exists
-# on the spawned workers.
+# The desire to avoid serialization also leads to an optimization that
+# seems a bit wierd at first.  We don't spawn any of the subprocesses
+# until we've calculated `ops`, the terms of the polynomial that we
+# want to expand.  This avoids having to serialize `ops`, since each
+# worker already has a copy.  This also has the negative side-effect
+# of preventing workers from running on other machines, since each
+# worker has to be forked from the main process.
 #
-# It's possible to pass a proxy for the ManagerClass to each worker
-# when the process is started, so there's only a single ManagerClass
-# on the main process and proxies for it on each worker.
+# We have a manager process (separate from the main process) that acts
+# as a traffic cop, and worker processes that pass data directly to
+# other workers, avoiding turning either the main process or the
+# manager process into a bottleneck.  You might think that the main
+# process could be used as the manager, but that isn't well supported
+# by Python's multithreading library, and there's very little overhead
+# associated with running the manager in its own task.
 #
-# It doesn't seem possible to pass proxy objects in method calls to
-# other proxy objects, so the workers are identified by address, and a
-# separate WorkerClass is created for each remote process that wants
-# to make calls to that worker.  This allows the workers to pass data
-# directly to other workers, avoiding turning the main process into a
-# bottleneck.
-#
-# Since every connection to a worker process has a separate
-# WorkerClass, I use global and class variables a lot in WorkerClass.
-# The proxy to the main process's ManagerClass is stored in a global
-# variable 'mc', as is the local server in a global variable
-# 'local_server' (we need to know its address to identify ourselves to
-# the main process).  The data being processes is stored in a class
-# variable 'data' (an array).
+# The proxy to the manager process's ManagerClass is stored in a
+# global variable `mc`, and from it methods like `get_workers` can be
+# used to obtain proxies to the worker processes.
 #
 # Right now, it works like this:
 #
@@ -514,6 +511,8 @@ class ManagerClass(Autoself):
     def notify_result_ready(self, wc):
         logger.debug('notify_result_ready %s', wc._token)
         self.localq.put(wc)
+        if self.localq.qsize() > 1 or len(self.thousands) > 0:
+            self.start_worker()
     def notify_data_received(self, wc):
         # thread safe because RPC messages are processed on a single thread
         logger.debug('notify_data_received %s', wc._token)
