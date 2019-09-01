@@ -393,6 +393,14 @@ if len(logger.handlers) == 0:
 
 running_workers = 2
 
+# I want some of longer-running methods in WorkerClass to return
+# immediately after arranging to start processing in background.  This
+# decorator causes a method to run asynchronously in a background
+# thread, as well as keeping a record of such threads.  WorkerClass
+# implements a `join_threads` method that joins (i.e, waits for) all
+# of these threads, and should be called before terminating the worker
+# process.
+
 import threading
 
 def async_method(method):
@@ -404,6 +412,24 @@ def async_method(method):
         else:
             self.threads = [th]
     return inner
+
+# Standard Python proxy objects from the multiprocessing library can't
+# be used as keys in dictionaries because multiple proxies can point
+# to the same object.  This code adjusts the hashing and equality
+# methods to ensure that proxies to the same object test equal and can
+# then be used as dictionary keys.
+#
+# Probably needs to be reported as a bug in the multiprocessing library.
+
+def BaseProxy_hash(self):
+    return hash((self._token.address, self._token.id))
+def BaseProxy_eq(self, other):
+    return hash(self) == hash(other)
+
+from multiprocessing.managers import BaseProxy
+BaseProxy.__hash__ = BaseProxy_hash
+BaseProxy.__eq__ = BaseProxy_eq
+
 
 class ManagerClass:
     localq = queue.Queue()
@@ -440,14 +466,14 @@ class ManagerClass:
 
         logger.debug('start_worker %s %s', workerclass, workerclass._token)
         #self.workers[workerclass] = worker_manager
-        self.workers[(workerclass._token.address, workerclass._token.id)] = (workerclass, worker_manager)
+        self.workers[workerclass] = (workerclass, worker_manager)
         #self.workers[0] = worker_manager
 
         global running_workers
 
         if self.localq.qsize() > 1:
             logger.debug('combine')
-            self.worker_data_count[(workerclass._token.address, workerclass._token.id)] = 2
+            self.worker_data_count[workerclass] = 2
             wc1 = self.localq.get()
             wc2 = self.localq.get()
             logger.debug('wc1 %s', wc1._token)
@@ -470,7 +496,7 @@ class ManagerClass:
         logger.debug('shutdown_worker %s %s', repr(wc), wc._token)
         #self.workers[wc][1].shutdown()
         wc.join_threads()
-        del self.workers[(wc._token.address, wc._token.id)]
+        del self.workers[wc]
     def worker_addresses(self):
         return self.workers.keys()
     def release_all_workers(self):
@@ -485,8 +511,12 @@ class ManagerClass:
     def notify_data_received(self, worker):
         # thread safe because RPC messages are processed on a single thread
         logger.debug('notify_data_received %s', worker._token)
-        self.worker_data_count[(worker._token.address, worker._token.id)] = self.worker_data_count[(worker._token.address, worker._token.id)] - 1
-        if (self.worker_data_count[(worker._token.address, worker._token.id)] == 0):
+        self.worker_data_count[worker] = self.worker_data_count[worker] - 1
+        if (self.worker_data_count[worker] == 0):
+            # We do need to delete this dictionary item, otherwise the
+            # reference associated with the key will prevent the
+            # worker process from terminating.
+            del self.worker_data_count[worker]
             worker.start_combine()
     def qsize(self):
         return self.localq.qsize()
