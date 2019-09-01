@@ -395,6 +395,11 @@ running_workers = 2
 
 import threading
 
+def async_method(method):
+    def inner(self, *args):
+        threading.Thread(target = method, args=(self,) + args).start()
+    return inner
+
 class ManagerClass:
     localq = queue.Queue()
     workers = {}
@@ -435,8 +440,8 @@ class ManagerClass:
             logger.info('combine')
             wc1 = self.localq.get()
             wc2 = self.localq.get()
-            wc1.send_result_to_worker_then_exit(workerclass)
-            wc2.send_result_to_worker_then_exit(workerclass)
+            wc1.send_result_to_worker(workerclass)
+            wc2.send_result_to_worker(workerclass)
             #del self.workers[wc1]
             #del self.workers[wc2]
             running_workers = running_workers - 2
@@ -495,24 +500,21 @@ class WorkerClass:
         self.mc = mc
     def get_mc(self):
         return self.mc
-    def do_expand(self, start, stop):
-        self.data.append(SRdict_expander2a(expand(sum(islice(ops, start, stop)))))
-        #logger.info(self.result)
-        self.mc.notify_result_ready(self.autoself())
+    @async_method
     def start_expand(self, start, stop):
-        threading.Thread(target = self.do_expand, args=(start, stop)).start()
-    def do_send_result_to_worker_then_exit(self, wc):
+        self.data.append(SRdict_expander2a(expand(sum(islice(ops, start, stop)))))
+        self.mc.notify_result_ready(self.autoself())
+    @async_method
+    def send_result_to_worker(self, wc):
         wc.data_transfer(self.data[0])
-        #self.shutdown()
-    def send_result_to_worker_then_exit(self, wc):
-        threading.Thread(target = self.do_send_result_to_worker_then_exit, args=(wc,)).start()
     def get_data(self):
         return self.data
     def data_transfer(self, datain):
         self.data.append(datain)
         if len(self.data) > 1:
             self.mc.notify_data_received(self.autoself(), len(self.data))
-    def do_combine(self):
+    @async_method
+    def start_combine(self):
         result = {}
         for SRd in self.data:
             for key,value in SRd.items():
@@ -521,8 +523,6 @@ class WorkerClass:
                 result[key] = result.get(key, 0) + value
         self.data = [result]
         self.mc.notify_result_ready(self.autoself())
-    def start_combine(self):
-        threading.Thread(target = self.do_combine).start()
 
 # Not sure just how this works.  Basically cribbed from the Python
 # multiprocessing docs.
