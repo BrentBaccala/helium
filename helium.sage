@@ -370,7 +370,7 @@ def SRdict_expander4():
 blocksize = 100
 
 # number of collector processes
-num_collectors = 1
+num_collectors = 2
 
 def multi_init():
     global ops
@@ -382,12 +382,13 @@ def multi_init():
     mc.set_range(len(ops), blocksize)
 
 def multi_expand():
-    global wc
+    global ccs
     mc.start_collectors()
     mc.start_worker()
     mc.wait_for_finish()
-    wc = mc.get_workers()[0]
-    wc.convert_to_eqns()
+    ccs = mc.get_workers()
+    for cc in ccs:
+        cc.convert_to_eqns()
 
 import queue
 
@@ -826,17 +827,18 @@ if use_multiprocessing:
 
     def minfunc(v):
         d = dict(zip(coeff_vars, v))
-        res = real_type(real_type(wc.sum_of_squares(d)) / zero_variety.subs(d))
+        sum_of_squares = sum([cc.sum_of_squares(d) for cc in ccs])
+        res = real_type(sum_of_squares / zero_variety.subs(d))
         print res
         return res
 
     def jac(v):
         d = dict(zip(coeff_vars, v))
-        sum_of_squares = real_type(wc.sum_of_squares(d))
+        sum_of_squares = sum([cc.sum_of_squares(d) for cc in ccs])
         zero_var = zero_variety.subs(d)
         dvar = {var : 0 for var in coeff_vars}
         dvar.update({var : d[var] for var in Avars})
-        A = [real_type((real_type(wc.first_derivative(d,var))*zero_var - (2*dvar[var]*sum_of_squares))/zero_var^2) for var in coeff_vars]
+        A = [real_type((sum([cc.first_derivative(d,var) for cc in ccs])*zero_var - (2*dvar[var]*sum_of_squares))/zero_var^2) for var in coeff_vars]
         res = np.array(A)
         return res
 
