@@ -402,14 +402,20 @@ def multi_init():
 # growing without bound).
 
 managers = {}
-ccs = []
+
+def start_collector():
+    collector_manager = BaseManager()
+    collector_manager.start()
+    cc = collector_manager.CollectorClass()
+    mc.register_collector(cc)
+    managers[cc._token] = collector_manager
 
 def start_worker():
     worker_manager = BaseManager()
     worker_manager.start()
     wc = worker_manager.ExpanderClass()
     mc.register_worker(wc)
-    managers[wc] = worker_manager
+    managers[wc._token] = worker_manager
 
 def reap_worker():
     wc = mc.get_finished_worker()
@@ -417,20 +423,15 @@ def reap_worker():
     # Tricky, tricky... we want to destroy wc, then its manager,
     # in that order.  "del managers[wc]" destroys in the wrong
     # order (since wc is still alive after the `del`)
-    worker_manager = managers[wc]
-    del managers[wc]
+    worker_manager = managers[wc._token]
+    del managers[wc._token]
     del wc
     del worker_manager
 
 def multi_expand():
 
     for i in range(num_collectors):
-        collector_manager = BaseManager()
-        collector_manager.start()
-        cc = collector_manager.CollectorClass()
-        mc.register_collector(cc)
-        managers[cc] = collector_manager
-        ccs.append(cc)
+        start_collector()
 
     for i in range(num_expanders):
         start_worker()
@@ -444,6 +445,9 @@ def multi_expand():
 
     for i in range(num_expanders-1):
         reap_worker()
+
+    global ccs
+    ccs = mc.get_collectors()
 
     for cc in ccs:
         cc.join_threads()
@@ -534,6 +538,15 @@ from multiprocessing.managers import BaseProxy
 BaseProxy.__hash__ = BaseProxy_hash
 BaseProxy.__eq__ = BaseProxy_eq
 
+def Token_hash(self):
+    return hash((self.address, self.id))
+def Token_eq(self, other):
+    return hash(self) == hash(other)
+
+from multiprocessing.managers import Token
+Token.__hash__ = Token_hash
+Token.__eq__ = Token_eq
+
 # Shared objects in Python's multiprocessing library are usually
 # wrapped in proxy objects, but `self` is never a proxy, so how do we
 # pass `self` to another shared object?  `autoself` creates a proxy
@@ -583,6 +596,8 @@ import queue
 class ManagerClass(Autoself):
     # a list of indices waiting to be expanded
     thousands = []
+    # a set of running workers
+    running_workers = set()
     # a queue of workers that have finished and are waiting for the
     # main process to reap them
     workers_finished = queue.Queue()
@@ -603,7 +618,10 @@ class ManagerClass(Autoself):
 
         logger.debug('register collector %s', cc._token)
         self.collectors.append(cc)
+    def get_collectors(self):
+        return self.collectors
     def register_worker(self, wc):
+        self.running_workers.add(wc)
         wc.register_manager(self.autoself())
         wc.register_collectors(self.collectors)
 
@@ -621,9 +639,12 @@ class ManagerClass(Autoself):
     @async_method
     def notify_expand_done(self, wc):
         logger.debug('notify_expand_done %s', wc._token)
+        self.running_workers.remove(wc)
         self.workers_finished.put(wc)
     def thousands_len(self):
         return len(self.thousands)
+
+import time
 
 class ExpanderClass(Autoself):
 
@@ -638,6 +659,9 @@ class ExpanderClass(Autoself):
             del self.collectors[-1]
     @async_method
     def start_expand(self, start, stop):
+        # sleep for a fraction of a second here to let this method
+        # return back to the manager before we begin work
+        time.sleep(0.1)
         expr = expand(sum(islice(ops, start, stop)))
         for monomial in expr.operands():
             s = str(monomial)
