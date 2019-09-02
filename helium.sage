@@ -152,7 +152,7 @@ def prep_hydrogen():
     Phi = SR.var('Phi')
 
 def prep_helium():
-    global eq, H, Psi, A, B, Avars, Bvars, cvars, rvars
+    global eq, H, Psi, coeff_vars, A, B, Avars, Bvars, cvars, rvars
 
     cvars = (x1,y1,z1, x2,y2,z2)
     rvars = (r1,r2,r12)
@@ -362,9 +362,12 @@ def SRdict_expander4():
 # ops = bwb4a.operands()
 # start_manager_process()
 # mc.set_range(len(ops), 100)
-# mc.start_worker()  (13 times)
+# mc.start_worker()
 # wc = mc.getq()[0]  (or wc = mc.get_workers()[0])
 # wc.get_data()
+
+# number of operands to process in each expander worker
+blocksize = 100
 
 def multi_init():
     global ops
@@ -373,11 +376,14 @@ def multi_init():
     SR_expand2a()
     ops = bwb4a.operands()
     start_manager_process()
-    mc.set_range(len(ops), 100)
+    mc.set_range(len(ops), blocksize)
 
-
-
-blocksize = 100
+def multi_expand():
+    global wc
+    mc.start_worker()
+    mc.wait_for_finish()
+    wc = mc.getq()[0]
+    wc.convert_to_eqns()
 
 import queue
 
@@ -452,6 +458,8 @@ class Autoself:
                     return proxy
         return None
 
+from rfoo.utils import rconsole
+
 class ManagerClass(Autoself):
     # a list of indices waiting to be expanded
     thousands = []
@@ -464,8 +472,14 @@ class ManagerClass(Autoself):
     # remaining until this worker is ready to start a 'combine'
     worker_data_count = {}
 
+    # convenience functions for development
     def getpid(self):
         return os.getpid()
+    def load(self, filename):
+        load(filename)
+    def rconsole(self, port=54321):
+        rconsole.spawn_server(port=port)
+
     def set_range(self, limit, blocksize):
         self.thousands.extend(range(0, limit, blocksize))
     def start_worker(self):
@@ -508,11 +522,21 @@ class ManagerClass(Autoself):
     def shutdown_all_workers(self):
         for wc in self.workers.keys():
             del self.workers[wc]
+
+    cvar = multiprocessing.Condition()
+    def wait_for_finish(self):
+        self.cvar.acquire()
+        self.cvar.wait()
+        self.cvar.release()
     def notify_result_ready(self, wc):
         logger.debug('notify_result_ready %s', wc._token)
         self.localq.put(wc)
         if self.localq.qsize() > 1 or len(self.thousands) > 0:
             self.start_worker()
+        else:
+            self.cvar.acquire()
+            self.cvar.notify_all()
+            self.cvar.release()
     def notify_data_received(self, wc):
         # thread safe because RPC messages are processed on a single thread
         logger.debug('notify_data_received %s', wc._token)
@@ -532,8 +556,15 @@ class ManagerClass(Autoself):
 
 class WorkerClass(Autoself):
     data = []
+
+    # convenience functions for development
     def getpid(self):
         return os.getpid()
+    def load(self, filename):
+        load(filename)
+    def rconsole(self, port=54321):
+        rconsole.spawn_server(port=port)
+
     def join_threads(self):
         if hasattr(self, 'threads'):
             for th in self.threads:
@@ -564,6 +595,41 @@ class WorkerClass(Autoself):
                 result[key] = result.get(key, '') + value
         self.data = [result]
         self.mc.notify_result_ready(self.autoself())
+
+    # we want to evaluate the sum of squares of polynomials p,
+    # as well as the first derivatives of the sum of squares,
+    # which is the sum of (2 p dp/dv)
+    def convert_to_eqns(self):
+        self.eqns = list(set([eval(preparse(value)) for value in self.data[0].values()]))
+        self.deqns = {v : [2 * eqn * diff(eqn, v) for eqn in self.eqns] for v in coeff_vars}
+    def get_eqns(self):
+        return self.eqns
+    def sum_of_squares(self, d):
+        return sum([square(eqn.subs(d)) for eqn in self.eqns])
+    def first_derivative(self, d, v):
+        return sum([deqn.subs(d) for deqn in self.deqns[v]])
+
+
+def square(x):
+    return x*x
+
+def get_objs():
+    return multiprocessing.current_process()._manager_server.id_to_obj
+def get_obj():
+    return get_objs().values()[1][0]
+def bind(instance, func, as_name=None):
+    """
+    Bind the function *func* to *instance*, with either provided name *as_name*
+    or the existing name of *func*. The provided *func* should accept the
+    instance as the first argument, i.e. "self".
+    """
+    if as_name is None:
+        as_name = func.__name__
+    bound_method = func.__get__(instance, instance.__class__)
+    setattr(instance, as_name, bound_method)
+    return bound_method
+
+# bind = lambda instance, func, asname: setattr(instance, asname, func.__get__(instance, instance.__class__))
 
 # Register both of these classes with BaseManager.  After this step,
 # instantiating BaseManager will start a new process in which we can
@@ -739,9 +805,6 @@ def random_numerical(seed=0):
     global iv
     iv = [random.random() for i in range(nvars)]
 
-    def square(x):
-        return x*x
-
     # We know the zero variety (all Avar's zero, so Psi is zero) will be
     # a "solution", but we want to avoid it
 
@@ -758,14 +821,28 @@ def random_numerical(seed=0):
 
     global minfunc
     def minfunc(v):
-        #return minpoly.subs(dict(zip(BWB.gens(), v))) / sum(map(square, v)) / zero_variety.subs(dict(zip(BWB.gens(), v)))
-        return real_type(minpoly.subs(dict(zip(coeff_vars, v))) / zero_variety.subs(dict(zip(coeff_vars, v))))
-        #return minpoly.subs(dict(zip(BWB.gens(), v)))
+        #res = real_type(minpoly.subs(dict(zip(coeff_vars, v))) / zero_variety.subs(dict(zip(coeff_vars, v))))
+        d = dict(zip(coeff_vars, v))
+        res = real_type(real_type(wc.sum_of_squares(d)) / zero_variety.subs(d))
+        print res
+        return res
 
     minpoly_derivatives = [diff(minpoly / zero_variety, v) for v in coeff_vars]
     global jac
     def jac(v):
-        return np.array([real_type(d.subs(dict(zip(coeff_vars, v)))) for d in minpoly_derivatives])
+        #res = np.array([real_type(d.subs(dict(zip(coeff_vars, v)))) for d in minpoly_derivatives])
+        #print res
+        #return res
+        d = dict(zip(coeff_vars, v))
+        sum_of_squares = real_type(wc.sum_of_squares(d))
+        zero_var = zero_variety.subs(d)
+        dvar = {var : 0 for var in coeff_vars}
+        dvar.update({var : d[var] for var in Avars})
+        A = [real_type((real_type(wc.first_derivative(d,var))*zero_var - (2*dvar[var]*sum_of_squares))/zero_var^2) for var in coeff_vars]
+        res = np.array(A)
+        #print res
+        return res
+
 
     global SciMin
     SciMin = scipy.optimize.minimize(minfunc, iv, jac=jac, method='BFGS', options={'return_all':True})
