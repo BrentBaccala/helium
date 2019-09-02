@@ -396,7 +396,7 @@ ccs = []
 def start_worker():
     worker_manager = BaseManager()
     worker_manager.start()
-    wc = worker_manager.WorkerClass()
+    wc = worker_manager.ExpanderClass()
     mc.register_worker(wc)
     managers[wc] = worker_manager
 
@@ -425,9 +425,8 @@ def multi_expand():
             break
 
     for cc in ccs:
+        cc.join_threads()
         cc.convert_to_eqns()
-
-import queue
 
 import multiprocessing, logging
 logger = multiprocessing.get_logger()
@@ -435,10 +434,10 @@ logger.setLevel(logging.INFO)
 if len(logger.handlers) == 0:
     multiprocessing.log_to_stderr()
 
-# I want some of longer-running methods in WorkerClass to return
+# I want some of longer-running methods in worker processes to return
 # immediately after arranging to start processing in background.  This
 # decorator causes a method to run asynchronously in a background
-# thread, as well as keeping a record of such threads.  WorkerClass
+# thread, as well as keeping a record of such threads.  The class
 # implements a `join_threads` method that joins (i.e, waits for) all
 # of these threads, and should be called before terminating the worker
 # process.
@@ -510,6 +509,8 @@ class Autoself:
     def rconsole(self, port=54321):
         rconsole.spawn_server(port=port)
 
+import queue
+
 class ManagerClass(Autoself):
     # a list of indices waiting to be expanded
     thousands = []
@@ -550,8 +551,6 @@ class ManagerClass(Autoself):
         self.cvar.acquire()
         self.cvar.wait()
         self.cvar.release()
-        for cc in self.collectors:
-            cc.join_threads()
     def get_finished_worker(self):
         if self.workers_finished.empty():
             return None
@@ -567,7 +566,7 @@ class ManagerClass(Autoself):
     def thousands_len(self):
         return len(self.thousands)
 
-class WorkerClass(Autoself):
+class ExpanderClass(Autoself):
     data = []
 
     def join_threads(self):
@@ -633,12 +632,17 @@ class CollectorClass(Autoself):
         return self.eqns
     def sum_of_squares(self, d):
         return sum([square(eqn.subs(d)) for eqn in self.eqns])
-    def first_derivative(self, d, v):
+    def D_sum_of_squares(self, d, v):
         return sum([deqn.subs(d) for deqn in self.deqns[v]])
 
 
 def square(x):
     return x*x
+
+# These functions are here to make it easier to update the code of
+# worker processes without restarting them.  You 'load' the new code
+# into the worker, then 'rconsole' to the worker and bind the new
+# class functions to the existing instance.
 
 def get_objs():
     return multiprocessing.current_process()._manager_server.id_to_obj
@@ -658,17 +662,17 @@ def bind(instance, func, as_name=None):
 
 # bind = lambda instance, func, asname: setattr(instance, asname, func.__get__(instance, instance.__class__))
 
-# Register both of these classes with BaseManager.  After this step,
+# Register all of these classes with BaseManager.  After this step,
 # instantiating BaseManager will start a new process in which we can
-# request the creation of ManagerClass or WorkerClass objects and
-# receive back proxy objects referring to them.  In fact, we'll only
-# create a single ManagerClass or a single WorkerClass in each
-# process, and actually only a single process with a ManagerClass, as
-# all of the other processes will be workers.
+# request the creation of ManagerClass, ExpanderClass, or CollectorClass
+# objects and receive back proxy objects referring to them.  In fact,
+# we'll only create a single *Class object in each process, and only a
+# single process with a ManagerClass, as all of the other processes
+# will be either workers or collectors.
 
 from multiprocessing.managers import BaseManager
 BaseManager.register('ManagerClass', ManagerClass)
-BaseManager.register('WorkerClass', WorkerClass)
+BaseManager.register('ExpanderClass', ExpanderClass)
 BaseManager.register('CollectorClass', CollectorClass)
 
 def start_manager_process():
@@ -840,7 +844,7 @@ if use_multiprocessing:
         zero_var = zero_variety.subs(d)
         dvar = {var : 0 for var in coeff_vars}
         dvar.update({var : d[var] for var in Avars})
-        A = [real_type((sum([cc.first_derivative(d,var) for cc in ccs])*zero_var - (2*dvar[var]*sum_of_squares))/zero_var^2) for var in coeff_vars]
+        A = [real_type((sum([cc.D_sum_of_squares(d,var) for cc in ccs])*zero_var - (2*dvar[var]*sum_of_squares))/zero_var^2) for var in coeff_vars]
         res = np.array(A)
         return res
 
