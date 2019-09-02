@@ -404,11 +404,7 @@ def start_worker():
     managers[wc] = worker_manager
 
 def reap_worker():
-    mc.wait_for_finish()
     wc = mc.get_finished_worker()
-    if not wc:
-        print "No worker finished?"
-        return
     wc.join_threads()
     # Tricky, tricky... we want to destroy wc, then its manager,
     # in that order.  "del managers[wc]" destroys in the wrong
@@ -518,6 +514,12 @@ class Autoself:
                     return proxy
         return None
 
+    def join_threads(self):
+        if hasattr(self, 'threads'):
+            for th in self.threads:
+                logger.debug('join %s', th)
+                th.join()
+
     # convenience functions for development
     def getpid(self):
         return os.getpid()
@@ -531,7 +533,8 @@ import queue
 class ManagerClass(Autoself):
     # a list of indices waiting to be expanded
     thousands = []
-    #
+    # a queue of workers that have finished and are waiting for the
+    # main process to reap them
     workers_finished = queue.Queue()
     # a list of collectors
     collectors = []
@@ -563,39 +566,19 @@ class ManagerClass(Autoself):
         else:
             self.shutdown_worker(wc)
 
-    cvar = multiprocessing.Condition()
-    def wait_for_finish(self):
-        self.cvar.acquire()
-        if self.workers_finished.empty():
-            self.cvar.wait()
-        self.cvar.release()
     def get_finished_worker(self):
-        if self.workers_finished.empty():
-            return None
-        else:
-            return self.workers_finished.get()
+        return self.workers_finished.get()
     @async_method
     def notify_expand_done(self, wc):
         logger.debug('notify_expand_done %s', wc._token)
-        self.cvar.acquire()
         self.workers_finished.put(wc)
-        self.cvar.notify_all()
-        self.cvar.release()
     def thousands_len(self):
         return len(self.thousands)
 
 class ExpanderClass(Autoself):
-    data = []
 
-    def join_threads(self):
-        if hasattr(self, 'threads'):
-            for th in self.threads:
-                logger.debug('join %s', th)
-                th.join()
     def register_manager(self, mc):
         self.mc = mc
-    def get_mc(self):
-        return self.mc
     def register_collectors(self, collectors):
         self.collectors = collectors
         self.dicts = map(dict, [[]] * len(collectors))
@@ -625,15 +608,8 @@ class ExpanderClass(Autoself):
 class CollectorClass(Autoself):
     result = {}
 
-    def join_threads(self):
-        if hasattr(self, 'threads'):
-            for th in self.threads:
-                logger.debug('join %s', th)
-                th.join()
     def register_manager(self, mc):
         self.mc = mc
-    def get_mc(self):
-        return self.mc
 
     @async_method
     def combine_data(self, SRd):
