@@ -467,6 +467,48 @@ def async_method(method):
             self.threads = [th]
     return inner
 
+# The @async_result decorator is used like @async_method, except that
+# a proxy object is generated as the immediately returned result.  The
+# actual result is obtained by calling the `get` method on the proxy.
+
+class AsyncResult:
+    def __init__(self, outerself, method, *args):
+        self._cond = threading.Condition()
+        self._ready = False
+
+        def target(outerself, method, *args):
+            self._result = method(outerself, *args)
+            self._cond.acquire()
+            self._ready = True
+            self._cond.notify_all()
+            self._cond.release()
+
+        th = threading.Thread(target = target, args=(outerself,method) + args)
+        th.start()
+        if hasattr(outerself, 'threads'):
+            outerself.threads.append(th)
+        else:
+            outerself.threads = [th]
+
+    def get(self):
+        self._cond.acquire()
+        if not self._ready:
+            self._cond.wait()
+        self._cond.release()
+        return self._result
+
+def async_result(method):
+    def inner(self, *args):
+        classname = 'AsyncResult'
+        server = getattr(multiprocessing.current_process(), '_manager_server', None)
+        (ident, exposed) = server.create(None, classname, *((self, method) + args))
+        token = multiprocessing.managers.Token(typeid=classname, address=server.address, id=ident)
+        proxy = multiprocessing.managers.AutoProxy(token, 'pickle', authkey=server.authkey)
+        server.decref(None, ident)
+        return proxy
+
+    return inner
+
 # Standard Python proxy objects from the multiprocessing library can't
 # be used as keys in dictionaries because multiple proxies can point
 # to the same object.  This code adjusts the hashing and equality
@@ -624,8 +666,10 @@ class CollectorClass(Autoself):
         self.deqns = {v : [2 * eqn * diff(eqn, v) for eqn in self.eqns] for v in coeff_vars}
     def get_eqns(self):
         return self.eqns
+    @async_result
     def sum_of_squares(self, d):
         return sum([square(eqn.subs(d)) for eqn in self.eqns])
+    @async_result
     def D_sum_of_squares(self, d, v):
         return sum([deqn.subs(d) for deqn in self.deqns[v]])
 
@@ -668,6 +712,7 @@ from multiprocessing.managers import BaseManager
 BaseManager.register('ManagerClass', ManagerClass)
 BaseManager.register('ExpanderClass', ExpanderClass)
 BaseManager.register('CollectorClass', CollectorClass)
+BaseManager.register('AsyncResult', AsyncResult)
 
 def start_manager_process():
     global manager, mc
@@ -827,18 +872,19 @@ if use_multiprocessing:
 
     def minfunc(v):
         d = dict(zip(coeff_vars, v))
-        sum_of_squares = sum([cc.sum_of_squares(d) for cc in ccs])
+        sum_of_squares = sum(map(lambda x: x.get(), [cc.sum_of_squares(d) for cc in ccs]))
         res = real_type(sum_of_squares / zero_variety.subs(d))
         print res
         return res
 
     def jac(v):
         d = dict(zip(coeff_vars, v))
-        sum_of_squares = sum([cc.sum_of_squares(d) for cc in ccs])
+        sum_of_squares = sum(map(lambda x: x.get(), [cc.sum_of_squares(d) for cc in ccs]))
+        D_sum_of_squares = {var : sum(map(lambda x: x.get(), [cc.D_sum_of_squares(d,var) for cc in ccs])) for var in coeff_vars}
         zero_var = zero_variety.subs(d)
         dvar = {var : 0 for var in coeff_vars}
         dvar.update({var : d[var] for var in Avars})
-        A = [real_type((sum([cc.D_sum_of_squares(d,var) for cc in ccs])*zero_var - (2*dvar[var]*sum_of_squares))/zero_var^2) for var in coeff_vars]
+        A = [real_type((D_sum_of_squares[var]*zero_var - 2*dvar[var]*sum_of_squares)/zero_var^2) for var in coeff_vars]
         res = np.array(A)
         return res
 
