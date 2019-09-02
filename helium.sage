@@ -375,12 +375,20 @@ num_collectors = 2
 # number of simultaneous expander processes
 num_expanders = 2
 
-def multi_init():
+import timeit
+
+def extract_ops():
     global ops
-    prep_hydrogen()
-    create_bwb4()
-    SR_expand2a()
     ops = bwb4a.operands()
+
+def multi_init():
+    prep_hydrogen()
+    t = timeit.timeit(lambda: create_bwb4(), number=1)
+    print 'create_bwb4() : %s sec'%(t)
+    t = timeit.timeit(lambda: SR_expand2a(), number=1)
+    print 'SR_expand2a() : %s sec'%(t)
+    t = timeit.timeit(lambda: extract_ops(), number=1)
+    print 'extract_ops() : %s sec'%(t)
     start_manager_process()
     mc.set_range(len(ops), blocksize)
 
