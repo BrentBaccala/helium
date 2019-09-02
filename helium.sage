@@ -784,6 +784,48 @@ def bwb_isnan(x):
 np.isnan = bwb_isnan
 
 
+# What type should we use for our numerical approximation?
+
+real_type = np.float64
+#real_type = RR
+#real_type = RealField(100)
+
+# The function we're trying to minimize: the sum of squares of the polys
+# that define the solution variety, divided by two factors we're trying
+# to avoid: the norm of 'v' (avoid the origin), and zero_variety (which
+# includes the origin).
+
+use_multiprocessing = True
+
+if use_multiprocessing:
+
+    def minfunc(v):
+        d = dict(zip(coeff_vars, v))
+        res = real_type(real_type(wc.sum_of_squares(d)) / zero_variety.subs(d))
+        print res
+        return res
+
+    def jac(v):
+        d = dict(zip(coeff_vars, v))
+        sum_of_squares = real_type(wc.sum_of_squares(d))
+        zero_var = zero_variety.subs(d)
+        dvar = {var : 0 for var in coeff_vars}
+        dvar.update({var : d[var] for var in Avars})
+        A = [real_type((real_type(wc.first_derivative(d,var))*zero_var - (2*dvar[var]*sum_of_squares))/zero_var^2) for var in coeff_vars]
+        res = np.array(A)
+        return res
+
+else:
+
+    def minfunc(v):
+        res = real_type(minpoly.subs(dict(zip(coeff_vars, v))) / zero_variety.subs(dict(zip(coeff_vars, v))))
+        print res
+        return res
+
+    def jac(v):
+        res = np.array([real_type(d.subs(dict(zip(coeff_vars, v)))) for d in minpoly_derivatives])
+        return res
+
 import random
 
 def random_numerical(seed=0):
@@ -792,7 +834,6 @@ def random_numerical(seed=0):
 
     # eqns.append(E+1/4)
     # eqns.append(BWB.gen(1) - 1)
-    minpoly = sum([poly*poly for poly in eqns])
 
     nvars = len(coeff_vars)
 
@@ -808,41 +849,12 @@ def random_numerical(seed=0):
     # We know the zero variety (all Avar's zero, so Psi is zero) will be
     # a "solution", but we want to avoid it
 
+    global zero_variety, minpoly, minpoly_derivatives
     zero_variety = sum(map(square, Avars))
-
-    # The function we're trying to minimize: the sum of squares of the polys
-    # that define the solution variety, divided by two factors we're trying
-    # to avoid: the norm of 'v' (avoid the origin), and zero_variety (which
-    # includes the origin).
-
-    real_type = np.float64
-    #real_type = RR
-    #real_type = RealField(100)
-
-    global minfunc
-    def minfunc(v):
-        #res = real_type(minpoly.subs(dict(zip(coeff_vars, v))) / zero_variety.subs(dict(zip(coeff_vars, v))))
-        d = dict(zip(coeff_vars, v))
-        res = real_type(real_type(wc.sum_of_squares(d)) / zero_variety.subs(d))
-        print res
-        return res
-
-    minpoly_derivatives = [diff(minpoly / zero_variety, v) for v in coeff_vars]
-    global jac
-    def jac(v):
-        #res = np.array([real_type(d.subs(dict(zip(coeff_vars, v)))) for d in minpoly_derivatives])
-        #print res
-        #return res
-        d = dict(zip(coeff_vars, v))
-        sum_of_squares = real_type(wc.sum_of_squares(d))
-        zero_var = zero_variety.subs(d)
-        dvar = {var : 0 for var in coeff_vars}
-        dvar.update({var : d[var] for var in Avars})
-        A = [real_type((real_type(wc.first_derivative(d,var))*zero_var - (2*dvar[var]*sum_of_squares))/zero_var^2) for var in coeff_vars]
-        res = np.array(A)
-        #print res
-        return res
-
+    if not use_multiprocessing:
+        global minpoly, minpoly_derivatives
+        minpoly = sum([poly*poly for poly in eqns])
+        minpoly_derivatives = [diff(minpoly / zero_variety, v) for v in coeff_vars]
 
     global SciMin
     SciMin = scipy.optimize.minimize(minfunc, iv, jac=jac, method='BFGS', options={'return_all':True})
