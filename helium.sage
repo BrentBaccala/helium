@@ -372,6 +372,9 @@ blocksize = 100
 # number of collector processes
 num_collectors = 2
 
+# number of simultaneous expander processes
+num_expanders = 2
+
 def multi_init():
     global ops
     prep_hydrogen()
@@ -400,6 +403,21 @@ def start_worker():
     mc.register_worker(wc)
     managers[wc] = worker_manager
 
+def reap_worker():
+    mc.wait_for_finish()
+    wc = mc.get_finished_worker()
+    if not wc:
+        print "No worker finished?"
+        return
+    wc.join_threads()
+    # Tricky, tricky... we want to destroy wc, then its manager,
+    # in that order.  "del managers[wc]" destroys in the wrong
+    # order (since wc is still alive after the `del`)
+    worker_manager = managers[wc]
+    del managers[wc]
+    del wc
+    del worker_manager
+
 def multi_expand():
 
     for i in range(num_collectors):
@@ -410,19 +428,18 @@ def multi_expand():
         managers[cc] = collector_manager
         ccs.append(cc)
 
-    start_worker()
+    for i in range(num_expanders):
+        start_worker()
 
     while True:
-        mc.wait_for_finish()
-        while True:
-            wc = mc.get_finished_worker()
-            if not wc: break
-            wc.join_threads()
-            del managers[wc]
+        reap_worker()
         if mc.thousands_len() > 0:
             start_worker()
         else:
             break
+
+    for i in range(num_expanders-1):
+        reap_worker()
 
     for cc in ccs:
         cc.join_threads()
@@ -549,7 +566,8 @@ class ManagerClass(Autoself):
     cvar = multiprocessing.Condition()
     def wait_for_finish(self):
         self.cvar.acquire()
-        self.cvar.wait()
+        if self.workers_finished.empty():
+            self.cvar.wait()
         self.cvar.release()
     def get_finished_worker(self):
         if self.workers_finished.empty():
@@ -559,8 +577,8 @@ class ManagerClass(Autoself):
     @async_method
     def notify_expand_done(self, wc):
         logger.debug('notify_expand_done %s', wc._token)
-        self.workers_finished.put(wc)
         self.cvar.acquire()
+        self.workers_finished.put(wc)
         self.cvar.notify_all()
         self.cvar.release()
     def thousands_len(self):
