@@ -369,6 +369,9 @@ def SRdict_expander4():
 # number of operands to process in each expander worker
 blocksize = 100
 
+# number of collector processes
+num_collectors = 1
+
 def multi_init():
     global ops
     prep_hydrogen()
@@ -380,9 +383,10 @@ def multi_init():
 
 def multi_expand():
     global wc
+    mc.start_collectors()
     mc.start_worker()
     mc.wait_for_finish()
-    wc = mc.getq()[0]
+    wc = mc.get_workers()[0]
     wc.convert_to_eqns()
 
 import queue
@@ -465,6 +469,8 @@ class ManagerClass(Autoself):
     thousands = []
     # a dictionary mapping workers to their process managers
     workers = {}
+    # a list of collectors
+    collectors = []
     # a queue of workers that have completed their work and
     # are waiting to transfer the result somewhere
     localq = queue.Queue()
@@ -482,11 +488,23 @@ class ManagerClass(Autoself):
 
     def set_range(self, limit, blocksize):
         self.thousands.extend(range(0, limit, blocksize))
+    def start_collectors(self):
+        for i in range(num_collectors):
+            worker_manager = BaseManager()
+            worker_manager.start()
+            cc = worker_manager.CollectorClass()
+            cc.register_manager(self.autoself())
+
+            logger.debug('start collector %s', cc._token)
+            self.workers[cc] = worker_manager
+            self.collectors.append(cc)
+
     def start_worker(self):
         worker_manager = BaseManager()
         worker_manager.start()
         wc = worker_manager.WorkerClass()
         wc.register_manager(self.autoself())
+        wc.register_collectors(self.collectors)
 
         # Destroying worker_manager would terminate the worker process
         # when this method finishes, so we save a copy in a dictionary
@@ -496,16 +514,7 @@ class ManagerClass(Autoself):
         logger.debug('start_worker %s', wc._token)
         self.workers[wc] = worker_manager
 
-        if self.localq.qsize() > 1:
-            logger.debug('combine')
-            self.worker_data_count[wc] = 2
-            wc1 = self.localq.get()
-            wc2 = self.localq.get()
-            logger.debug('wc1 %s', wc1._token)
-            logger.debug('wc2 %s', wc2._token)
-            wc.get_data_from_worker(wc1)
-            wc.get_data_from_worker(wc2)
-        elif len(self.thousands) > 0:
+        if len(self.thousands) > 0:
             thousand = self.thousands.pop()
             logger.debug('%s expand (%d,%d)', self, thousand, thousand+blocksize)
             wc.start_expand(thousand, thousand+blocksize)
@@ -528,29 +537,18 @@ class ManagerClass(Autoself):
         self.cvar.acquire()
         self.cvar.wait()
         self.cvar.release()
-    def notify_result_ready(self, wc):
-        logger.debug('notify_result_ready %s', wc._token)
-        self.localq.put(wc)
-        if self.localq.qsize() > 1 or len(self.thousands) > 0:
+        for cc in self.collectors:
+            cc.join_threads()
+    @async_method
+    def notify_expand_done(self, wc):
+        logger.debug('notify_expand_done %s', wc._token)
+        self.shutdown_worker(wc)
+        if len(self.thousands) > 0:
             self.start_worker()
         else:
             self.cvar.acquire()
             self.cvar.notify_all()
             self.cvar.release()
-    def notify_data_received(self, wc):
-        # thread safe because RPC messages are processed on a single thread
-        logger.debug('notify_data_received %s', wc._token)
-        self.worker_data_count[wc] = self.worker_data_count[wc] - 1
-        if (self.worker_data_count[wc] == 0):
-            # We do need to delete this dictionary item, otherwise the
-            # reference associated with the key will later prevent the
-            # worker process from terminating.
-            del self.worker_data_count[wc]
-            wc.start_combine()
-    def qsize(self):
-        return self.localq.qsize()
-    def getq(self):
-        return self.localq.queue
     def thousands_len(self):
         return len(self.thousands)
 
@@ -574,33 +572,59 @@ class WorkerClass(Autoself):
         self.mc = mc
     def get_mc(self):
         return self.mc
+    def register_collectors(self, collectors):
+        self.collectors = collectors
+        self.dicts = map(dict, [[]] * len(collectors))
     @async_method
     def start_expand(self, start, stop):
-        self.data.append(SRdict_expander2a(expand(sum(islice(ops, start, stop)))))
-        self.mc.notify_result_ready(self.autoself())
+        expr = expand(sum(islice(ops, start, stop)))
+        for monomial in expr.operands():
+            s = str(monomial)
+            if s[0] is '-':
+                sign='-'
+                s=s[1:]
+            else:
+                sign='+'
+            vs = s.split('*')
+            key = '*'.join(ifilter(lambda x: any([x.startswith(c) for c in ('x', 'y', 'z', 'r', 'P')]), vs))
+            value = '*'.join(ifilterfalse(lambda x: any([x.startswith(c) for c in ('x', 'y', 'z', 'r', 'P')]), vs))
+            dictnum = hash(key) % len(self.collectors)
+            self.dicts[dictnum][key] = self.dicts[dictnum].get(key, '') + sign + value
+        for i in range(len(self.collectors)):
+            self.collectors[i].combine_data(self.dicts[i])
+        self.mc.notify_expand_done(self.autoself())
+
+class CollectorClass(Autoself):
+    result = {}
+
+    # convenience functions for development
+    def getpid(self):
+        return os.getpid()
+    def load(self, filename):
+        load(filename)
+    def rconsole(self, port=54321):
+        rconsole.spawn_server(port=port)
+
+    def join_threads(self):
+        if hasattr(self, 'threads'):
+            for th in self.threads:
+                logger.debug('join %s', th)
+                th.join()
+    def register_manager(self, mc):
+        self.mc = mc
+    def get_mc(self):
+        return self.mc
+
     @async_method
-    def get_data_from_worker(self, wc):
-        logger.debug('get_data_from_worker %s', wc._token)
-        self.data.extend(wc.get_data())
-        self.mc.shutdown_worker(wc)
-        self.mc.notify_data_received(self.autoself())
-    def get_data(self):
-        return self.data
-    @async_method
-    def start_combine(self):
-        logger.debug('start_combine')
-        result = {}
-        for SRd in self.data:
-            for key,value in SRd.items():
-                result[key] = result.get(key, '') + value
-        self.data = [result]
-        self.mc.notify_result_ready(self.autoself())
+    def combine_data(self, SRd):
+        for key,value in SRd.items():
+            self.result[key] = self.result.get(key, '') + value
 
     # we want to evaluate the sum of squares of polynomials p,
     # as well as the first derivatives of the sum of squares,
     # which is the sum of (2 p dp/dv)
     def convert_to_eqns(self):
-        self.eqns = list(set([eval(preparse(value)) for value in self.data[0].values()]))
+        self.eqns = list(set([eval(preparse(value)) for value in self.result.values()]))
         self.deqns = {v : [2 * eqn * diff(eqn, v) for eqn in self.eqns] for v in coeff_vars}
     def get_eqns(self):
         return self.eqns
@@ -642,6 +666,7 @@ def bind(instance, func, as_name=None):
 from multiprocessing.managers import BaseManager
 BaseManager.register('ManagerClass', ManagerClass)
 BaseManager.register('WorkerClass', WorkerClass)
+BaseManager.register('CollectorClass', CollectorClass)
 
 def start_manager_process():
     global manager, mc
