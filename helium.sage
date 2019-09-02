@@ -381,12 +381,49 @@ def multi_init():
     start_manager_process()
     mc.set_range(len(ops), blocksize)
 
+# I've found that starting workers as sub-sub-processes from the
+# manager subprocess is error prone because you get copies of the
+# manager class in the worker process, and this causes problems with
+# reference tracking and the like.  It's better to start all of the
+# processes "clean" from the master process, so we handshake between
+# the master process and the manager to feed new workers to the
+# manager as the old ones terminate (to avoid their memory consumption
+# growing without bound).
+
+managers = {}
+ccs = []
+
+def start_worker():
+    worker_manager = BaseManager()
+    worker_manager.start()
+    wc = worker_manager.WorkerClass()
+    mc.register_worker(wc)
+    managers[wc] = worker_manager
+
 def multi_expand():
-    global ccs
-    mc.start_collectors()
-    mc.start_worker()
-    mc.wait_for_finish()
-    ccs = mc.get_workers()
+
+    for i in range(num_collectors):
+        collector_manager = BaseManager()
+        collector_manager.start()
+        cc = collector_manager.CollectorClass()
+        mc.register_collector(cc)
+        managers[cc] = collector_manager
+        ccs.append(cc)
+
+    start_worker()
+
+    while True:
+        mc.wait_for_finish()
+        while True:
+            wc = mc.get_finished_worker()
+            if not wc: break
+            wc.join_threads()
+            del managers[wc]
+        if mc.thousands_len() > 0:
+            start_worker()
+        else:
+            break
+
     for cc in ccs:
         cc.convert_to_eqns()
 
@@ -451,6 +488,8 @@ BaseProxy.__eq__ = BaseProxy_eq
 # https://stackoverflow.com/a/55303121/1493790 suggests that this
 # might not be needed in newer versions of Python.
 
+from rfoo.utils import rconsole
+
 class Autoself:
     def autoself(self):
         server = getattr(multiprocessing.current_process(), '_manager_server', None)
@@ -463,22 +502,6 @@ class Autoself:
                     return proxy
         return None
 
-from rfoo.utils import rconsole
-
-class ManagerClass(Autoself):
-    # a list of indices waiting to be expanded
-    thousands = []
-    # a dictionary mapping workers to their process managers
-    workers = {}
-    # a list of collectors
-    collectors = []
-    # a queue of workers that have completed their work and
-    # are waiting to transfer the result somewhere
-    localq = queue.Queue()
-    # a dictionary mapping workers to the number of data transfers
-    # remaining until this worker is ready to start a 'combine'
-    worker_data_count = {}
-
     # convenience functions for development
     def getpid(self):
         return os.getpid()
@@ -487,33 +510,33 @@ class ManagerClass(Autoself):
     def rconsole(self, port=54321):
         rconsole.spawn_server(port=port)
 
+class ManagerClass(Autoself):
+    # a list of indices waiting to be expanded
+    thousands = []
+    #
+    workers_finished = queue.Queue()
+    # a list of collectors
+    collectors = []
+    # a dictionary mapping workers to the number of data transfers
+    # remaining until this worker is ready to start a 'combine'
+    worker_data_count = {}
+
+    def __del__(self):
+        for i in range(len(self.collectors)):
+            del self.collectors[-1]
+
     def set_range(self, limit, blocksize):
-        self.thousands.extend(range(0, limit, blocksize))
-    def start_collectors(self):
-        for i in range(num_collectors):
-            worker_manager = BaseManager()
-            worker_manager.start()
-            cc = worker_manager.CollectorClass()
-            cc.register_manager(self.autoself())
+        self.thousands.extend(reversed(range(0, limit, blocksize)))
+    def register_collector(self, cc):
+        cc.register_manager(self.autoself())
 
-            logger.debug('start collector %s', cc._token)
-            self.workers[cc] = worker_manager
-            self.collectors.append(cc)
-
-    def start_worker(self):
-        worker_manager = BaseManager()
-        worker_manager.start()
-        wc = worker_manager.WorkerClass()
+        logger.debug('register collector %s', cc._token)
+        self.collectors.append(cc)
+    def register_worker(self, wc):
         wc.register_manager(self.autoself())
         wc.register_collectors(self.collectors)
 
-        # Destroying worker_manager would terminate the worker process
-        # when this method finishes, so we save a copy in a dictionary
-        # and only delete the dictionary entry when we're ready to
-        # terminate the worker process.
-
-        logger.debug('start_worker %s', wc._token)
-        self.workers[wc] = worker_manager
+        logger.debug('register_worker %s', wc._token)
 
         if len(self.thousands) > 0:
             thousand = self.thousands.pop()
@@ -521,17 +544,6 @@ class ManagerClass(Autoself):
             wc.start_expand(thousand, thousand+blocksize)
         else:
             self.shutdown_worker(wc)
-    def shutdown_worker(self, wc):
-        logger.debug('shutdown_worker %s', wc._token)
-        wc.join_threads()
-        # Destroying the manager in this dictionary entry terminates
-        # the worker process.
-        del self.workers[wc]
-    def get_workers(self):
-        return self.workers.keys()
-    def shutdown_all_workers(self):
-        for wc in self.workers.keys():
-            del self.workers[wc]
 
     cvar = multiprocessing.Condition()
     def wait_for_finish(self):
@@ -540,29 +552,23 @@ class ManagerClass(Autoself):
         self.cvar.release()
         for cc in self.collectors:
             cc.join_threads()
+    def get_finished_worker(self):
+        if self.workers_finished.empty():
+            return None
+        else:
+            return self.workers_finished.get()
     @async_method
     def notify_expand_done(self, wc):
         logger.debug('notify_expand_done %s', wc._token)
-        self.shutdown_worker(wc)
-        if len(self.thousands) > 0:
-            self.start_worker()
-        else:
-            self.cvar.acquire()
-            self.cvar.notify_all()
-            self.cvar.release()
+        self.workers_finished.put(wc)
+        self.cvar.acquire()
+        self.cvar.notify_all()
+        self.cvar.release()
     def thousands_len(self):
         return len(self.thousands)
 
 class WorkerClass(Autoself):
     data = []
-
-    # convenience functions for development
-    def getpid(self):
-        return os.getpid()
-    def load(self, filename):
-        load(filename)
-    def rconsole(self, port=54321):
-        rconsole.spawn_server(port=port)
 
     def join_threads(self):
         if hasattr(self, 'threads'):
@@ -576,6 +582,10 @@ class WorkerClass(Autoself):
     def register_collectors(self, collectors):
         self.collectors = collectors
         self.dicts = map(dict, [[]] * len(collectors))
+    @async_method
+    def shutdown(self):
+        for i in range(len(self.collectors)):
+            del self.collectors[-1]
     @async_method
     def start_expand(self, start, stop):
         expr = expand(sum(islice(ops, start, stop)))
@@ -597,14 +607,6 @@ class WorkerClass(Autoself):
 
 class CollectorClass(Autoself):
     result = {}
-
-    # convenience functions for development
-    def getpid(self):
-        return os.getpid()
-    def load(self, filename):
-        load(filename)
-    def rconsole(self, port=54321):
-        rconsole.spawn_server(port=port)
 
     def join_threads(self):
         if hasattr(self, 'threads'):
