@@ -458,6 +458,8 @@ def multi_expand():
     for cc in ccs:
         cc.join_threads()
         cc.convert_to_eqns()
+    for cc in ccs:
+        cc.join_threads()
 
 import multiprocessing, logging
 logger = multiprocessing.get_logger()
@@ -696,14 +698,27 @@ class CollectorClass(Autoself):
         for key,value in SRd.items():
             self.result[key] = self.result.get(key, '') + value
 
+    def len_result(self):
+        return len(self.result)
+    def len_values(self):
+        return sum([len(v) for v in a.result.values()])
+    def len_keys(self):
+        return sum([len(v) for v in a.result.keys()])
+    def nterms(self):
+        return sum([v.count('+')+v.count('-') for v in self.result.values()])
+
     # we want to evaluate the sum of squares of polynomials p,
     # as well as the first derivatives of the sum of squares,
     # which is the sum of (2 p dp/dv)
+    @async_method
     def convert_to_eqns(self):
-        self.eqns = list(set([eval(preparse(value)) for value in self.result.values()]))
+        self.eqns = set()
+        for value in self.result.values():
+            self.eqns.add(eval(preparse(value)))
         self.deqns = {v : [2 * eqn * diff(eqn, v) for eqn in self.eqns] for v in coeff_vars}
     def get_eqns(self):
         return self.eqns
+
     @async_result
     def sum_of_squares(self, d):
         return sum([square(eqn.subs(d)) for eqn in self.eqns])
