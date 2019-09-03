@@ -415,6 +415,7 @@ def start_collector():
     cc = collector_manager.CollectorClass()
     mc.register_collector(cc)
     managers[cc._token] = collector_manager
+    return cc
 
 def start_worker():
     worker_manager = BaseManager()
@@ -460,6 +461,14 @@ def multi_expand():
         cc.convert_to_eqns()
     for cc in ccs:
         cc.join_threads()
+
+import glob
+
+def multi_load(wildcard):
+    for fn in glob.glob(wildcard):
+        start_collector().load(fn)
+    global ccs
+    ccs = mc.get_collectors()
 
 import multiprocessing, logging
 logger = multiprocessing.get_logger()
@@ -687,6 +696,8 @@ class ExpanderClass(Autoself):
             self.collectors[i].combine_data(self.dicts[i])
         self.mc.notify_expand_done(self.autoself())
 
+import json
+
 class CollectorClass(Autoself):
     result = {}
 
@@ -697,6 +708,18 @@ class CollectorClass(Autoself):
     def combine_data(self, SRd):
         for key,value in SRd.items():
             self.result[key] = self.result.get(key, '') + value
+
+    def dump(self):
+        fn = '/tmp/' + str(os.getpid()) + '.json'
+        fp = open(fn, 'w')
+        json.dump(self.result, fp)
+        fp.close()
+        logger.info('result dumped to %s', fn)
+    def load(self, fn):
+        fp = open(fn)
+        self.result = json.load(fp)
+        fp.close()
+        logger.info('result loaded from %s', fn)
 
     def len_result(self):
         return len(self.result)
@@ -730,18 +753,29 @@ class CollectorClass(Autoself):
 def square(x):
     return x*x
 
+# These functions are here to make it easier to work with long running
+# worker processes without restarting them.  `get_objs` returns a
+# dictionary containing all of the objects being managed by the
+# multiprocessing server, and since we only create a single *Class
+# object in each process, `get_obj` returns that object.  Thus,
+# you can use the worker's `load` method to load a snippet of
+# code that access the worker's *Class object via `get_obj`.
+#
 # These functions are here to make it easier to update the code of
 # worker processes without restarting them.  You 'load' the new code
 # into the worker, then 'rconsole' to the worker and bind the new
 # class functions to the existing instance.  `get_objs` returns a
 # dictionary containing all of the objects being managed by the
-# multiprocessing server, and since we only create a single object
-# in each process, `get_obj` returns that object.
+# multiprocessing server, and since we only create a single *Class
+# object in each process, `get_obj` returns that object.
+#
+# The bind function isn't working; I cribbed it from stackexchange
 
 def get_objs():
     return multiprocessing.current_process()._manager_server.id_to_obj
-def get_obj():
-    return get_objs().values()[1][0]
+def get_obj(cls=Autoself):
+    return (v[0] for v in get_objs().values() if isinstance(v[0], cls)).next()
+
 def bind(instance, func, as_name=None):
     """
     Bind the function *func* to *instance*, with either provided name *as_name*
