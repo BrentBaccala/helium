@@ -793,11 +793,11 @@ class CollectorClass(Autoself):
     # then all the biproducts of the vector elements, then all the
     # triproducts of the vector elements.
     #
-    # generate_vector([a,b,c])
+    # generate_multi_vector([a,b,c])
     #   -> [a,b,c,a^2,a*b,a*c,b^2,b*c,c^2,a^3,a^2*b,a^2*c,a*b^2,a*b*c,a*c^2,a*b^2,b^2*c,b*c^2,c^3]
 
     @staticmethod
-    def generate_vector(v):
+    def generate_multi_vector(v):
         two_products = [map(mul, izip(v[i:], repeat(e))) for i,e in enumerate(v)]
         three_products = [map(mul, izip(flatten(two_products[i:]), repeat(e))) for i,e in enumerate(v)]
         return np.array(list(flatten([v, flatten(two_products), flatten(three_products)])))
@@ -821,7 +821,7 @@ class CollectorClass(Autoself):
     @async_method
     def convert_to_matrix(self):
         self.i = 0
-        self.indices = {str(pair[1]) : pair[0] for pair in enumerate(self.generate_vector(coeff_vars))}
+        self.indices = {str(pair[1]) : pair[0] for pair in enumerate(self.generate_multi_vector(coeff_vars))}
         veclen = len(self.indices)
         self.dok = scipy.sparse.dok_matrix((len(self.result), veclen), np.int64)
         for value in self.result.values():
@@ -854,12 +854,12 @@ class CollectorClass(Autoself):
 
     # no longer works because I can't figure how to multiply numpy matrices with Sage Expressions in them
     def verify_matrix(self, vars):
-        vec = self.generate_vector(vars)
+        vec = self.generate_multi_vector(vars)
         set1 = set([eval(preparse(result)) for result in self.result])
         set2 = set(list(self.M.dot(vec)))
         return set1 == set2
 
-    def generate_D_vector(self, v, var):
+    def generate_multi_D_vector(self, v, var):
         ind = coeff_vars.index(var)
         firsts = [int(0)] * len(coeff_vars)
         firsts[ind] = int(1)
@@ -872,22 +872,22 @@ class CollectorClass(Autoself):
         return np.array(list(flatten([firsts, flatten(two_products_D), flatten(three_products)])))
 
     def verify_D_vector(self):
-        all([all([bool(diff(e,v)==d) for e,d in zip(generate_vector(coeff_vars), generate_D_vector(coeff_vars, v))]) for v in coeff_vars])
+        all([all([bool(diff(e,v)==d) for e,d in zip(generate_multi_vector(coeff_vars), generate_multi_D_vector(coeff_vars, v))]) for v in coeff_vars])
 
     @async_result
-    def sum_of_squares(self, d):
-        vec = self.generate_vector([d[v] for v in coeff_vars])
-        return sum(square(self.M.dot(vec)))
+    def sum_of_squares(self, vec):
+        multivec = self.generate_multi_vector(vec)
+        return sum(square(self.M.dot(multivec)))
     @async_result
-    def D_sum_of_squares(self, d, v):
+    def D_sum_of_squares(self, vec, var):
         # d(p^a s^b t^c)/ds = b(p^a s^(b-1) t^c),
         # so (p^a s^b t^c) should map to b(p^a s^(b-1) t^c)
         # dp/ds = 0         ds/ds = 1
         # d(s^2)/ds = 2s    d(ps)/ds = p     d(pt)/ds = 0
         # d(s^3)/ds = 3s^2  d(ps^2)/ds = 2ps   d(pst) = pt
-        vec = self.generate_vector([d[v1] for v1 in coeff_vars])
-        Dvec = self.generate_D_vector([d[v1] for v1 in coeff_vars], v)
-        return sum(2 * self.M.dot(vec) * self.M.dot(Dvec))
+        multivec = self.generate_multi_vector(vec)
+        multiDvec = self.generate_multi_D_vector(vec, var)
+        return sum(2 * self.M.dot(multivec) * self.M.dot(multiDvec))
 
 
 def square(x):
@@ -1102,15 +1102,15 @@ if use_multiprocessing:
 
     def minfunc(v):
         d = dict(zip(coeff_vars, v))
-        sum_of_squares = sum(map(lambda x: x.get(), [cc.sum_of_squares(d) for cc in ccs]))
+        sum_of_squares = sum(map(lambda x: x.get(), [cc.sum_of_squares(v) for cc in ccs]))
         res = real_type(sum_of_squares / zero_variety.subs(d))
         print res
         return res
 
     def jac(v):
         d = dict(zip(coeff_vars, v))
-        sum_of_squares = sum(map(lambda x: x.get(), [cc.sum_of_squares(d) for cc in ccs]))
-        D_sum_of_squares = {var : sum(map(lambda x: x.get(), [cc.D_sum_of_squares(d,var) for cc in ccs])) for var in coeff_vars}
+        sum_of_squares = sum(map(lambda x: x.get(), [cc.sum_of_squares(v) for cc in ccs]))
+        D_sum_of_squares = {var : sum(map(lambda x: x.get(), [cc.D_sum_of_squares(v,var) for cc in ccs])) for var in coeff_vars}
         zero_var = zero_variety.subs(d)
         dvar = {var : 0 for var in coeff_vars}
         dvar.update({var : d[var] for var in Avars})
