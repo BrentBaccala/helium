@@ -545,6 +545,12 @@ def async_result(method):
 # object test equal and can then be used as dictionary keys.
 #
 # Probably needs to be reported as a bug in the multiprocessing library.
+#
+# TODO list for Python multiprocessing library:
+#   - handle CNTL-C without killing subprocesses
+#   - hashing proxies and tokens
+#   - autoself() and more general auto-objects
+#   - async return objects
 
 def BaseProxy_hash(self):
     return hash((self._token.address, self._token.id))
@@ -700,6 +706,8 @@ import json
 
 import re
 
+import numpy as np
+
 class CollectorClass(Autoself):
     result = {}
 
@@ -754,13 +762,20 @@ class CollectorClass(Autoself):
     # These versions of the evaluation routines create a pairlist
     # instead of using Sage symbolic expressions
 
+    # Given a vector, generate a multi-vector of the vector itself,
+    # then all the biproducts of the vector elements, then all the
+    # triproducts of the vector elements.
+    #
+    # generate_vector([a,b,c])
+    #   -> [a,b,c,a^2,a*b,a*c,b^2,b*c,c^2,a^3,a^2*b,a^2*c,a*b^2,a*b*c,a*c^2,a*b^2,b^2*c,b*c^2,c^3]
+
     @staticmethod
     def generate_vector(v):
         two_products = [map(mul, izip(v[i:], repeat(e))) for i,e in enumerate(v)]
         three_products = [map(mul, izip(flatten(two_products[i:]), repeat(e))) for i,e in enumerate(v)]
-        return list(flatten([v, flatten(two_products), flatten(three_products)]))
+        return np.array(list(flatten([v, flatten(two_products), flatten(three_products)])))
 
-    def term_to_pair(self, term):
+    def term_to_vector(self, term):
         if term[0] == '-':
             sign = -1
             term = term[1:]
@@ -774,29 +789,31 @@ class CollectorClass(Autoself):
             coeff = '1'
         coeff = sign * int(coeff)
         index = self.indices[monomial]
-        return (coeff, index)
+        return coeff * self.monomial_vectors[monomial]
 
-    @staticmethod
-    def apply_pairlist_to_vector(pairlist, v):
-        return sum([coeff * v[index] for coeff,index in pairlist])
-
-    def convert_to_pairlist(self, vars):
+    def convert_to_matrix(self, vars):
         self.i = 0
-        self.pairs = set()
+        self.M = None
         self.vars = vars
         self.indices = {str(pair[1]) : pair[0] for pair in enumerate(self.generate_vector(vars))}
+        veclen = len(self.indices)
+        self.monomial_vectors = {str(pair[1]) : np.array([int(i==pair[0]) for i in range(veclen)]) for pair in enumerate(self.generate_vector(vars))}
         for value in self.result.values():
             self.i += 1
             terms = re.split('([+-][^+-]+)', value)
-            termdict = dict()
-            for term in ifilter(bool, terms):
-                coeff,index = self.term_to_pair(term)
-                termdict[index] = termdict.get(index, 0) + coeff
-            self.pairs.add(tuple(map(tuple,map(reversed, termdict.items()))))
+            newrow = np.array(sum([self.term_to_vector(term) for term in ifilter(bool, terms)]))
+            if self.M is not None:
+                self.M = np.vstack((self.M, newrow))
+            else:
+                self.M = newrow
+        self.M = np.unique(self.M, axis=0)
 
-    def verify_pairlist(self, vars):
+    # no longer works because I can't figure how to multiply numpy matrices with Sage Expressions in them
+    def verify_matrix(self, vars):
         vec = self.generate_vector(vars)
-        return all([bool(eval(preparse(self.result.values()[i])) == self.apply_pairlist_to_vector(self.pairs[i], vec)) for i in range(len(self.result))])
+        set1 = set([eval(preparse(result)) for result in self.result])
+        set2 = set(list(np.matmul(self.M, vec)))
+        return set1 == set2
 
     def generate_D_vector(self, v, var):
         ind = self.vars.index(var)
@@ -808,7 +825,7 @@ class CollectorClass(Autoself):
 
         three_products = [map(sum, zip(*(map(mul, izip(flatten(two_products[i:]), repeat(firsts[i]))), map(mul, izip(flatten(two_products_D[i:]), repeat(v[i])))))) for i in range(len(self.vars))]
 
-        return list(flatten([firsts, flatten(two_products_D), flatten(three_products)]))
+        return np.array(list(flatten([firsts, flatten(two_products_D), flatten(three_products)])))
 
     def verify_D_vector(self):
         all([all([bool(diff(e,v)==d) for e,d in zip(generate_vector(self.vars), generate_D_vector(self.vars, v))]) for v in self.vars])
@@ -816,7 +833,7 @@ class CollectorClass(Autoself):
     @async_result
     def sum_of_squares(self, d):
         vec = self.generate_vector([d[v] for v in self.vars])
-        return sum([square(self.apply_pairlist_to_vector(pairlist, vec)) for pairlist in self.pairs])
+        return sum(square(np.matmul(self.M, vec)))
     @async_result
     def D_sum_of_squares(self, d, v):
         # d(p^a s^b t^c)/ds = b(p^a s^(b-1) t^c),
@@ -826,7 +843,7 @@ class CollectorClass(Autoself):
         # d(s^3)/ds = 3s^2  d(ps^2)/ds = 2ps   d(pst) = pt
         vec = self.generate_vector([d[v1] for v1 in self.vars])
         Dvec = self.generate_D_vector([d[v1] for v1 in self.vars], v)
-        return sum([2 * self.apply_pairlist_to_vector(pairlist, vec) * self.apply_pairlist_to_vector(pairlist, Dvec) for pairlist in self.pairs])
+        return sum(2 * np.matmul(self.M, vec) * np.matmul(self.M, Dvec))
 
 
 def square(x):
