@@ -834,7 +834,11 @@ class CollectorClass(Autoself):
                     sign = 1
                     if term[0] == '+':
                         term = term[1:]
-                (coeff, monomial) = re.split('\*', term, 1)
+                try:
+                    (coeff, monomial) = re.split('\*', term, 1)
+                except ValueError:
+                    coeff = '1'
+                    monomial = term
                 if not re.match('^[0-9]*$', coeff):
                     monomial = coeff + '*' + monomial
                     coeff = '1'
