@@ -698,6 +698,8 @@ class ExpanderClass(Autoself):
 
 import json
 
+import re
+
 class CollectorClass(Autoself):
     result = {}
 
@@ -743,11 +745,110 @@ class CollectorClass(Autoself):
         return self.eqns
 
     @async_result
-    def sum_of_squares(self, d):
+    def sum_of_squares_SR(self, d):
         return sum([square(eqn.subs(d)) for eqn in self.eqns])
     @async_result
-    def D_sum_of_squares(self, d, v):
+    def D_sum_of_squares_SR(self, d, v):
         return sum([deqn.subs(d) for deqn in self.deqns[v]])
+
+    # These versions of the routines create a pairlist instead of
+    # using Sage
+
+    @staticmethod
+    def generate_vector(v):
+        two_products = [map(mul, izip(v[i:], repeat(e))) for i,e in enumerate(v)]
+        three_products = [map(mul, izip(flatten(two_products[i:]), repeat(e))) for i,e in enumerate(v)]
+        return list(flatten([v, flatten(two_products), flatten(three_products)]))
+
+    def term_to_pair(self, term):
+        if term[0] == '-':
+            sign = -1
+            term = term[1:]
+        else:
+            sign = 1
+            if term[0] == '+':
+                term = term[1:]
+        (coeff, monomial) = re.split('\*', term, 1)
+        if not re.match('^[0-9]*$', coeff):
+            monomial = coeff + '*' + monomial
+            coeff = '1'
+        coeff = sign * int(coeff)
+        index = self.indices[monomial]
+        return (coeff, index)
+
+    @staticmethod
+    def apply_pairlist_to_vector(pairlist, v):
+        return sum([coeff * v[index] for coeff,index in pairlist])
+
+    def convert_to_pairlist(self, vars):
+        self.i = 0
+        #self.pairs = []
+        self.pairs = set()
+        self.vars = vars
+        #indices = []
+        #indices.extend(map(mul, list(combinations_with_replacement(vars, 1))))
+        #indices.extend(map(mul, list(combinations_with_replacement(vars, 2))))
+        #indices.extend(map(mul, list(combinations_with_replacement(vars, 3))))
+        #self.indices = {str(pair[1]) : pair[0] for pair in enumerate(indices)}
+        self.indices = {str(pair[1]) : pair[0] for pair in enumerate(self.generate_vector(vars))}
+        for value in self.result.values():
+            self.i += 1
+            terms = re.split('([+-][^+-]+)', value)
+            #self.pairs.add(tuple(map(self.term_to_pair, ifilter(bool, terms))))
+            termdict = dict()
+            for term in ifilter(bool, terms):
+                coeff,index = self.term_to_pair(term)
+                termdict[index] = termdict.get(index, 0) + coeff
+            self.pairs.add(tuple(map(tuple,map(reversed, termdict.items()))))
+
+    def verify_pairlist(self, vars):
+        vec = self.generate_vector(vars)
+        return all([bool(eval(preparse(self.result.values()[i])) == self.apply_pairlist_to_vector(self.pairs[i], vec)) for i in range(len(self.result))])
+
+    def generate_D_vector(self, v, var):
+        ind = self.vars.index(var)
+        firsts = [int(0)] * len(self.vars)
+        firsts[ind] = int(1)
+        two_products = [map(mul, izip(v[i:], repeat(e))) for i,e in enumerate(firsts)]
+        #three_products = [map(mul, izip(flatten(two_products[i:]), repeat(e))) for i,e in enumerate(v)]
+        three_products = []
+        return list(flatten([firsts, flatten(two_products), flatten(three_products)]))
+
+    def generate_D_vector(self, v, var):
+        ind = self.vars.index(var)
+        firsts = [int(0)] * len(self.vars)
+        firsts[ind] = int(1)
+        #two_products_a = [map(mul, izip(v[i:], repeat(e))) for i,e in enumerate(firsts)]
+        #two_products_b = [map(mul, izip(firsts[i:], repeat(e))) for i,e in enumerate(v)]
+        #two_products = [map(add, izip(flatten(two_products_a), flatten(two_products_b)))]
+
+        #two_products = [map(add, map(mul, izip(v[i:], repeat(e))), map(mul, izip(firsts[i:], repeat(e)))) for i,e in enumerate(firsts)]
+        two_products = [map(mul, izip(v[i:], repeat(e))) for i,e in enumerate(v)]
+        two_products_D = [map(sum, zip(*(map(mul, izip(v[i:], repeat(firsts[i]))), map(mul, izip(firsts[i:], repeat(v[i])))))) for i in range(len(self.vars))]
+
+        #three_products = [map(mul, izip(flatten(two_products[i:]), repeat(e))) for i,e in enumerate(v)]
+
+        three_products = [map(sum, zip(*(map(mul, izip(flatten(two_products[i:]), repeat(firsts[i]))), map(mul, izip(flatten(two_products_D[i:]), repeat(v[i])))))) for i in range(len(self.vars))]
+        #three_products = []
+        return list(flatten([firsts, flatten(two_products_D), flatten(three_products)]))
+
+    def verify_D_vector(self):
+        all([all([bool(diff(e,v)==d) for e,d in zip(generate_vector(self.vars), generate_D_vector(self.vars, v))]) for v in self.vars])
+
+    @async_result
+    def sum_of_squares(self, d):
+        vec = self.generate_vector([d[v] for v in self.vars])
+        return sum([square(self.apply_pairlist_to_vector(pairlist, vec)) for pairlist in self.pairs])
+    @async_result
+    def D_sum_of_squares(self, d, v):
+        # d(p^a s^b t^c)/ds = b(p^a s^(b-1) t^c),
+        # so (p^a s^b t^c) should map to b(p^a s^(b-1) t^c)
+        # dp/ds = 0         ds/ds = 1
+        # d(s^2)/ds = 2s    d(ps)/ds = p     d(pt)/ds = 0
+        # d(s^3)/ds = 3s^2  d(ps^2)/ds = 2ps   d(pst) = pt
+        vec = self.generate_vector([d[v1] for v1 in self.vars])
+        Dvec = self.generate_D_vector([d[v1] for v1 in self.vars], v)
+        return sum([2 * self.apply_pairlist_to_vector(pairlist, vec) * self.apply_pairlist_to_vector(pairlist, Dvec) for pairlist in self.pairs])
 
 
 def square(x):
