@@ -466,7 +466,7 @@ import glob
 
 def multi_load(wildcard):
     for fn in glob.glob(wildcard):
-        start_collector().load(fn)
+        start_collector().load_json(fn)
     global ccs
     ccs = mc.get_collectors()
 
@@ -725,7 +725,8 @@ class CollectorClass(Autoself):
         json.dump(self.result, fp)
         fp.close()
         logger.info('result dumped to %s', fn)
-    def load(self, fn):
+    @async_method
+    def load_json(self, fn):
         fp = open(fn)
         self.result = json.load(fp)
         fp.close()
@@ -781,6 +782,7 @@ class CollectorClass(Autoself):
         index = self.indices[monomial]
         return coeff * self.monomial_vectors[monomial]
 
+    @async_method
     def convert_to_matrix(self, vars):
         self.i = 0
         self.M = None
@@ -797,6 +799,7 @@ class CollectorClass(Autoself):
             else:
                 self.M = newrow
         self.M = np.unique(self.M, axis=0)
+        logger.info('convert_to_matrix done')
 
     # no longer works because I can't figure how to multiply numpy matrices with Sage Expressions in them
     def verify_matrix(self, vars):
