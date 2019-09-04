@@ -751,8 +751,8 @@ class CollectorClass(Autoself):
     def D_sum_of_squares_SR(self, d, v):
         return sum([deqn.subs(d) for deqn in self.deqns[v]])
 
-    # These versions of the routines create a pairlist instead of
-    # using Sage
+    # These versions of the evaluation routines create a pairlist
+    # instead of using Sage symbolic expressions
 
     @staticmethod
     def generate_vector(v):
@@ -782,19 +782,12 @@ class CollectorClass(Autoself):
 
     def convert_to_pairlist(self, vars):
         self.i = 0
-        #self.pairs = []
         self.pairs = set()
         self.vars = vars
-        #indices = []
-        #indices.extend(map(mul, list(combinations_with_replacement(vars, 1))))
-        #indices.extend(map(mul, list(combinations_with_replacement(vars, 2))))
-        #indices.extend(map(mul, list(combinations_with_replacement(vars, 3))))
-        #self.indices = {str(pair[1]) : pair[0] for pair in enumerate(indices)}
         self.indices = {str(pair[1]) : pair[0] for pair in enumerate(self.generate_vector(vars))}
         for value in self.result.values():
             self.i += 1
             terms = re.split('([+-][^+-]+)', value)
-            #self.pairs.add(tuple(map(self.term_to_pair, ifilter(bool, terms))))
             termdict = dict()
             for term in ifilter(bool, terms):
                 coeff,index = self.term_to_pair(term)
@@ -809,27 +802,12 @@ class CollectorClass(Autoself):
         ind = self.vars.index(var)
         firsts = [int(0)] * len(self.vars)
         firsts[ind] = int(1)
-        two_products = [map(mul, izip(v[i:], repeat(e))) for i,e in enumerate(firsts)]
-        #three_products = [map(mul, izip(flatten(two_products[i:]), repeat(e))) for i,e in enumerate(v)]
-        three_products = []
-        return list(flatten([firsts, flatten(two_products), flatten(three_products)]))
 
-    def generate_D_vector(self, v, var):
-        ind = self.vars.index(var)
-        firsts = [int(0)] * len(self.vars)
-        firsts[ind] = int(1)
-        #two_products_a = [map(mul, izip(v[i:], repeat(e))) for i,e in enumerate(firsts)]
-        #two_products_b = [map(mul, izip(firsts[i:], repeat(e))) for i,e in enumerate(v)]
-        #two_products = [map(add, izip(flatten(two_products_a), flatten(two_products_b)))]
-
-        #two_products = [map(add, map(mul, izip(v[i:], repeat(e))), map(mul, izip(firsts[i:], repeat(e)))) for i,e in enumerate(firsts)]
         two_products = [map(mul, izip(v[i:], repeat(e))) for i,e in enumerate(v)]
         two_products_D = [map(sum, zip(*(map(mul, izip(v[i:], repeat(firsts[i]))), map(mul, izip(firsts[i:], repeat(v[i])))))) for i in range(len(self.vars))]
 
-        #three_products = [map(mul, izip(flatten(two_products[i:]), repeat(e))) for i,e in enumerate(v)]
-
         three_products = [map(sum, zip(*(map(mul, izip(flatten(two_products[i:]), repeat(firsts[i]))), map(mul, izip(flatten(two_products_D[i:]), repeat(v[i])))))) for i in range(len(self.vars))]
-        #three_products = []
+
         return list(flatten([firsts, flatten(two_products_D), flatten(three_products)]))
 
     def verify_D_vector(self):
