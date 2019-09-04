@@ -458,7 +458,7 @@ def multi_expand():
 
     for cc in ccs:
         cc.join_threads()
-        cc.convert_to_eqns()
+        cc.convert_to_matrix()
     for cc in ccs:
         cc.join_threads()
 
@@ -548,6 +548,7 @@ def async_result(method):
 #
 # TODO list for Python multiprocessing library:
 #   - handle CNTL-C without killing subprocesses
+#   - add rconsole to manager/server and use Sage interact for rconsole
 #   - hashing proxies and tokens
 #   - autoself() and more general auto-objects
 #   - async return objects
@@ -703,10 +704,45 @@ class ExpanderClass(Autoself):
         self.mc.notify_expand_done(self.autoself())
 
 import json
+import pickle
 
 import re
 
 import numpy as np
+
+import scipy.sparse
+
+# from https://stackoverflow.com/questions/46126840
+import scipy.sparse as sp
+def sp_unique(sp_matrix, axis=0, new_format=None):
+    ''' Returns a sparse matrix with the unique rows (axis=0)
+    or columns (axis=1) of an input sparse matrix sp_matrix'''
+    if axis == 1:
+        sp_matrix = sp_matrix.T
+
+    old_format = sp_matrix.getformat()
+    dt = sp_matrix.dtype
+    ncols = sp_matrix.shape[1]
+
+    if old_format != 'lil':
+        sp_matrix = sp_matrix.tolil()
+
+    _, ind = np.unique(sp_matrix.data + sp_matrix.rows, return_index=True)
+    rows = sp_matrix.rows[ind]
+    data = sp_matrix.data[ind]
+    nrows_uniq = data.shape[0]
+
+    sp_matrix = sp.lil_matrix((nrows_uniq, ncols), dtype=dt)  #  or sp_matrix.resize(nrows_uniq, ncols)
+    sp_matrix.data = data
+    sp_matrix.rows = rows
+
+    if new_format is None:
+        new_format = old_format
+
+    ret = sp_matrix.asformat(new_format)
+    if axis == 1:
+        ret = ret.T
+    return ret
 
 class CollectorClass(Autoself):
     result = {}
@@ -732,9 +768,9 @@ class CollectorClass(Autoself):
         fp.close()
         logger.info('result loaded from %s', fn)
     def dump_matrix(self):
-        fn = '/tmp/' + str(os.getpid()) + '.json'
+        fn = '/tmp/' + str(os.getpid()) + '.pickle'
         fp = open(fn, 'w')
-        json.dump(self.M, fp)
+        pickle.dump(self.M, fp)
         fp.close()
         logger.info('matrix dumped to %s', fn)
 
@@ -783,50 +819,61 @@ class CollectorClass(Autoself):
         return coeff * self.monomial_vectors[monomial]
 
     @async_method
-    def convert_to_matrix(self, vars):
+    def convert_to_matrix(self):
         self.i = 0
-        self.M = None
-        self.vars = vars
-        self.indices = {str(pair[1]) : pair[0] for pair in enumerate(self.generate_vector(vars))}
+        self.indices = {str(pair[1]) : pair[0] for pair in enumerate(self.generate_vector(coeff_vars))}
         veclen = len(self.indices)
-        self.monomial_vectors = {str(pair[1]) : np.array([int(i==pair[0]) for i in range(veclen)]) for pair in enumerate(self.generate_vector(vars))}
+        self.dok = scipy.sparse.dok_matrix((len(self.result), veclen), np.int64)
         for value in self.result.values():
-            self.i += 1
             terms = re.split('([+-][^+-]+)', value)
-            newrow = np.array(sum([self.term_to_vector(term) for term in ifilter(bool, terms)]))
-            if self.M is not None:
-                self.M = np.vstack((self.M, newrow))
-            else:
-                self.M = newrow
-        self.M = np.unique(self.M, axis=0)
+            for term in ifilter(bool, terms):
+                if term[0] == '-':
+                    sign = -1
+                    term = term[1:]
+                else:
+                    sign = 1
+                    if term[0] == '+':
+                        term = term[1:]
+                (coeff, monomial) = re.split('\*', term, 1)
+                if not re.match('^[0-9]*$', coeff):
+                    monomial = coeff + '*' + monomial
+                    coeff = '1'
+                coeff = sign * int(coeff)
+                index = self.indices[monomial]
+                self.dok[self.i, index] += coeff
+            self.i += 1
+
+        #self.M = np.unique(self.M, axis=0)
+        #self.M = self.dok.tocsr()
+        self.M = sp_unique(self.dok, axis=0, new_format='csr')
         logger.info('convert_to_matrix done')
 
     # no longer works because I can't figure how to multiply numpy matrices with Sage Expressions in them
     def verify_matrix(self, vars):
         vec = self.generate_vector(vars)
         set1 = set([eval(preparse(result)) for result in self.result])
-        set2 = set(list(np.matmul(self.M, vec)))
+        set2 = set(list(self.M.dot(vec)))
         return set1 == set2
 
     def generate_D_vector(self, v, var):
-        ind = self.vars.index(var)
-        firsts = [int(0)] * len(self.vars)
+        ind = coeff_vars.index(var)
+        firsts = [int(0)] * len(coeff_vars)
         firsts[ind] = int(1)
 
         two_products = [map(mul, izip(v[i:], repeat(e))) for i,e in enumerate(v)]
-        two_products_D = [map(sum, zip(*(map(mul, izip(v[i:], repeat(firsts[i]))), map(mul, izip(firsts[i:], repeat(v[i])))))) for i in range(len(self.vars))]
+        two_products_D = [map(sum, zip(*(map(mul, izip(v[i:], repeat(firsts[i]))), map(mul, izip(firsts[i:], repeat(v[i])))))) for i in range(len(coeff_vars))]
 
-        three_products = [map(sum, zip(*(map(mul, izip(flatten(two_products[i:]), repeat(firsts[i]))), map(mul, izip(flatten(two_products_D[i:]), repeat(v[i])))))) for i in range(len(self.vars))]
+        three_products = [map(sum, zip(*(map(mul, izip(flatten(two_products[i:]), repeat(firsts[i]))), map(mul, izip(flatten(two_products_D[i:]), repeat(v[i])))))) for i in range(len(coeff_vars))]
 
         return np.array(list(flatten([firsts, flatten(two_products_D), flatten(three_products)])))
 
     def verify_D_vector(self):
-        all([all([bool(diff(e,v)==d) for e,d in zip(generate_vector(self.vars), generate_D_vector(self.vars, v))]) for v in self.vars])
+        all([all([bool(diff(e,v)==d) for e,d in zip(generate_vector(coeff_vars), generate_D_vector(coeff_vars, v))]) for v in coeff_vars])
 
     @async_result
     def sum_of_squares(self, d):
-        vec = self.generate_vector([d[v] for v in self.vars])
-        return sum(square(np.matmul(self.M, vec)))
+        vec = self.generate_vector([d[v] for v in coeff_vars])
+        return sum(square(self.M.dot(vec)))
     @async_result
     def D_sum_of_squares(self, d, v):
         # d(p^a s^b t^c)/ds = b(p^a s^(b-1) t^c),
@@ -834,9 +881,9 @@ class CollectorClass(Autoself):
         # dp/ds = 0         ds/ds = 1
         # d(s^2)/ds = 2s    d(ps)/ds = p     d(pt)/ds = 0
         # d(s^3)/ds = 3s^2  d(ps^2)/ds = 2ps   d(pst) = pt
-        vec = self.generate_vector([d[v1] for v1 in self.vars])
-        Dvec = self.generate_D_vector([d[v1] for v1 in self.vars], v)
-        return sum(2 * np.matmul(self.M, vec) * np.matmul(self.M, Dvec))
+        vec = self.generate_vector([d[v1] for v1 in coeff_vars])
+        Dvec = self.generate_D_vector([d[v1] for v1 in coeff_vars], v)
+        return sum(2 * self.M.dot(vec) * self.M.dot(Dvec))
 
 
 def square(x):
