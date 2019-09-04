@@ -730,6 +730,12 @@ class CollectorClass(Autoself):
         self.result = json.load(fp)
         fp.close()
         logger.info('result loaded from %s', fn)
+    def dump_matrix(self):
+        fn = '/tmp/' + str(os.getpid()) + '.json'
+        fp = open(fn, 'w')
+        json.dump(self.M, fp)
+        fp.close()
+        logger.info('matrix dumped to %s', fn)
 
     def len_result(self):
         return len(self.result)
@@ -740,27 +746,11 @@ class CollectorClass(Autoself):
     def nterms(self):
         return sum([v.count('+')+v.count('-') for v in self.result.values()])
 
-    # we want to evaluate the sum of squares of polynomials p,
-    # as well as the first derivatives of the sum of squares,
-    # which is the sum of (2 p dp/dv)
-    @async_method
-    def convert_to_eqns(self):
-        self.eqns = set()
-        for value in self.result.values():
-            self.eqns.add(eval(preparse(value)))
-        self.deqns = {v : [2 * eqn * diff(eqn, v) for eqn in self.eqns] for v in coeff_vars}
-    def get_eqns(self):
-        return self.eqns
-
-    @async_result
-    def sum_of_squares_SR(self, d):
-        return sum([square(eqn.subs(d)) for eqn in self.eqns])
-    @async_result
-    def D_sum_of_squares_SR(self, d, v):
-        return sum([deqn.subs(d) for deqn in self.deqns[v]])
-
-    # These versions of the evaluation routines create a pairlist
-    # instead of using Sage symbolic expressions
+    # Now we want to evaluate the sum of squares of polynomials p, as
+    # well as the first derivatives of the sum of squares, which is
+    # the sum of (2 p dp/dv).  Using Sage symbolic expressions is slow
+    # and consumes much memory, so this version of the code uses numpy
+    # matrices instead.
 
     # Given a vector, generate a multi-vector of the vector itself,
     # then all the biproducts of the vector elements, then all the
