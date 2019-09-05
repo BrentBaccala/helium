@@ -466,7 +466,7 @@ import glob
 
 def multi_load(wildcard):
     for fn in glob.glob(wildcard):
-        start_collector().load_json(fn)
+        start_collector().load_matrix(fn)
     global ccs
     ccs = mc.get_collectors()
 
@@ -767,12 +767,19 @@ class CollectorClass(Autoself):
         self.result = json.load(fp)
         fp.close()
         logger.info('result loaded from %s', fn)
+    @async_method
     def dump_matrix(self):
         fn = '/tmp/' + str(os.getpid()) + '.pickle'
         fp = open(fn, 'w')
         pickle.dump(self.M, fp)
         fp.close()
         logger.info('matrix dumped to %s', fn)
+    @async_method
+    def load_matrix(self, fn):
+        fp = open(fn)
+        self.M = pickle.load(fp)
+        fp.close()
+        logger.info('matrix loaded from %s', fn)
 
     def len_result(self):
         return len(self.result)
@@ -874,6 +881,10 @@ class CollectorClass(Autoself):
     def verify_D_vector(self):
         all([all([bool(diff(e,v)==d) for e,d in zip(generate_multi_vector(coeff_vars), generate_multi_D_vector(coeff_vars, v))]) for v in coeff_vars])
 
+    @async_result
+    def eval_polynomials(self, vec):
+        multivec = self.generate_multi_vector(vec)
+        return self.M.dot(multivec)
     @async_result
     def sum_of_squares(self, vec):
         multivec = self.generate_multi_vector(vec)
