@@ -34,7 +34,6 @@
 # program
 #
 # TODO list:
-# - append matrices together as collector loads multiple matrices
 # - collector should parse directly into matrix form
 # - eliminate duplicate polynomials between multiple processes
 # - compile a better regular expression to parse terms
@@ -784,6 +783,7 @@ def sp_unique(sp_matrix, axis=0, new_format=None):
 
 class CollectorClass(Autoself):
     result = {}
+    M = None
 
     def register_manager(self, mc):
         self.mc = mc
@@ -815,7 +815,10 @@ class CollectorClass(Autoself):
     @async_method
     def load_matrix(self, fn):
         fp = open(fn)
-        self.M = pickle.load(fp)
+        if self.M is None:
+            self.M = pickle.load(fp)
+        else:
+            self.M = sp_unique(sp.vstack((self.M, pickle.load(fp))))
         fp.close()
         logger.info('matrix loaded from %s', fn)
 
