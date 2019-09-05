@@ -2,8 +2,46 @@
 # Python code to search for solutions of Hydrogen and Helium
 # non-relativistic time-invariant Schrodinger equation
 #
+# ALGORITHM:
+#
+# We start with a trial solution with free coefficients (coeff_vars)
+# that we hope will yield an exact solution if they are set to the
+# correct real numbers.  We don't try to reduce the complexity of this
+# system to the point where we have single isolated solutions, so we
+# expect our solutions to be higher-dimensional algebraic varieties.
+#
+# We plug the trial solution into the differential equation that we're
+# trying to solve, expand it out, and collect coefficients of like
+# terms.  This gives us a set of polynomial equations in the
+# coefficients that define an algebraic variety in the space generated
+# by the coefficient variables.  We pick a point at random and use a
+# gradient descent algorithm in the hopes of finding an approximate
+# point on that variety.  If successful, we look for algebraic
+# relationships between the point's coordinates, hoping to find the
+# algebraic equations that define the irreducible component that the
+# point lies on.
+#
+# A big computational bottleneck is the space complexity of expanding
+# out the differential equation.  To solve this problem, we use
+# multiple processes to expand out the polynomial incrementally.
+#
 # by Brent Baccala
-# August 2019
+#
+# first version - August 2019
+# latest version - September 2019
+#
+# no rights reserved; you may freely copy, modify, or distribute this
+# program
+#
+# TODO list:
+# - compute all partial derivatives in one RPC call
+# - append matrices together as collector loads multiple matrices
+# - eliminate duplicate polynomials between multiple processes
+# - more easily turn multiprocessing on and off
+# - better naming of functions and variables like bwb4
+# - collector should parse directly into matrix form
+# - allow worker processes on different hosts
+# - remove unused code like Rosenfeld-Groebner
 
 from itertools import *
 
