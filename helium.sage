@@ -34,12 +34,12 @@
 # program
 #
 # TODO list:
-# - compute all partial derivatives in one RPC call
 # - append matrices together as collector loads multiple matrices
+# - collector should parse directly into matrix form
 # - eliminate duplicate polynomials between multiple processes
+# - compile a better regular expression to parse terms
 # - more easily turn multiprocessing on and off
 # - better naming of functions and variables like bwb4
-# - collector should parse directly into matrix form
 # - allow worker processes on different hosts
 # - remove unused code like Rosenfeld-Groebner
 
@@ -921,22 +921,56 @@ class CollectorClass(Autoself):
 
     @async_result
     def eval_polynomials(self, vec):
+        r"""
+        Evaluate our polynomials
+
+        INPUT:
+
+        - ``vec`` -- a vector of real values for all coeff_vars
+
+        OUTPUT:
+
+        - a vector of all of our polynomials, evaluated at ``vec``
+        """
         multivec = self.generate_multi_vector(vec)
         return self.M.dot(multivec)
     @async_result
     def sum_of_squares(self, vec):
+        r"""
+        Compute the sum of squares of our polynomials
+
+        INPUT:
+
+        - ``vec`` -- a vector of real values for all coeff_vars
+
+        OUTPUT:
+
+        - sum(p^2), evaluated at ``vec``
+        """
+        # logger.info('sum_of_squares %s %s', vec.dtype, vec)
         multivec = self.generate_multi_vector(vec)
         return sum(square(self.M.dot(multivec)))
     @async_result
-    def D_sum_of_squares(self, vec, var):
+    def D_sum_of_squares(self, vec):
+        r"""
+        Compute the Jacobian vector of the sum of squares of our polynomials
+
+        INPUT:
+
+        - ``vec`` -- a vector of real values for all coeff_vars
+
+        OUTPUT:
+
+        - the vector of partial derivatives of sum(p^2) w.r.t each coeff_var,
+          evaluated at ``vec``
+        """
         # d(p^a s^b t^c)/ds = b(p^a s^(b-1) t^c),
         # so (p^a s^b t^c) should map to b(p^a s^(b-1) t^c)
         # dp/ds = 0         ds/ds = 1
         # d(s^2)/ds = 2s    d(ps)/ds = p     d(pt)/ds = 0
         # d(s^3)/ds = 3s^2  d(ps^2)/ds = 2ps   d(pst) = pt
         multivec = self.generate_multi_vector(vec)
-        multiDvec = self.generate_multi_D_vector(vec, var)
-        return sum(2 * self.M.dot(multivec) * self.M.dot(multiDvec))
+        return [sum(2 * self.M.dot(multivec) * self.M.dot(self.generate_multi_D_vector(vec, var))) for var in coeff_vars]
 
 
 def square(x):
@@ -1159,12 +1193,10 @@ if use_multiprocessing:
     def jac(v):
         d = dict(zip(coeff_vars, v))
         sum_of_squares = sum(map(lambda x: x.get(), [cc.sum_of_squares(v) for cc in ccs]))
-        D_sum_of_squares = {var : sum(map(lambda x: x.get(), [cc.D_sum_of_squares(v,var) for cc in ccs])) for var in coeff_vars}
-        zero_var = zero_variety.subs(d)
-        dvar = {var : 0 for var in coeff_vars}
-        dvar.update({var : d[var] for var in Avars})
-        A = [real_type((D_sum_of_squares[var]*zero_var - 2*dvar[var]*sum_of_squares)/zero_var^2) for var in coeff_vars]
-        res = np.array(A)
+        D_sum_of_squares = sum(map(lambda x: np.array(x.get()), [cc.D_sum_of_squares(v) for cc in ccs]))
+        zero_var = v.dtype.type(zero_variety.subs(d))
+        Av = v * np.array([c in Avars for c in coeff_vars])
+        res = ((D_sum_of_squares*zero_var - 2*np.array(Av)*sum_of_squares)/zero_var^2)
         return res
 
 else:
