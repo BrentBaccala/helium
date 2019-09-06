@@ -1282,6 +1282,8 @@ real_type = np.float64
 
 use_multiprocessing = True
 
+last_time = 0
+
 if use_multiprocessing:
 
     def minfunc(v):
@@ -1292,7 +1294,12 @@ if use_multiprocessing:
         d = dict(zip(coeff_vars, v))
         sum_of_squares = sum(map(lambda x: x.get(), [cc.sum_of_squares(v) for cc in ccs]))
         res = real_type(sum_of_squares / zero_variety.subs(d))
-        print res
+        global last_time
+        if last_time == 0:
+            print res
+        else:
+            print "{:<30} {:20} sec".format(res, time.time()-last_time)
+        last_time = time.time()
         return res
 
     def jac(v):
