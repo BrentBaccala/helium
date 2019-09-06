@@ -1285,6 +1285,10 @@ use_multiprocessing = True
 if use_multiprocessing:
 
     def minfunc(v):
+        # Save a copy of vector to aid in stopping and restarting the calculation
+        global last_v
+        last_v = v
+
         d = dict(zip(coeff_vars, v))
         sum_of_squares = sum(map(lambda x: x.get(), [cc.sum_of_squares(v) for cc in ccs]))
         res = real_type(sum_of_squares / zero_variety.subs(d))
@@ -1292,6 +1296,9 @@ if use_multiprocessing:
         return res
 
     def jac(v):
+        global last_v
+        last_v = v
+
         d = dict(zip(coeff_vars, v))
         sum_of_squares = sum(map(lambda x: x.get(), [cc.sum_of_squares(v) for cc in ccs]))
         D_sum_of_squares = sum(map(lambda x: np.array(x.get()), [cc.D_sum_of_squares(v) for cc in ccs]))
@@ -1313,7 +1320,7 @@ else:
 
 import random
 
-def random_numerical(seed=0):
+def random_numerical(iv=0):
 
     import scipy.optimize
 
@@ -1325,11 +1332,11 @@ def random_numerical(seed=0):
     # even though we're using numpy, we don't need to set its PRNG
     # seed, (which would require calling numpy.random.seed()), since
     # the algorithm is deterministic after the iv is picked
-    random.seed(seed)        # for random
-    set_random_seed(seed)    # for RR.random_element()
 
-    global iv
-    iv = [random.random() for i in range(nvars)]
+    if isinstance(iv, int) or isinstance(iv, Integer):
+        random.seed(iv)        # for random
+        set_random_seed(iv)    # for RR.random_element()
+        iv = [random.random() for i in range(nvars)]
 
     # We know the zero variety (all Avar's zero, so Psi is zero) will be
     # a "solution", but we want to avoid it
