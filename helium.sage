@@ -517,26 +517,37 @@ def remove_duplicates():
     Detect duplicates by feeding each collector a random vector and
     looking for identical results.  It's possible (but hopefully not
     likely) that different polynomials could return identical results;
-    nothing is done to detect this case.  Reverse sort by time
-    required to evaluate the polynomials, so the slower collectors get
-    the most duplicates removed.
+    nothing is done to detect this case.  Try to remove duplicates
+    from the collectors with the largest number of equations first,
+    to even out the time required by each collector to run.
     """
     iv = [random.random() for i in coeff_vars]
     global results
-    results = [(cc, cc.eval_polynomials(iv)) for cc in ccs]
-    results = sorted(results, key=lambda x: x[1].time(), reverse=True)
-    fetched_results = map(lambda x: x[1].get(), results)
-    target_size = 0
-    initial_size = [cc.nrows() for cc in ccs]
-    initial_total_size = sum(initial_size)
+    results = [cc.eval_polynomials(iv) for cc in ccs]
+    fetched_results = map(lambda x: x.get(), results)
+    sizes = [cc.nrows() for cc in ccs]
     value_to_count = dict(zip(*np.unique(np.hstack(fetched_results), return_counts=True)))
-    target_size = int(len(value_to_count)/len(ccs))
-    for i in range(len(results)):
-        dups = set((u for u,c in value_to_count.items() if c>1))
-        indices = list(islice((j for j,e in enumerate(fetched_results[i]) if e in dups), max(initial_size[i] - target_size, 0)))
-        for index in indices:
-            value_to_count[fetched_results[i][index]] -= 1
-        results[i][0].delete_rows(indices)
+    dups = set((u for u,c in value_to_count.items() if c>1))
+    generators = [((j,e) for j,e in enumerate(fetched_results[i]) if e in dups) for i in range(len(ccs))]
+    indices = [[] for i in range(len(ccs))]
+    while len(dups) > 0:
+        maxsize = max(sizes)
+        try:
+            i = (i for i,c in enumerate(sizes) if c == maxsize and generators[i] is not None).next()
+        except StopIteration:
+            break
+        try:
+            (index, value) = generators[i].next()
+        except StopIteration:
+            generators[i] = None
+            continue
+        value_to_count[value] -= 1
+        sizes[i] -= 1
+        if value_to_count[value] == 1:
+            dups.remove(value)
+        indices[i].append(index)
+    for i in range(len(ccs)):
+        ccs[i].delete_rows(indices[i])
 
 import multiprocessing, logging
 logger = multiprocessing.get_logger()
@@ -981,7 +992,7 @@ class CollectorClass(Autoself):
     @async_method
     def delete_rows(self, indices):
         logger.info('deleting %d rows', len(indices))
-        self.M = delete_rows_csr(self.M, sorted(indices, reverse=True))
+        self.M = delete_rows_csr(self.M, indices)
 
     # no longer works because I can't figure how to multiply numpy matrices with Sage Expressions in them
     def verify_matrix(self, vars):
