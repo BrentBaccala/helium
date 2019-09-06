@@ -532,12 +532,8 @@ def remove_duplicates():
     value_to_count = dict(zip(*np.unique(np.hstack(fetched_results), return_counts=True)))
     target_size = int(len(value_to_count)/len(ccs))
     for i in range(len(results)):
-        dups_two = [u for u,c in value_to_count.items() if c==2]
-        indices_two = [j for j,e in enumerate(fetched_results[i]) if e in dups_two]
-        dups_more = [u for u,c in value_to_count.items() if c>2]
-        indices_more = [j for j,e in enumerate(fetched_results[i]) if e in dups_more]
-        indices = indices_two + indices_more
-        indices = indices[:max(initial_size[i] - target_size, 0)]
+        dups = set((u for u,c in value_to_count.items() if c>1))
+        indices = list(islice((j for j,e in enumerate(fetched_results[i]) if e in dups), max(initial_size[i] - target_size, 0)))
         for index in indices:
             value_to_count[fetched_results[i][index]] -= 1
         results[i][0].delete_rows(indices)
