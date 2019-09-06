@@ -526,11 +526,19 @@ def remove_duplicates():
     results = [(cc, cc.eval_polynomials(iv)) for cc in ccs]
     results = sorted(results, key=lambda x: x[1].time(), reverse=True)
     fetched_results = map(lambda x: x[1].get(), results)
-    for i in range(len(results)-1):
+    target_size = 0
+    initial_size = [cc.nrows() for cc in ccs]
+    initial_total_size = sum(initial_size)
+    for i in range(len(results)):
         polys = fetched_results[i:]
         u,c = np.unique(np.hstack(polys), return_counts=True)
-        dups = u[c>1]
-        indices = [j for j,e in enumerate(fetched_results[i]) if e in dups]
+        if target_size == 0:
+            target_size = int(len(u)/len(ccs))
+        dups_two = u[c==2]
+        indices_two = [j for j,e in enumerate(fetched_results[i]) if e in dups_two]
+        dups_more = u[c>2]
+        indices_more = [j for j,e in enumerate(fetched_results[i]) if e in dups_more]
+        indices = indices_two + indices_more[:max(initial_size[i] - target_size - len(dups_two), 0)]
         results[i][0].delete_rows(indices)
 
 import multiprocessing, logging
@@ -894,6 +902,8 @@ class CollectorClass(Autoself):
         logger.info('matrix loaded from %s', fn)
         logger.info(repr(self.M))
 
+    def nrows(self):
+        return self.M.shape[0]
     def len_result(self):
         return len(self.result)
     def len_values(self):
