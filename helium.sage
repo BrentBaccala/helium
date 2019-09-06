@@ -848,18 +848,17 @@ def delete_rows_csr(mat, indices):
 
 # from https://stackoverflow.com/a/26504995
 #
-# probably not as efficient, since our matrices are so sparse (< .1% occupancy)
-#
-# def delete_rows_csr(mat, indices):
-#     """
-#     Remove the rows denoted by ``indices`` form the CSR sparse matrix ``mat``.
-#     """
-#     if not isinstance(mat, scipy.sparse.csr_matrix):
-#         raise ValueError("works only for CSR format -- use .tocsr() first")
-#     indices = list(indices)
-#     mask = numpy.ones(mat.shape[0], dtype=bool)
-#     mask[indices] = False
-#     return mat[mask]
+
+def delete_rows_csr(mat, indices):
+    """
+    Remove the rows denoted by ``indices`` form the CSR sparse matrix ``mat``.
+    """
+    if not isinstance(mat, sp.csr_matrix):
+        raise ValueError("works only for CSR format -- use .tocsr() first")
+    indices = list(indices)
+    mask = np.ones(mat.shape[0], dtype=bool)
+    mask[indices] = False
+    return mat[mask]
 
 class CollectorClass(Autoself):
     result = {}
@@ -985,7 +984,7 @@ class CollectorClass(Autoself):
 
     def delete_rows(self, indices):
         logger.info('deleting %d rows', len(indices))
-        delete_rows_csr(self.M, sorted(indices, reverse=True))
+        self.M = delete_rows_csr(self.M, sorted(indices, reverse=True))
 
     # no longer works because I can't figure how to multiply numpy matrices with Sage Expressions in them
     def verify_matrix(self, vars):
