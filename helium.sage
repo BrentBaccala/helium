@@ -982,6 +982,7 @@ class CollectorClass(Autoself):
         self.M = sp_unique(self.dok, axis=0, new_format='csr')
         logger.info('convert_to_matrix done')
 
+    @async_method
     def delete_rows(self, indices):
         logger.info('deleting %d rows', len(indices))
         self.M = delete_rows_csr(self.M, sorted(indices, reverse=True))
