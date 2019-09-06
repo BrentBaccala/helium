@@ -530,7 +530,10 @@ def remove_duplicates():
     dups = set((u for u,c in value_to_count.items() if c>1))
     generators = [((j,e) for j,e in enumerate(fetched_results[i]) if e in dups) for i in range(len(ccs))]
     indices = [[] for i in range(len(ccs))]
+    remaining_iterations = sum(sizes) - len(value_to_count)
     while len(dups) > 0:
+        if remaining_iterations % 1000 == 0:
+            print remaining_iterations, 'iterations remaining'
         maxsize = max(sizes)
         try:
             i = (i for i,c in enumerate(sizes) if c == maxsize and generators[i] is not None).next()
@@ -546,6 +549,7 @@ def remove_duplicates():
         if value_to_count[value] == 1:
             dups.remove(value)
         indices[i].append(index)
+        remaining_iterations -= 1
     for i in range(len(ccs)):
         ccs[i].delete_rows(indices[i])
 
