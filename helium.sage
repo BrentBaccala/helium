@@ -1019,15 +1019,18 @@ class CollectorClass(Autoself):
     def generate_multi_D_vector(self, v, var):
         start_time = time.time()
         ind = coeff_vars.index(var)
-        firsts = [int(0)] * len(coeff_vars)
+
+        npv = np.array(v)
+
+        firsts = np.zeros(len(coeff_vars))
         firsts[ind] = int(1)
 
-        two_products = [map(mul, izip(v[i:], repeat(e))) for i,e in enumerate(v)]
-        two_products_D = [map(sum, zip(*(map(mul, izip(v[i:], repeat(firsts[i]))), map(mul, izip(firsts[i:], repeat(v[i])))))) for i in range(len(coeff_vars))]
+        two_products = [e * npv[i:] for i,e in enumerate(v)]
+        two_products_D = [firsts[i] * npv[i:] + firsts[i:] * npv[i] for i in range(len(coeff_vars))]
 
-        three_products = [map(sum, zip(*(map(mul, izip(flatten(two_products[i:]), repeat(firsts[i]))), map(mul, izip(flatten(two_products_D[i:]), repeat(v[i])))))) for i in range(len(coeff_vars))]
+        three_products = [np.hstack(two_products[i:]) *firsts[i] + np.hstack(two_products_D[i:]) * npv[i] for i in range(len(coeff_vars))]
 
-        res = np.array(list(flatten([firsts, flatten(two_products_D), flatten(three_products)])))
+        res = np.hstack([firsts] + two_products_D + three_products)
         self.multi_D_vec_times += time.time() - start_time
         self.multi_D_vec_calls += 1
         return res
