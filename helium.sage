@@ -41,6 +41,10 @@
 # - better naming of functions and variables like bwb4
 # - allow worker processes on different hosts
 # - remove unused code like Rosenfeld-Groebner
+# - allow second-order ODEs in trial form
+# - compute bound on degree of coefficient monomials
+# - automate finding polynomial relations
+# - save checkpoints of optimization iterations
 
 from itertools import *
 
@@ -507,6 +511,14 @@ def multi_load(wildcard):
     global ccs
     ccs = mc.get_collectors()
 
+def remove_duplicates():
+    iv = [random.random() for i in coeff_vars]
+    polys = map(lambda x: x.get(), [cc.eval_polynomials(iv) for cc in ccs])
+    u,c = np.unique(np.hstack(polys), return_counts=True)
+    dups = u[c>1]
+    indices = [i for i,e in enumerate(polys[1]) if e in dups]
+    ccs[1].delete_rows(indices)
+
 import multiprocessing, logging
 logger = multiprocessing.get_logger()
 logger.setLevel(logging.INFO)
@@ -781,6 +793,40 @@ def sp_unique(sp_matrix, axis=0, new_format=None):
         ret = ret.T
     return ret
 
+# from https://stackoverflow.com/a/13078768
+def delete_row_csr(mat, i):
+    if not isinstance(mat, scipy.sparse.csr_matrix):
+        raise ValueError("works only for CSR format -- use .tocsr() first")
+    n = mat.indptr[i+1] - mat.indptr[i]
+    if n > 0:
+        mat.data[mat.indptr[i]:-n] = mat.data[mat.indptr[i+1]:]
+        mat.data = mat.data[:-n]
+        mat.indices[mat.indptr[i]:-n] = mat.indices[mat.indptr[i+1]:]
+        mat.indices = mat.indices[:-n]
+    mat.indptr[i:-1] = mat.indptr[i+1:]
+    mat.indptr[i:] -= n
+    mat.indptr = mat.indptr[:-1]
+    mat._shape = (mat._shape[0]-1, mat._shape[1])
+
+def delete_rows_csr(mat, indices):
+    for i in indices:
+        delete_row_csr(mat, i)
+
+# from https://stackoverflow.com/a/26504995
+#
+# probably not as efficient, since our matrices are so sparse (< .1% occupancy)
+#
+# def delete_rows_csr(mat, indices):
+#     """
+#     Remove the rows denoted by ``indices`` form the CSR sparse matrix ``mat``.
+#     """
+#     if not isinstance(mat, scipy.sparse.csr_matrix):
+#         raise ValueError("works only for CSR format -- use .tocsr() first")
+#     indices = list(indices)
+#     mask = numpy.ones(mat.shape[0], dtype=bool)
+#     mask[indices] = False
+#     return mat[mask]
+
 class CollectorClass(Autoself):
     result = {}
     M = None
@@ -899,6 +945,9 @@ class CollectorClass(Autoself):
         #self.M = self.dok.tocsr()
         self.M = sp_unique(self.dok, axis=0, new_format='csr')
         logger.info('convert_to_matrix done')
+
+    def delete_rows(self, indices):
+        delete_rows_csr(self.M, sorted(indices, reverse=True))
 
     # no longer works because I can't figure how to multiply numpy matrices with Sage Expressions in them
     def verify_matrix(self, vars):
