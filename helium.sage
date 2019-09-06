@@ -947,9 +947,10 @@ class CollectorClass(Autoself):
 
     def generate_multi_vector(self, v):
         start_time = time.time()
-        two_products = [map(mul, izip(v[i:], repeat(e))) for i,e in enumerate(v)]
-        three_products = [map(mul, izip(flatten(two_products[i:]), repeat(e))) for i,e in enumerate(v)]
-        res = np.array(list(flatten([v, flatten(two_products), flatten(three_products)])))
+        npv = np.array(v)
+        two_products = [npv[i] * npv[i:] for i in range(len(v))]
+        three_products = [np.hstack(two_products[i:]) * npv[i] for i in range(len(coeff_vars))]
+        res = np.hstack([npv] + two_products + three_products)
         self.multi_vec_times += time.time() - start_time
         self.multi_vec_calls += 1
         return res
