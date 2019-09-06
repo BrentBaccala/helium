@@ -35,7 +35,6 @@
 #
 # TODO list:
 # - collector should parse directly into matrix form
-# - eliminate duplicate polynomials between multiple processes
 # - compile a better regular expression to parse terms
 # - more easily turn multiprocessing on and off
 # - better naming of functions and variables like bwb4
@@ -512,12 +511,26 @@ def multi_load(wildcard):
     ccs = mc.get_collectors()
 
 def remove_duplicates():
+    r""""
+    Remove duplicate equations from collector processes.
+
+    Detect duplicates by feeding each collector a random vector and
+    looking for identical results.  It's possible (but hopefully not
+    likely) that different polynomials could return identical results;
+    nothing is done to detect this case.  Reverse sort by time
+    required to evaluate the polynomials, so the slower collectors get
+    the most duplicates removed.
+    """
     iv = [random.random() for i in coeff_vars]
-    polys = map(lambda x: x.get(), [cc.eval_polynomials(iv) for cc in ccs])
-    u,c = np.unique(np.hstack(polys), return_counts=True)
-    dups = u[c>1]
-    indices = [i for i,e in enumerate(polys[1]) if e in dups]
-    ccs[1].delete_rows(indices)
+    global results
+    results = [(cc, cc.eval_polynomials(iv)) for cc in ccs]
+    results = sorted(results, key=lambda x: x[1].time(), reverse=True)
+    for i in range(len(results)-1):
+        polys = map(lambda x: x[1].get(), results[i:])
+        u,c = np.unique(np.hstack(polys), return_counts=True)
+        dups = u[c>1]
+        indices = [j for j,e in enumerate(results[i][1].get()) if e in dups]
+        results[i][0].delete_rows(indices)
 
 import multiprocessing, logging
 logger = multiprocessing.get_logger()
@@ -547,7 +560,9 @@ def async_method(method):
 
 # The @async_result decorator is used like @async_method, except that
 # a proxy object is generated as the immediately returned result.  The
-# actual result is obtained by calling the `get` method on the proxy.
+# actual result is obtained by calling the `get` method on the proxy,
+# and the time required to run the method is obtained from proxy's
+# `time` method.
 
 class AsyncResult:
     def __init__(self, outerself, method, *args):
@@ -555,7 +570,9 @@ class AsyncResult:
         self._ready = False
 
         def target(outerself, method, *args):
+            start_time = time.time()
             self._result = method(outerself, *args)
+            self._time = time.time() - start_time
             self._cond.acquire()
             self._ready = True
             self._cond.notify_all()
@@ -574,6 +591,13 @@ class AsyncResult:
             self._cond.wait()
         self._cond.release()
         return self._result
+
+    def time(self):
+        self._cond.acquire()
+        if not self._ready:
+            self._cond.wait()
+        self._cond.release()
+        return self._time
 
 def async_result(method):
     def inner(self, *args):
@@ -947,6 +971,7 @@ class CollectorClass(Autoself):
         logger.info('convert_to_matrix done')
 
     def delete_rows(self, indices):
+        logger.info('deleting rows %s', indices)
         delete_rows_csr(self.M, sorted(indices, reverse=True))
 
     # no longer works because I can't figure how to multiply numpy matrices with Sage Expressions in them
