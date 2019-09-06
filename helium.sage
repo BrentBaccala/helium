@@ -874,6 +874,12 @@ def delete_rows_csr(mat, indices):
 class CollectorClass(Autoself):
     result = {}
     M = None
+    multi_D_vec_times = 0
+    multi_D_vec_calls = 0
+    multi_vec_times = 0
+    multi_vec_calls = 0
+    dot_times = 0
+    dot_calls = 0
 
     def register_manager(self, mc):
         self.mc = mc
@@ -913,6 +919,8 @@ class CollectorClass(Autoself):
         logger.info('matrix loaded from %s', fn)
         logger.info(repr(self.M))
 
+    def times(self):
+        return (self.dot_calls, self.dot_times, self.multi_vec_calls, self.multi_vec_times, self.multi_D_vec_calls, self.multi_D_vec_times)
     def nrows(self):
         return self.M.shape[0]
     def len_result(self):
@@ -937,11 +945,14 @@ class CollectorClass(Autoself):
     # generate_multi_vector([a,b,c])
     #   -> [a,b,c,a^2,a*b,a*c,b^2,b*c,c^2,a^3,a^2*b,a^2*c,a*b^2,a*b*c,a*c^2,a*b^2,b^2*c,b*c^2,c^3]
 
-    @staticmethod
-    def generate_multi_vector(v):
+    def generate_multi_vector(self, v):
+        start_time = time.time()
         two_products = [map(mul, izip(v[i:], repeat(e))) for i,e in enumerate(v)]
         three_products = [map(mul, izip(flatten(two_products[i:]), repeat(e))) for i,e in enumerate(v)]
-        return np.array(list(flatten([v, flatten(two_products), flatten(three_products)])))
+        res = np.array(list(flatten([v, flatten(two_products), flatten(three_products)])))
+        self.multi_vec_times += time.time() - start_time
+        self.multi_vec_calls += 1
+        return res
 
     def term_to_vector(self, term):
         if term[0] == '-':
@@ -1006,6 +1017,7 @@ class CollectorClass(Autoself):
         return set1 == set2
 
     def generate_multi_D_vector(self, v, var):
+        start_time = time.time()
         ind = coeff_vars.index(var)
         firsts = [int(0)] * len(coeff_vars)
         firsts[ind] = int(1)
@@ -1015,10 +1027,20 @@ class CollectorClass(Autoself):
 
         three_products = [map(sum, zip(*(map(mul, izip(flatten(two_products[i:]), repeat(firsts[i]))), map(mul, izip(flatten(two_products_D[i:]), repeat(v[i])))))) for i in range(len(coeff_vars))]
 
-        return np.array(list(flatten([firsts, flatten(two_products_D), flatten(three_products)])))
+        res = np.array(list(flatten([firsts, flatten(two_products_D), flatten(three_products)])))
+        self.multi_D_vec_times += time.time() - start_time
+        self.multi_D_vec_calls += 1
+        return res
 
     def verify_D_vector(self):
         all([all([bool(diff(e,v)==d) for e,d in zip(generate_multi_vector(coeff_vars), generate_multi_D_vector(coeff_vars, v))]) for v in coeff_vars])
+
+    def dot(self, multivec):
+        start_time = time.time()
+        res = self.M.dot(multivec)
+        self.dot_times += time.time() - start_time
+        self.dot_calls += 1
+        return res
 
     @async_result
     def eval_polynomials(self, vec):
@@ -1034,7 +1056,7 @@ class CollectorClass(Autoself):
         - a vector of all of our polynomials, evaluated at ``vec``
         """
         multivec = self.generate_multi_vector(vec)
-        return self.M.dot(multivec)
+        return self.dot(multivec)
     @async_result
     def sum_of_squares(self, vec):
         r"""
@@ -1050,7 +1072,7 @@ class CollectorClass(Autoself):
         """
         # logger.info('sum_of_squares %s %s', vec.dtype, vec)
         multivec = self.generate_multi_vector(vec)
-        return sum(square(self.M.dot(multivec)))
+        return sum(square(self.dot(multivec)))
     @async_result
     def D_sum_of_squares(self, vec):
         r"""
@@ -1071,7 +1093,7 @@ class CollectorClass(Autoself):
         # d(s^2)/ds = 2s    d(ps)/ds = p     d(pt)/ds = 0
         # d(s^3)/ds = 3s^2  d(ps^2)/ds = 2ps   d(pst) = pt
         multivec = self.generate_multi_vector(vec)
-        return [sum(2 * self.M.dot(multivec) * self.M.dot(self.generate_multi_D_vector(vec, var))) for var in coeff_vars]
+        return [sum(2 * self.dot(multivec) * self.dot(self.generate_multi_D_vector(vec, var))) for var in coeff_vars]
 
 
 def square(x):
