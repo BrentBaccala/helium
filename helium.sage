@@ -525,11 +525,12 @@ def remove_duplicates():
     global results
     results = [(cc, cc.eval_polynomials(iv)) for cc in ccs]
     results = sorted(results, key=lambda x: x[1].time(), reverse=True)
+    fetched_results = map(lambda x: x[1].get(), results)
     for i in range(len(results)-1):
-        polys = map(lambda x: x[1].get(), results[i:])
+        polys = fetched_results[i:]
         u,c = np.unique(np.hstack(polys), return_counts=True)
         dups = u[c>1]
-        indices = [j for j,e in enumerate(results[i][1].get()) if e in dups]
+        indices = [j for j,e in enumerate(fetched_results[i]) if e in dups]
         results[i][0].delete_rows(indices)
 
 import multiprocessing, logging
@@ -891,6 +892,7 @@ class CollectorClass(Autoself):
             self.M = sp_unique(sp.vstack((self.M, pickle.load(fp))))
         fp.close()
         logger.info('matrix loaded from %s', fn)
+        logger.info(repr(self.M))
 
     def len_result(self):
         return len(self.result)
@@ -971,7 +973,7 @@ class CollectorClass(Autoself):
         logger.info('convert_to_matrix done')
 
     def delete_rows(self, indices):
-        logger.info('deleting rows %s', indices)
+        logger.info('deleting %d rows', len(indices))
         delete_rows_csr(self.M, sorted(indices, reverse=True))
 
     # no longer works because I can't figure how to multiply numpy matrices with Sage Expressions in them
