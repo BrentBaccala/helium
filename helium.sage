@@ -61,72 +61,6 @@ def powerset(iterable):
     s = list(iterable)
     return chain.from_iterable(combinations(s, r) for r in range(len(s)+1))
 
-# Rosenfeld-Groebner runs very slowly, even on Hydrogen first excited state
-#
-# I don't use it anymore.
-
-def rosenfeld_groebner():
-    # If I specify derivations=[x,y,z], then I have to use all three
-    # variables when constructing A(x,y,z), i.e, A(x,y) produces an error
-
-    (x,y,z) = var('x,y,z')
-    (A,B,expB,r,Psi) = function('A,B,expB,r,Psi')
-    (a,b,c,d,e) = var('a,b,c,d,e')
-    (f,g,h,i,j) = var('f,g,h,i,j')
-    var('E')
-
-    parameters = [a,b,c,d,e,  f,g,h,i,j,  E]
-
-    from sage.calculus.DifferentialAlgebra import DifferentialRing, BaseFieldExtension
-    DR = DifferentialRing(derivations = [x,y,z],
-                          blocks = [[A,B,expB,Psi,r], parameters],
-                          parameters = parameters)
-
-    def H(Psi):
-       return -diff(Psi,x,2)-diff(Psi,y,2)-diff(Psi,z,2)-(1/r(x,y,z))*Psi
-
-    # timings for various trial functions:
-    # all used [[A,B,expB,Psi,r], parameters] for block ordering
-    #
-    #  5 sec: Psi = e * exp(i*r)
-    # 45 sec: Psi = (a*x + e) * exp(i*r)
-    # 52 sec: Psi = (a*x + b*y + e) * exp(i*r)
-    # >13 hr: Psi = (d*r + e) * exp(i*r)
-
-    #rels = [A(x,y,z) == a*x + b*y + c*z + d*r(x,y,z) + e,
-    #        B(x,y,z) == f*x + g*y + h*z + i*r(x,y,z) + j,
-    #rels = [A(x,y,z) == d*r(x,y,z) + e,
-    rels = [A(x,y,z) == e,
-            B(x,y,z) == i*r(x,y,z),
-            r(x,y,z)^2 == x^2 + y^2 + z^2,
-            Psi(x,y,z) != 0,
-            Psi(x,y,z) == A(x,y,z)*expB(x,y,z),
-            diff(expB(x,y,z),x) == diff(B(x,y,z), x) * expB(x,y,z),
-            diff(expB(x,y,z),y) == diff(B(x,y,z), y) * expB(x,y,z),
-            diff(expB(x,y,z),z) == diff(B(x,y,z), z) * expB(x,y,z),
-            H(Psi(x,y,z)) == E*Psi(x,y,z)]
-
-    # expanding H and dividing out expB helps (a little):
-    #
-    #  8 sec: Psi = (a*x + e) * exp(i*r)
-    #  8 sec: Psi = (a*x + b*y + e) * exp(i*r)
-    # >1 min: Psi = (d*r + e) * exp(i*r)
-
-    Psi = A(x,y,z)*exp(B(x,y,z))
-    rels = [A(x,y,z) == (e),
-            B(x,y,z) == i*r(x,y,z),
-            r(x,y,z)^2 == x^2 + y^2 + z^2,
-            expand(H(Psi)/Psi - E)]
-
-    RDC = DR.RosenfeldGroebner(rels)
-
-    #Field = BaseFieldExtension (generators = parameters)
-    #RDC = DR.RosenfeldGroebner (rels, basefield = Field)
-
-    #print RDC
-
-    for id in RDC: print id
-
 
 
 var('x1,y1,z1,x2,y2,z2')
@@ -268,82 +202,6 @@ def create_bwb4():
 #
 # This is a slow step, so I've tried several different ways to do it.
 
-# This version (SR_expand) expands in the symbolic ring, by first converting
-# higher powers of the rvars to their expansions, then recursively extracting
-# coefficients from all of the cvars and rvars.
-
-def bwb2(expr):
-    if isinstance(expr, Expression) and expr.operator():
-       if expr.operator() == operator.pow and bool(expr.operands()[0] in SRr_s):
-           var = expr.operands()[0]
-           num = int(expr.operands()[1])
-           #return ((x1^2+y1^2+z1^2)^(int(num/2))) * (expr.operands()[0]^(int(num%2)))
-           return (globals()[str(var)])^(2*int(num/2)) * (var^(int(num%2)))
-       else:
-           return expr.operator()(*map(bwb2, expr.operands()))
-    else:
-       return expr
-
-# This version expands everything using Gynac (i.e, the symbolic ring), and collects
-# all the coefficients together in a list.  It runs very slow.
-
-def SR_expander(expr, vars):
-    if isinstance(expr, Expression) and len(vars) > 0:
-        l = map(lambda x: SR_expander(x, vars[1:]), expr.coefficients(vars[0], sparse=False))
-        return list(flatten(l))
-    else:
-        return [expr]
-
-# This version collects coefficients together into a dictionary.  It is also very slow.
-
-def SRdict_expander(expr, vars_expanded, vars_to_expand):
-    if isinstance(expr, Expression) and len(vars_to_expand) > 0:
-        v = vars_to_expand[0]
-	map(lambda l: SRdict_expander(l[0], vars_expanded * v^l[1], vars_to_expand[1:]), expr.coefficients(v))
-    else:
-        SRdict[vars_expanded] = SRdict.get(vars_expanded, 0) + expr
-
-# This version converts each monomial into a string and then splits
-# the strings apart using Python operations.  It's pretty slow, but
-# is more amenable to parallelisation.
-
-def SRdict_expander2(expr):
-    assert expr.operator() is sage.symbolic.operators.add_vararg
-    for monomial in expr.operands():
-        s = str(monomial)
-        if s[0] is '-':
-            sign='-'
-            s=s[1:]
-        else:
-            sign='+'
-        vs = s.split('*')
-        key = '*'.join(ifilter(lambda x: any([x.startswith(c) for c in ('x', 'y', 'z', 'r', 'P')]), vs))
-        value = '*'.join(ifilterfalse(lambda x: any([x.startswith(c) for c in ('x', 'y', 'z', 'r', 'P')]), vs))
-        SRdict[key] = SRdict.get(key, '') + sign + value
-
-# this version returns a dictionary instead of using a global
-
-def SRdict_expander2a(expr):
-    assert expr.operator() is sage.symbolic.operators.add_vararg
-    SRdict = dict()
-    for monomial in expr.operands():
-        s = str(monomial)
-        if s[0] is '-':
-            sign='-'
-            s=s[1:]
-        else:
-            sign='+'
-        vs = s.split('*')
-        key = '*'.join(ifilter(lambda x: any([x.startswith(c) for c in ('x', 'y', 'z', 'r', 'P')]), vs))
-        value = '*'.join(ifilterfalse(lambda x: any([x.startswith(c) for c in ('x', 'y', 'z', 'r', 'P')]), vs))
-        SRdict[key] = SRdict.get(key, '') + sign + value
-    return SRdict
-
-def SR_expand():
-    global eqns
-    bwb4 = create_bwb4()
-    eqns = set(SR_expander(bwb2(bwb4), cvars + SRr_s + (Phi,)))
-
 # Runs at a reasonable speed after create_bwb4() has been called.
 # 'bwb4a' still needs to be expanded.
 
@@ -351,22 +209,6 @@ def SR_expand2a():
     global bwb4a
     sdict = {SR.var(v)^d : (globals()[v]^d, SR.var(v)*globals()[v]^(d-1))[d%2] for d in range(2,8) for v in ('r1','r2','r12')}
     bwb4a = bwb4.subs(sdict)
-
-# Runs out of memory.
-
-def SR_expand2b():
-    global bwb4b
-    bwb4b = expand(bwb4a)
-
-def SRexpand2c(start, stop):
-    ops = bwb4a.operands()
-    ex = []
-    ex.append(expand(sum(islice(ops, start, stop))))
-
-def SRdict_expander4():
-    global thousands
-    for thousands in range(0, len(ops), 1000):
-        SRdict_expander2(expand(sum(islice(ops, thousands, thousands+1000))))
 
 # Perform the expansion step using multiple processes.
 #
@@ -841,25 +683,6 @@ def sp_unique(sp_matrix, axis=0, new_format=None):
         ret = ret.T
     return ret
 
-# from https://stackoverflow.com/a/13078768
-def delete_row_csr(mat, i):
-    if not isinstance(mat, scipy.sparse.csr_matrix):
-        raise ValueError("works only for CSR format -- use .tocsr() first")
-    n = mat.indptr[i+1] - mat.indptr[i]
-    if n > 0:
-        mat.data[mat.indptr[i]:-n] = mat.data[mat.indptr[i+1]:]
-        mat.data = mat.data[:-n]
-        mat.indices[mat.indptr[i]:-n] = mat.indices[mat.indptr[i+1]:]
-        mat.indices = mat.indices[:-n]
-    mat.indptr[i:-1] = mat.indptr[i+1:]
-    mat.indptr[i:] -= n
-    mat.indptr = mat.indptr[:-1]
-    mat._shape = (mat._shape[0]-1, mat._shape[1])
-
-def delete_rows_csr(mat, indices):
-    for i in indices:
-        delete_row_csr(mat, i)
-
 # from https://stackoverflow.com/a/26504995
 #
 
@@ -1183,120 +1006,14 @@ def start_manager_process():
     mc = manager.ManagerClass()
 
 
-
-
-
-def PolynomialRing_expand():
-
-    # This method creates a PolynomialRing QQ(E,As,Bs)[cvars, rvars],
-    # then quotients it by the ideal generated by the relationships
-    # between the rvars and the cvars, converts bwb4 into this new
-    # ring, extracts all of the QQ(E,As,Bs) coefficients, and
-    # forms the numerators into eqns.
-    #
-    # BWB : QQ(E,As,Bs)
-    # BWB2: QQ(E,As,Bs)[cvars, rvars]
-    # BWB3: QQ(E,As,Bs)[cvars, rvars]/(relations)
-
-    global BWB, BWB2, BWB3
-
-    # use custom term ordering to prioritize elimination of 'E' variable
-    # if Sage's Groebner basis-based techniques are used
-    order = TermOrder('deglex(1),degrevlex({})'.format(len(Avars)+len(Bvars)))
-    BWB = PolynomialRing(QQ, (var('E'),) + Avars + Bvars, order=order)
-    #BWB = PolynomialRing(QQ, (var('E'),) + Avars + Bvars)
-
-    #BWB2.<x,y,z,r> = Frac(BWB)[]
-    BWB2 = PolynomialRing(Frac(BWB), cvars + tuple(maps.get(v^2, v) for v in rvars))
-    #BWB3 = BWB2.quo(r^2-(x^2+y^2+z^2))
-    BWB3 = BWB2.quo([k - v^2 for k,v in maps.items()])
-
-    bwb4 = create_bwb4()
-
-    global bwb3
-    global eqns
-    #bwb3 = BWB3(numerator(expand(bwb(eq/exp(B)))))
-    bwb3 = BWB3(bwb4)
-
-    global eqns
-    eqns = map(numerator, bwb3.lift().coefficients())
-
-    #for poly in eqns:
-    #    print poly
-
-# PolynomialRing_expand() runs very slowly on helium, so I've tried to wrap my own version of it...
-
-# probably doesn't work - more work has gone into numpy_expand
-def bwb_expand():
-  bwb4 = create_bwb4()
-  for count,monomial in enumerate(bwb4.operands()):
-    index = [monomial.degree(c) for c in cvars]
-    map(operator.add, index, [1,1,1,0,0,0] * monomial.degree(SR.var('r1'))/2)
-    map(operator.add, index, [0,0,0,1,1,1] * monomial.degree(SR.var('r2'))/2)
-    map(operator.add, index, [1,1,1,-1,-1,-1] * monomial.degree(SR.var('r12'))/2)
-    index = index + [monomial.degree(SR.var('r1')) % 2, monomial.degree(SR.var('r2')) % 2, monomial.degree(SR.var('r12')) % 2]
-    print count, monomial, index, monomial.coefficient(map(operator.mul, v_s, index))
-
-import numpy as np
-term_expansion = dict()
-equations = dict()
-
-def numpy_expand():
-  bwb4 = create_bwb4()
-  for count,monomial in enumerate(bwb4.operands()):
-    index = np.array([int(monomial.degree(c)) for c in cvars] + [0,0,0])
-    index2 = np.array([int(monomial.degree(c)) for c in v_s])
-    index3 = np.array([int(monomial.degree(c)) for c in SRr_s])
-    try:
-        terms = term_expansion[tuple(index3/2)]
-    except KeyError:
-        expansion = expand(mul(map(operator.pow, rvars, 2*(index3/2))))
-        assert expansion.operator() is sage.symbolic.operators.add_vararg
-        terms = [np.array([int(term.degree(c)) for c in cvars] + [0,0,0]) for term in expansion.operands()]
-        term_expansion[tuple(index3/2)] = terms
-
-    index = index + np.array([0,0,0,0,0,0, int(monomial.degree(SR.var('r1'))) % 2, int(monomial.degree(SR.var('r2'))) % 2, int(monomial.degree(SR.var('r12'))) % 2])
-    #for term in terms:
-    #    print count, monomial, index + term, monomial.coefficient(mul(map(operator.pow, v_s, index2)))
-    multiplier = monomial.coefficient(mul(map(operator.pow, v_s, index2)))
-    for term in terms:
-        equations[tuple(index + term)] = equations.get(tuple(index + term), 0) + multiplier
-    if count % 100 == 0: print count
-
-#raise(None)
-
-print
-print
-
-#Ss = solve (map(SR, eqns), *((E,) + Avars + Bvars), algorithm='sympy')
-#for s in Ss: print s
-#exit()
-
-# Tried with a finite field.  Same performance issues
-# (BWB's coefficient fields needs to be changed to ZZ)
-#BWBff = PolynomialRing(GF(3), (var('E'),) + Avars + Bvars)
-#BWB2ff.<x,y,z,r> = Frac(BWBff)[]
-#hom = BWB.hom(BWBff)
-#bwbIf = ideal(map(hom, bwbI.gens()))
-
-# If we used PolynomialRing_expand(), then we can form an ideal from
-# eqns and use Groebner basis techniques to factor the ideal.
-
-def associated_primes():
-
-    bwbI = ideal(eqns)
-    primes = bwbI.associated_primes()
-
-    for prime in primes:
-        print prime._repr_short()
-
-
 # Look for solutions using an approximate numerical technique
 
 # Standard operator overloading lets us use Sage's multi-precision
 # floating point numbers for most numpy operations, but a few need to
 # be overridden to use Sage tests.  Use some Python magic to achieve
 # this.
+
+import numpy as np
 
 if 'np_isfinite' not in vars():
     np_isfinite = np.isfinite
@@ -1328,95 +1045,80 @@ real_type = np.float64
 # to avoid: the norm of 'v' (avoid the origin), and zero_variety (which
 # includes the origin).
 
-use_multiprocessing = True
-
 last_time = 0
 
-if use_multiprocessing:
+def fn(v):
+    r"""
+    Evaluate our polynomials at a given coordinate.
 
-    def fn(v):
-        r"""
-        Evaluate our polynomials at a given coordinate.
+    INPUT:
 
-        INPUT:
+    - ``vec`` -- a vector of real values for all coeff_vars
 
-        - ``vec`` -- a vector of real values for all coeff_vars
+    OUTPUT:
 
-        OUTPUT:
+    - a numpy vector of all of our polynomials, evaluated at ``vec``
 
-        - a numpy vector of all of our polynomials, evaluated at ``vec``
+    ALGORITHM:
 
-        ALGORITHM:
+    Call the `eval_polynomials` method for all CollectionClass's
+    in parallel, then concatenate all of the results together.
+    """
 
-        Call the `eval_polynomials` method for all CollectionClass's
-        in parallel, then concatenate all of the results together.
-        """
+    res = np.hstack(map(lambda x: x.get(), [cc.eval_polynomials(v) for cc in ccs]))
+    return res
 
-        res = np.hstack(map(lambda x: x.get(), [cc.eval_polynomials(v) for cc in ccs]))
-        return res
+def jacfn(v):
+    r"""
+    Evaluate the Jacobian matrix (the matrix of first-order
+    partial derivatives) of our polynomials
 
-    def jacfn(v):
-        r"""
-        Evaluate the Jacobian matrix (the matrix of first-order
-        partial derivatives) of our polynomials
+    INPUT:
 
-        INPUT:
+    - ``vec`` -- a vector of real values for all coeff_vars
 
-        - ``vec`` -- a vector of real values for all coeff_vars
+    OUTPUT:
 
-        OUTPUT:
+    - the Jacobian matrix, evaluated at ``vec``, as a numpy matrix,
+    with as many rows as polynomials and as many columns as coeff_vars
 
-        - the Jacobian matrix, evaluated at ``vec``, as a numpy matrix,
-        with as many rows as polynomials and as many columns as coeff_vars
+    ALGORITHM:
 
-        ALGORITHM:
+    Call the `jacobian` method for all CollectionClass's in
+    parallel, then concatenate all of the results together
+    (and transpose them).
+    """
 
-        Call the `jacobian` method for all CollectionClass's in
-        parallel, then concatenate all of the results together
-        (and transpose them).
-        """
+    res = np.hstack(map(lambda x: x.get(), [cc.jacobian(v) for cc in ccs])).T
+    return res
 
-        res = np.hstack(map(lambda x: x.get(), [cc.jacobian(v) for cc in ccs])).T
-        return res
+def minfunc(v):
+    # Save a copy of vector to aid in stopping and restarting the calculation
+    global last_v
+    last_v = v
 
-    def minfunc(v):
-        # Save a copy of vector to aid in stopping and restarting the calculation
-        global last_v
-        last_v = v
-
-        d = dict(zip(coeff_vars, v))
-        sum_of_squares = sum(map(lambda x: x.get(), [cc.sum_of_squares(v) for cc in ccs]))
-        res = real_type(sum_of_squares / zero_variety.subs(d))
-        global last_time
-        if last_time == 0:
-            print res
-        else:
-            print "{:<30} {:20} sec".format(res, time.time()-last_time)
-        last_time = time.time()
-        return res
-
-    def jac(v):
-        global last_v
-        last_v = v
-
-        d = dict(zip(coeff_vars, v))
-        sum_of_squares = sum(map(lambda x: x.get(), [cc.sum_of_squares(v) for cc in ccs]))
-        D_sum_of_squares = sum(map(lambda x: np.array(x.get()), [cc.D_sum_of_squares(v) for cc in ccs]))
-        zero_var = v.dtype.type(zero_variety.subs(d))
-        Av = v * np.array([c in Avars for c in coeff_vars])
-        res = ((D_sum_of_squares*zero_var - 2*np.array(Av)*sum_of_squares)/zero_var^2)
-        return res
-
-else:
-
-    def minfunc(v):
-        res = real_type(minpoly.subs(dict(zip(coeff_vars, v))) / zero_variety.subs(dict(zip(coeff_vars, v))))
+    d = dict(zip(coeff_vars, v))
+    sum_of_squares = sum(map(lambda x: x.get(), [cc.sum_of_squares(v) for cc in ccs]))
+    res = real_type(sum_of_squares / zero_variety.subs(d))
+    global last_time
+    if last_time == 0:
         print res
-        return res
+    else:
+        print "{:<30} {:20} sec".format(res, time.time()-last_time)
+    last_time = time.time()
+    return res
 
-    def jac(v):
-        res = np.array([real_type(d.subs(dict(zip(coeff_vars, v)))) for d in minpoly_derivatives])
-        return res
+def jac(v):
+    global last_v
+    last_v = v
+
+    d = dict(zip(coeff_vars, v))
+    sum_of_squares = sum(map(lambda x: x.get(), [cc.sum_of_squares(v) for cc in ccs]))
+    D_sum_of_squares = sum(map(lambda x: np.array(x.get()), [cc.D_sum_of_squares(v) for cc in ccs]))
+    zero_var = v.dtype.type(zero_variety.subs(d))
+    Av = v * np.array([c in Avars for c in coeff_vars])
+    res = ((D_sum_of_squares*zero_var - 2*np.array(Av)*sum_of_squares)/zero_var^2)
+    return res
 
 import random
 
@@ -1443,10 +1145,6 @@ def random_numerical(iv=0):
 
     global zero_variety, minpoly, minpoly_derivatives
     zero_variety = sum(map(square, Avars))
-    if not use_multiprocessing:
-        global minpoly, minpoly_derivatives
-        minpoly = sum([poly*poly for poly in eqns])
-        minpoly_derivatives = [diff(minpoly / zero_variety, v) for v in coeff_vars]
 
     global SciMin
     SciMin = scipy.optimize.minimize(minfunc, iv, jac=jac, method='BFGS', options={'return_all':True})
@@ -1504,23 +1202,3 @@ def find_relation():
 
         if Lrow[-1] != 0:
             break
-
-# print an input file for Bertini to numerically find all irreducible components
-
-def bertini():
-    print '''
-CONFIG
-  TrackType:1;
-END;
-
-INPUT
-
-'''
-    print 'variable_group ', ','.join(map(str, BWB.gens())), ';'
-
-    print 'function ', ','.join(['f{}'.format(i) for i in range(len(eqns))]), ';'
-
-    for i in range(len(eqns)):
-        print 'f{} = '.format(i), eqns[i], ';'
-
-    print 'END;'
