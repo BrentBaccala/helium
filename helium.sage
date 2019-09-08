@@ -1093,6 +1093,9 @@ def jacfn(v):
     res = np.hstack(map(lambda x: x.get(), [cc.jacobian(v) for cc in ccs])).T
     return res
 
+def sum_of_squares(v):
+    return sum(map(lambda x: x.get(), [cc.sum_of_squares(v) for cc in ccs]))
+
 def minfunc(v):
     # Save a copy of vector to aid in stopping and restarting the calculation
     global last_v
@@ -1123,6 +1126,70 @@ def jac(v):
 
 import random
 
+def optimize_step(vec):
+    r"""x
+
+    NOT CURRENTLY USED, as it doesn't converge very quickly near the
+    solution, probably due to a poor choice of the direction vector.
+
+    My attempt at an improved line search algorithm, which takes
+    advantage that given a direction vector on an algebraic variety,
+    the projection of the sum of squares onto that line is itself a
+    polynomial, and given a degree bound on the variety's defining
+    polynomials we can put a degree bound on the sum of squares
+    polynomial, thus we can easily compute a polynomial that doesn't
+    just fit the sum of squares, but describes it exactly.
+
+    "Numerical Recipes" recommends against this type of procedure
+    on p. 384, section 9.7, "Line Searches and Backtracking":
+
+        Until the early 1970s, standard practice was to choose λ so
+        that x new exactly minimizes f in the direction p. However, we
+        now know that it is extremely wasteful of function evaluations
+        to do so.
+
+    In this case, NR's advice might not apply so readily.  Each step
+    requires the calculation of the gradient vector, which for us is
+    the most time consuming operation, requiring N(coeff_vars) matrix
+    multiplications, while evaluating the function only requires a
+    single matrix multiplication.  So for N(coeff_vars) large (more
+    than seven, if the variety's degree bound is three), it makes
+    sense to do a few more function evaluations at each step.
+
+    """
+    # pick a step size in the direction of 'gradient'
+    v0 = minfunc(vec)
+    gradient = jac(vec)
+    norm = sum(square(gradient))
+    evalstep = gradient*v0/norm
+
+    # We want to sample at seven points to fit a sixth degree polynomial.
+    # We expect a zero "close" to -1, so this will sample three points
+    # on either size of it
+    points = [vec + i*evalstep for i in [-4,-3,-2,-1,0,1,2]]
+    values = map(sum_of_squares, points)
+
+    # Now fit a polynomial to this data
+    N = np.polynomial.polynomial.Polynomial.fit([-4,-3,-2,-1,0,1,2],values,6,[])
+
+    # The denominator is the sum of (A_0 + lambda A_d)^2 for all As
+    D = sum([square(np.polynomial.polynomial.Polynomial((vec[i], evalstep[i]))) for i in Aindices])
+
+    # the numerator of the first derivative of the function we're trying to minimize
+    f = (D * N.deriv() - N * D.deriv())
+
+    # find the real roots of the first derivative
+    all_roots = np.roots(list(reversed(list(f.coef))))
+    roots = [c.real for c in all_roots if np.isclose(c.imag, 0)]
+
+    # find the minimum and its location
+    value_root_pairs = [(N(r)/D(r), r) for r in roots]
+    value_root = min(value_root_pairs)
+
+    # return the computed step
+    nextstep = vec + evalstep*value_root[1]
+    return nextstep
+
 def random_numerical(iv=0):
 
     import scipy.optimize
@@ -1139,16 +1206,22 @@ def random_numerical(iv=0):
     if isinstance(iv, int) or isinstance(iv, Integer):
         random.seed(iv)        # for random
         set_random_seed(iv)    # for RR.random_element()
-        iv = [random.random() for i in range(nvars)]
+        iv = np.array([random.random() for i in range(nvars)])
 
     # We know the zero variety (all Avar's zero, so Psi is zero) will be
     # a "solution", but we want to avoid it
 
-    global zero_variety, minpoly, minpoly_derivatives
+    global zero_variety, Aindices
     zero_variety = sum(map(square, Avars))
+    Aindices = [i for i,c in enumerate(coeff_vars) if c in Avars]
 
     global SciMin
     SciMin = scipy.optimize.minimize(minfunc, iv, jac=jac, method='BFGS', options={'return_all':True})
+
+    #i = 0
+    #while i < 50:
+    #    iv = optimize_step(iv)
+    #    i += 1
 
     # This only optimizes the vector function itself, and doesn't do
     # anything to remove the superfluous zeros from zero_variety.
