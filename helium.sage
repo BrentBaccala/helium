@@ -41,9 +41,12 @@
 # - allow worker processes on different hosts
 # - remove unused code like Rosenfeld-Groebner
 # - allow second-order ODEs in trial form
+# - check collected coefficient polynomials to see if they factor
 # - compute bound on degree of coefficient monomials
 # - automate finding polynomial relations
 # - save checkpoints of optimization iterations
+# - optimize scipy sparse matrix by vector multiplication
+# - optimize creation of multi-vectors
 
 from itertools import *
 
@@ -1023,13 +1026,13 @@ class CollectorClass(Autoself):
 
         npv = np.array(v)
 
-        firsts = np.zeros(len(coeff_vars))
+        firsts = np.zeros(npv.size)
         firsts[ind] = int(1)
 
-        two_products = [e * npv[i:] for i,e in enumerate(v)]
-        two_products_D = [firsts[i] * npv[i:] + firsts[i:] * npv[i] for i in range(len(coeff_vars))]
+        two_products = [npv[i] * npv[i:] for i in range(npv.size)]
+        two_products_D = [firsts[i] * npv[i:] + firsts[i:] * npv[i] for i in range(npv.size)]
 
-        three_products = [np.hstack(two_products[i:]) *firsts[i] + np.hstack(two_products_D[i:]) * npv[i] for i in range(len(coeff_vars))]
+        three_products = [np.hstack(two_products[i:]) * firsts[i] + np.hstack(two_products_D[i:]) * npv[i] for i in range(npv.size)]
 
         res = np.hstack([firsts] + two_products_D + three_products)
         self.multi_D_vec_times += time.time() - start_time
@@ -1061,6 +1064,24 @@ class CollectorClass(Autoself):
         """
         multivec = self.generate_multi_vector(vec)
         return self.dot(multivec)
+
+    @async_result
+    def jacobian(self, vec):
+        r"""
+        Evaluate the Jacobian matrix (the matrix of first-order
+        partial derivatives) of our polynomials
+
+        INPUT:
+
+        - ``vec`` -- a vector of real values for all coeff_vars
+
+        OUTPUT:
+
+        - the Jacobian matrix, evaluated at ``vec``, as a numpy
+        matrix wrapped in a proxy object
+        """
+        return np.vstack([self.dot(self.generate_multi_D_vector(vec, var)) for var in coeff_vars])
+
     @async_result
     def sum_of_squares(self, vec):
         r"""
@@ -1077,6 +1098,7 @@ class CollectorClass(Autoself):
         # logger.info('sum_of_squares %s %s', vec.dtype, vec)
         multivec = self.generate_multi_vector(vec)
         return sum(square(self.dot(multivec)))
+
     @async_result
     def D_sum_of_squares(self, vec):
         r"""
@@ -1312,6 +1334,51 @@ last_time = 0
 
 if use_multiprocessing:
 
+    def fn(v):
+        r"""
+        Evaluate our polynomials at a given coordinate.
+
+        INPUT:
+
+        - ``vec`` -- a vector of real values for all coeff_vars
+
+        OUTPUT:
+
+        - a numpy vector of all of our polynomials, evaluated at ``vec``
+
+        ALGORITHM:
+
+        Call the `eval_polynomials` method for all CollectionClass's
+        in parallel, then concatenate all of the results together.
+        """
+
+        res = np.hstack(map(lambda x: x.get(), [cc.eval_polynomials(v) for cc in ccs]))
+        return res
+
+    def jacfn(v):
+        r"""
+        Evaluate the Jacobian matrix (the matrix of first-order
+        partial derivatives) of our polynomials
+
+        INPUT:
+
+        - ``vec`` -- a vector of real values for all coeff_vars
+
+        OUTPUT:
+
+        - the Jacobian matrix, evaluated at ``vec``, as a numpy matrix,
+        with as many rows as polynomials and as many columns as coeff_vars
+
+        ALGORITHM:
+
+        Call the `jacobian` method for all CollectionClass's in
+        parallel, then concatenate all of the results together
+        (and transpose them).
+        """
+
+        res = np.hstack(map(lambda x: x.get(), [cc.jacobian(v) for cc in ccs])).T
+        return res
+
     def minfunc(v):
         # Save a copy of vector to aid in stopping and restarting the calculation
         global last_v
@@ -1384,6 +1451,10 @@ def random_numerical(iv=0):
     global SciMin
     SciMin = scipy.optimize.minimize(minfunc, iv, jac=jac, method='BFGS', options={'return_all':True})
 
+    # This only optimizes the vector function itself, and doesn't do
+    # anything to remove the superfluous zeros from zero_variety.
+
+    #SciMin = scipy.optimize.root(fn, iv, jac=jacfn, method='lm')
     #print SciMin
 
     print
