@@ -292,7 +292,8 @@ def multi_init():
 # busy, the increments can take some time to run, creating a very
 # noticeable delay when starting a new worker.
 
-managers = {}
+if not 'managers' in vars():
+    managers = {}
 
 def start_collector():
     collector_manager = BaseManager()
