@@ -47,6 +47,7 @@
 # - save checkpoints of optimization iterations
 # - optimize scipy sparse matrix by vector multiplication
 # - optimize creation of multi-vectors
+# - allow workers to be added or removed on the fly
 
 from itertools import *
 
@@ -541,6 +542,14 @@ class Autoself:
                     return proxy
         return None
 
+    def autocreate(self, classname, *args):
+        server = getattr(multiprocessing.current_process(), '_manager_server', None)
+        (ident, exposed) = server.create(None, classname, *args)
+        token = multiprocessing.managers.Token(typeid=classname, address=server.address, id=ident)
+        proxy = multiprocessing.managers.AutoProxy(token, 'pickle', authkey=server.authkey)
+        server.decref(None, ident)
+        return proxy
+
     def join_threads(self):
         if hasattr(self, 'threads'):
             for th in self.threads:
@@ -697,6 +706,96 @@ def delete_rows_csr(mat, indices):
     mask = np.ones(mat.shape[0], dtype=bool)
     mask[indices] = False
     return mat[mask]
+
+class JacobianMatrix(Autoself):
+    r"""
+    Proxy class that wraps a Jacobian matrix.
+
+    The matrix is stored locally on a worker process and the main
+    process operates on it using method calls.  The `get` method,
+    while provided, should be avoided if the matrix is large.
+    Instead, methods are provided that allow a LU decomposition
+    algorithm to be implemented in the main process, transferring only
+    those rows that need to be permuted to the top.
+    """
+
+    @async_method
+    def _start_calculation(self):
+        start_time = time.time()
+        self.M = np.stack([self.collector.dot(self.collector.generate_multi_D_vector(self.vec, var)) for var in coeff_vars], axis=1)
+        self.U = np.array([])
+        self._time = time.time() - start_time
+        self.cond.acquire()
+        self.ready = True
+        self.cond.notify_all()
+        self.cond.release()
+
+    def _wait_for_result(self):
+        self.cond.acquire()
+        if not self.ready:
+            self.cond.wait()
+        self.cond.release()
+
+    def __init__(self, collector, vec):
+        self.cond = threading.Condition()
+        if collector is None:
+            self.ready = True
+            self.M = vec
+            self.U = np.array([])
+            return
+        self.ready = False
+        self.collector = collector
+        self.vec = vec
+        self._start_calculation()
+
+    def get(self):
+        self._wait_for_result()
+        return self.M
+
+    def time(self):
+        self._wait_for_result()
+        return self._time
+
+    def shape(self):
+        self._wait_for_result()
+        return self.M.shape
+
+    @async_result
+    def max_in_column(self, col, offset):
+        self._wait_for_result()
+        b = abs(self.M.T[col] + offset)
+        row = b.argmax()
+        return (b[row], row)
+
+    # XXX @async_result breaks the method if it's called directly
+    #@async_result
+    def LR_column_step(self, col):
+        self._wait_for_result()
+        global b_vector, b
+        b_vector = np.append(self.U.T[0:col], -1)
+        #b = abs((self.M.T[0:col+1] * b_vector)[0])
+        if col == 0:
+            b = abs(self.M[:,0])
+        else:
+            b = abs(self.M.T[0:col+1].T.dot(b_vector))
+        row = b.argmax()
+        return (b[row], row)
+
+    def fetch_and_remove_row(self, row):
+        res = self.M[row]
+        self.M = np.delete(self.M, row, axis=0)
+        return res
+
+    def add_U_row(self, new_U_row):
+        self.U = np.append(self.U, new_U_row)
+
+    def multiply_column(self, col, val):
+        if col > 0:
+            global m_vector
+            m_vector = self.U.T[0:col]
+            print col, m_vector
+            self.M[:,col] -= self.M[:,0:col].dot(m_vector)
+        self.M[:,col] *= val
 
 class CollectorClass(Autoself):
     result = {}
@@ -897,7 +996,6 @@ class CollectorClass(Autoself):
         multivec = self.generate_multi_vector(vec)
         return self.dot(multivec)
 
-    @async_result
     def jacobian_fns(self, vec):
         r"""
         Evaluate the Jacobian matrix (the matrix of first-order
@@ -912,7 +1010,7 @@ class CollectorClass(Autoself):
         - the Jacobian matrix, evaluated at ``vec``, as a numpy
         matrix wrapped in a proxy object
         """
-        return np.vstack([self.dot(self.generate_multi_D_vector(vec, var)) for var in coeff_vars])
+        return self.autocreate('JacobianMatrix', self, vec)
 
     @async_result
     def sum_of_squares(self, vec):
@@ -1022,6 +1120,7 @@ BaseManager.register('ManagerClass', ManagerClass)
 BaseManager.register('ExpanderClass', ExpanderClass)
 BaseManager.register('CollectorClass', CollectorClass)
 BaseManager.register('AsyncResult', AsyncResult)
+BaseManager.register('JacobianMatrix', JacobianMatrix)
 
 def start_manager_process():
     global manager, mc
@@ -1175,6 +1274,31 @@ def jac(v):
     return res
 
 import random
+
+def LU_decomposition(matrices):
+    (rows, cols) = matrices[0].shape()
+
+    global L,U
+    L = []
+    U = []
+    old_rs = []
+    next_U_row = np.zeros(cols)
+    for i in range(cols):
+        #((val, row), submatrix) = max(map(lambda x: (x.get(), m), [m.LR_column_step(i) for m in matrices]))
+        global val, row, submatrix, r, new_U_row
+        ((val, row), submatrix) = max(map(lambda x: (x, m), [m.LR_column_step(i) for m in matrices]))
+        r = submatrix.fetch_and_remove_row(row)
+        old_rs.append(r)
+        L.append(r * [n < i for n in range(cols)] + [n == i for n in range(cols)])
+        #new_U_row = r * [n >= i for n in range(cols)]
+        new_U_row = np.zeros(cols)
+        for ii in range(i+1):
+            new_U_row[ii] = old_rs[ii][i] - sum([L[ii][k]*U[k][i] for k in range(ii)])
+        U.append(new_U_row)
+        for m in matrices: m.add_U_row(new_U_row)
+        for m in matrices: m.multiply_column(i, 1/val)
+    return (L, U)
+
 
 def optimize_step(vec):
     r"""x
