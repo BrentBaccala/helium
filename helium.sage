@@ -945,6 +945,17 @@ class CollectorClass(Autoself):
         multivec = self.generate_multi_vector(vec)
         return [sum(2 * self.dot(multivec) * self.dot(self.generate_multi_D_vector(vec, var))) for var in coeff_vars]
 
+# count up which equations have 1st, 2nd, 3rd degree monomials
+# (`a` is a CollectionClass obtained from get_obj() in an rconsole session)
+#
+# ones = np.array(map(lambda l: int(any(l)), a.M.astype(bool).T[:17].T.toarray()))
+# twos = np.array(map(lambda l: int(any(l)), a.M.astype(bool).T[17:170].T.toarray()))
+# threes = np.array(map(lambda l: int(any(l)), a.M.astype(bool).T[170:].T.toarray()))
+
+# convert first row of a CollectorClass array back to a Sage expression
+#
+# B = a.generate_multi_vector(coeff_vars)
+# e = sum(a.M[0].toarray() * B)
 
 def square(x):
     return x*x
@@ -983,6 +994,8 @@ def bind(instance, func, as_name=None):
     bound_method = func.__get__(instance, instance.__class__)
     setattr(instance, as_name, bound_method)
     return bound_method
+
+
 
 # bind = lambda instance, func, asname: setattr(instance, asname, func.__get__(instance, instance.__class__))
 
@@ -1069,6 +1082,23 @@ def fn(v):
     res = np.hstack(map(lambda x: x.get(), [cc.eval_polynomials(v) for cc in ccs]))
     return res
 
+def fndivA(v):
+    # Save a copy of vector to aid in stopping and restarting the calculation
+    global last_v
+    last_v = v
+
+    res = np.hstack(map(lambda x: x.get(), [cc.eval_polynomials(v) for cc in ccs]))
+    Adenom = sqrt(sum([square(v[i]) for i in Aindices]))
+
+    global last_time
+    sum_of_squares = sum(square(res/Adenom))
+    if last_time == 0:
+        print sum_of_squares
+    else:
+        print "{:<30} {:20} sec".format(sum_of_squares, time.time()-last_time)
+    last_time = time.time()
+    return res/Adenom
+
 def jacfn(v):
     r"""
     Evaluate the Jacobian matrix (the matrix of first-order
@@ -1091,6 +1121,16 @@ def jacfn(v):
     """
 
     res = np.hstack(map(lambda x: x.get(), [cc.jacobian(v) for cc in ccs])).T
+    return res
+
+def jac_fndivA(v):
+    global N,dN,Av,Adenom
+    N = np.hstack(map(lambda x: x.get(), [cc.eval_polynomials(v) for cc in ccs]))
+    dN = np.hstack(map(lambda x: x.get(), [cc.jacobian(v) for cc in ccs])).T
+    Av = v * np.array([c in Avars for c in coeff_vars])   # could form a global vector for this
+    Adenomsq = sum([square(v[i]) for i in Aindices])
+    Adenom = sqrt(Adenomsq)
+    res = dN/Adenom - np.outer(N,Av)/Adenom/Adenomsq
     return res
 
 def sum_of_squares(v):
@@ -1216,7 +1256,7 @@ def random_numerical(iv=0):
     Aindices = [i for i,c in enumerate(coeff_vars) if c in Avars]
 
     global SciMin
-    SciMin = scipy.optimize.minimize(minfunc, iv, jac=jac, method='BFGS', options={'return_all':True})
+    #SciMin = scipy.optimize.minimize(minfunc, iv, jac=jac, method='BFGS', options={'return_all':True})
 
     #i = 0
     #while i < 50:
@@ -1226,7 +1266,11 @@ def random_numerical(iv=0):
     # This only optimizes the vector function itself, and doesn't do
     # anything to remove the superfluous zeros from zero_variety.
 
-    #SciMin = scipy.optimize.root(fn, iv, jac=jacfn, method='lm')
+    # optimize.root methods:
+    # 'hybr' (the default) requires same num of eqns as vars
+    # 'lm' uses a QR factorization of the Jacobian, then the Levenberg–Marquardt line search algorithm
+    # the others uses various approximations to the Jacobian
+    SciMin = scipy.optimize.root(fndivA, iv, jac=jac_fndivA, method='lm')
     #print SciMin
 
     print
