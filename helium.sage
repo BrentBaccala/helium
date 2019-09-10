@@ -1122,13 +1122,13 @@ def jacfn(v):
     (and transpose them).
     """
 
-    res = np.hstack(map(lambda x: x.get(), [cc.jacobian_fns(v) for cc in ccs])).T
+    res = np.vstack(map(lambda x: x.get(), [cc.jacobian_fns(v) for cc in ccs]))
     return res
 
 def jac_fndivA(v):
     global N,dN,Av,Adenom
     N = np.hstack(map(lambda x: x.get(), [cc.eval_fns(v) for cc in ccs]))
-    dN = np.hstack(map(lambda x: x.get(), [cc.jacobian_fns(v) for cc in ccs])).T
+    dN = np.vstack(map(lambda x: x.get(), [cc.jacobian_fns(v) for cc in ccs]))
     Av = v * np.array([c in Avars for c in coeff_vars])   # could form a global vector for this
     Adenomsq = sum([square(v[i]) for i in Aindices])
     Adenom = sqrt(Adenomsq)
