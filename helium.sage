@@ -369,7 +369,7 @@ def remove_duplicates():
     """
     iv = [random.random() for i in coeff_vars]
     global results
-    results = [cc.eval_polynomials(iv) for cc in ccs]
+    results = [cc.eval_fns(iv) for cc in ccs]
     fetched_results = map(lambda x: x.get(), results)
     sizes = [cc.nrows() for cc in ccs]
     value_to_count = dict(zip(*np.unique(np.hstack(fetched_results), return_counts=True)))
@@ -874,7 +874,7 @@ class CollectorClass(Autoself):
         return res
 
     @async_result
-    def eval_polynomials(self, vec):
+    def eval_fns(self, vec):
         r"""
         Evaluate our polynomials
 
@@ -890,7 +890,7 @@ class CollectorClass(Autoself):
         return self.dot(multivec)
 
     @async_result
-    def jacobian(self, vec):
+    def jacobian_fns(self, vec):
         r"""
         Evaluate the Jacobian matrix (the matrix of first-order
         partial derivatives) of our polynomials
@@ -924,9 +924,10 @@ class CollectorClass(Autoself):
         return sum(square(self.dot(multivec)))
 
     @async_result
-    def D_sum_of_squares(self, vec):
+    def jacobian_sum_of_squares(self, vec):
         r"""
-        Compute the Jacobian vector of the sum of squares of our polynomials
+        Compute the Jacobian vector (aka gradient) of the sum of
+        squares of our polynomials
 
         INPUT:
 
@@ -936,6 +937,7 @@ class CollectorClass(Autoself):
 
         - the vector of partial derivatives of sum(p^2) w.r.t each coeff_var,
           evaluated at ``vec``
+
         """
         # d(p^a s^b t^c)/ds = b(p^a s^(b-1) t^c),
         # so (p^a s^b t^c) should map to b(p^a s^(b-1) t^c)
@@ -1075,11 +1077,11 @@ def fn(v):
 
     ALGORITHM:
 
-    Call the `eval_polynomials` method for all CollectionClass's
+    Call the `eval_fns` method for all CollectionClass's
     in parallel, then concatenate all of the results together.
     """
 
-    res = np.hstack(map(lambda x: x.get(), [cc.eval_polynomials(v) for cc in ccs]))
+    res = np.hstack(map(lambda x: x.get(), [cc.eval_fns(v) for cc in ccs]))
     return res
 
 def fndivA(v):
@@ -1087,7 +1089,7 @@ def fndivA(v):
     global last_v
     last_v = v
 
-    res = np.hstack(map(lambda x: x.get(), [cc.eval_polynomials(v) for cc in ccs]))
+    res = np.hstack(map(lambda x: x.get(), [cc.eval_fns(v) for cc in ccs]))
     Adenom = sqrt(sum([square(v[i]) for i in Aindices]))
 
     global last_time
@@ -1115,18 +1117,18 @@ def jacfn(v):
 
     ALGORITHM:
 
-    Call the `jacobian` method for all CollectionClass's in
+    Call the `jacobian_fns` method for all CollectionClass's in
     parallel, then concatenate all of the results together
     (and transpose them).
     """
 
-    res = np.hstack(map(lambda x: x.get(), [cc.jacobian(v) for cc in ccs])).T
+    res = np.hstack(map(lambda x: x.get(), [cc.jacobian_fns(v) for cc in ccs])).T
     return res
 
 def jac_fndivA(v):
     global N,dN,Av,Adenom
-    N = np.hstack(map(lambda x: x.get(), [cc.eval_polynomials(v) for cc in ccs]))
-    dN = np.hstack(map(lambda x: x.get(), [cc.jacobian(v) for cc in ccs])).T
+    N = np.hstack(map(lambda x: x.get(), [cc.eval_fns(v) for cc in ccs]))
+    dN = np.hstack(map(lambda x: x.get(), [cc.jacobian_fns(v) for cc in ccs])).T
     Av = v * np.array([c in Avars for c in coeff_vars])   # could form a global vector for this
     Adenomsq = sum([square(v[i]) for i in Aindices])
     Adenom = sqrt(Adenomsq)
@@ -1158,10 +1160,10 @@ def jac(v):
 
     d = dict(zip(coeff_vars, v))
     sum_of_squares = sum(map(lambda x: x.get(), [cc.sum_of_squares(v) for cc in ccs]))
-    D_sum_of_squares = sum(map(lambda x: np.array(x.get()), [cc.D_sum_of_squares(v) for cc in ccs]))
+    jacobian_sum_of_squares = sum(map(lambda x: np.array(x.get()), [cc.jacobian_sum_of_squares(v) for cc in ccs]))
     zero_var = v.dtype.type(zero_variety.subs(d))
     Av = v * np.array([c in Avars for c in coeff_vars])
-    res = ((D_sum_of_squares*zero_var - 2*np.array(Av)*sum_of_squares)/zero_var^2)
+    res = ((jacobian_sum_of_squares*zero_var - 2*np.array(Av)*sum_of_squares)/zero_var^2)
     return res
 
 import random
