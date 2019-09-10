@@ -873,6 +873,14 @@ class CollectorClass(Autoself):
         self.dot_calls += 1
         return res
 
+    def get_eqn(self, row):
+        r"""
+        Recreate and retreive the Sage equation corresponding to a
+        particular row in the matrix.  Only used for debugging
+        """
+        B = self.generate_multi_vector(coeff_vars)
+        return sum(self.M[row].toarray() * B)
+
     @async_result
     def eval_fns(self, vec):
         r"""
