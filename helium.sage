@@ -770,11 +770,11 @@ class JacobianMatrix(Autoself):
 
     # XXX @async_result breaks the method if it's called directly
     #@async_result
-    def LR_column_step(self, col):
+    def LR_column_step(self, col, Ucol):
         self._wait_for_result()
         (rows, cols) = self.M.shape
         # the problem is that we've deleted the first "col" rows
-        b = np.array([self.M[row,col] - sum([self.M[row,k] * self.U[k,col] for k in range(col)]) for row in range(rows)])
+        b = np.array([self.M[row,col] - sum([self.M[row,k] * Ucol[k] for k in range(col)]) for row in range(rows)])
         row = b.argmax()
         return (b[row], row)
 
@@ -1272,19 +1272,21 @@ import random
 def LU_decomposition(matrices):
     (rows, cols) = matrices[0].shape()
 
-    global L,U
+    global L,U,old_rs
     L = np.zeros((cols,cols))
     U = np.zeros((cols,cols))
     old_rs = np.zeros((cols,cols))
-    for j in range(2):
+    for j in range(cols):
         #((val, row), submatrix) = max(map(lambda x: (x.get(), m), [m.LR_column_step(i) for m in matrices]))
         global val, row, submatrix, r, new_U_row
-        ((val, row), submatrix) = max(map(lambda x: (x, m), [m.LR_column_step(j) for m in matrices]))
+        for i in range(j):
+            U[i,j] = old_rs[i,j] - sum([L[i][k]*U[k][j] for k in range(i)])
+        ((val, row), submatrix) = max(map(lambda x: (x, m), [m.LR_column_step(j, U[:,j]) for m in matrices]))
         old_rs[j] = submatrix.fetch_and_remove_row(row)
         for i in range(j+1):
             U[i,j] = old_rs[i,j] - sum([L[i][k]*U[k][j] for k in range(i)])
-            L[j,i] = old_rs[j,i]/val
-        #L[j,j] = 1
+            L[j,i] = old_rs[j,i]
+        L[j,j] = 1
         for m in matrices: m.add_U_col(j, U[:,j])
         for m in matrices: m.multiply_column(j, 1/val)
     return (L, U)
