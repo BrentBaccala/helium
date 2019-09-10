@@ -741,7 +741,8 @@ class JacobianMatrix(Autoself):
         if collector is None:
             self.ready = True
             self.M = vec
-            self.U = np.array([])
+            (rows, cols) = vec.shape
+            self.U = np.zeros((cols, cols))
             return
         self.ready = False
         self.collector = collector
@@ -771,13 +772,9 @@ class JacobianMatrix(Autoself):
     #@async_result
     def LR_column_step(self, col):
         self._wait_for_result()
-        global b_vector, b
-        b_vector = np.append(self.U.T[0:col], -1)
-        #b = abs((self.M.T[0:col+1] * b_vector)[0])
-        if col == 0:
-            b = abs(self.M[:,0])
-        else:
-            b = abs(self.M.T[0:col+1].T.dot(b_vector))
+        (rows, cols) = self.M.shape
+        # the problem is that we've deleted the first "col" rows
+        b = np.array([self.M[row,col] - sum([self.M[row,k] * self.U[k,col] for k in range(col)]) for row in range(rows)])
         row = b.argmax()
         return (b[row], row)
 
@@ -786,16 +783,13 @@ class JacobianMatrix(Autoself):
         self.M = np.delete(self.M, row, axis=0)
         return res
 
-    def add_U_row(self, new_U_row):
-        self.U = np.append(self.U, new_U_row)
+    def add_U_col(self, col, new_U_col):
+        self.U[:,col] = new_U_col
 
     def multiply_column(self, col, val):
-        if col > 0:
-            global m_vector
-            m_vector = self.U.T[0:col]
-            print col, m_vector
-            self.M[:,col] -= self.M[:,0:col].dot(m_vector)
-        self.M[:,col] *= val
+        (rows, cols) = self.M.shape
+        for row in range(rows):
+            self.M[row,col] = val * (self.M[row,col] - sum([self.M[row,k]*self.U[k,col]  for k in range(col)]))
 
 class CollectorClass(Autoself):
     result = {}
@@ -1279,24 +1273,20 @@ def LU_decomposition(matrices):
     (rows, cols) = matrices[0].shape()
 
     global L,U
-    L = []
-    U = []
-    old_rs = []
-    next_U_row = np.zeros(cols)
-    for i in range(cols):
+    L = np.zeros((cols,cols))
+    U = np.zeros((cols,cols))
+    old_rs = np.zeros((cols,cols))
+    for j in range(2):
         #((val, row), submatrix) = max(map(lambda x: (x.get(), m), [m.LR_column_step(i) for m in matrices]))
         global val, row, submatrix, r, new_U_row
-        ((val, row), submatrix) = max(map(lambda x: (x, m), [m.LR_column_step(i) for m in matrices]))
-        r = submatrix.fetch_and_remove_row(row)
-        old_rs.append(r)
-        L.append(r * [n < i for n in range(cols)] + [n == i for n in range(cols)])
-        #new_U_row = r * [n >= i for n in range(cols)]
-        new_U_row = np.zeros(cols)
-        for ii in range(i+1):
-            new_U_row[ii] = old_rs[ii][i] - sum([L[ii][k]*U[k][i] for k in range(ii)])
-        U.append(new_U_row)
-        for m in matrices: m.add_U_row(new_U_row)
-        for m in matrices: m.multiply_column(i, 1/val)
+        ((val, row), submatrix) = max(map(lambda x: (x, m), [m.LR_column_step(j) for m in matrices]))
+        old_rs[j] = submatrix.fetch_and_remove_row(row)
+        for i in range(j+1):
+            U[i,j] = old_rs[i,j] - sum([L[i][k]*U[k][j] for k in range(i)])
+            L[j,i] = old_rs[j,i]/val
+        #L[j,j] = 1
+        for m in matrices: m.add_U_col(j, U[:,j])
+        for m in matrices: m.multiply_column(j, 1/val)
     return (L, U)
 
 
