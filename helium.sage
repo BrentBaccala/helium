@@ -452,6 +452,7 @@ class AsyncResult:
             outerself.threads.append(th)
         else:
             outerself.threads = [th]
+        time.sleep(0)
 
     def get(self):
         self._cond.acquire()
@@ -471,11 +472,18 @@ def async_result(method):
     def inner(self, *args):
         classname = 'AsyncResult'
         server = getattr(multiprocessing.current_process(), '_manager_server', None)
-        (ident, exposed) = server.create(None, classname, *((self, method) + args))
-        token = multiprocessing.managers.Token(typeid=classname, address=server.address, id=ident)
-        proxy = multiprocessing.managers.AutoProxy(token, 'pickle', authkey=server.authkey)
-        server.decref(None, ident)
-        return proxy
+        # If we find a local multiprocessing server, use it to create
+        # the AsyncResult object and return a proxy to it.  Otherwise,
+        # return an AsyncResult object directly.  This allows a
+        # decorated method to be called both locally and remotely.
+        if server:
+            (ident, exposed) = server.create(None, classname, *((self, method) + args))
+            token = multiprocessing.managers.Token(typeid=classname, address=server.address, id=ident)
+            proxy = multiprocessing.managers.AutoProxy(token, 'pickle', authkey=server.authkey)
+            server.decref(None, ident)
+            return proxy
+        else:
+            return AsyncResult(self, method, *args)
 
     return inner
 
@@ -768,8 +776,7 @@ class JacobianMatrix(Autoself):
         row = b.argmax()
         return (b[row], row)
 
-    # XXX @async_result breaks the method if it's called directly
-    #@async_result
+    @async_result
     def LU_step(self, col, oldval, Ucol):
         r"""
         Execute one parallel step in the LU decomposition algorithm.
@@ -1299,7 +1306,7 @@ def LU_decomposition(matrices):
     for j in range(cols):
         for i in range(j):
             U[i,j] = L[i,j] - sum(L[i,:].dot(U[:,j]))
-        worker_results = map(lambda x: x, [(m.LU_step(j, diag_val, U[:,j]), m) for m in matrices])
+        worker_results = map(lambda x: (x[0].get(), x[1]), [(m.LU_step(j, diag_val, U[:,j]), m) for m in matrices])
         ((selection_val, row, diag_val), submatrix) = max(worker_results)
         # This is a second RPC exchange that could be avoided by
         # having LU_step() return the row and collapsing the remove
