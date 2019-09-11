@@ -1272,25 +1272,44 @@ import random
 def LU_decomposition(matrices):
     (rows, cols) = matrices[0].shape()
 
-    global L,U,old_rs
     L = np.zeros((cols,cols))
     U = np.zeros((cols,cols))
     old_rs = np.zeros((cols,cols))
     for j in range(cols):
-        #((val, row), submatrix) = max(map(lambda x: (x.get(), m), [m.LR_column_step(i) for m in matrices]))
-        global val, row, submatrix, r, new_U_row
         for i in range(j):
-            U[i,j] = old_rs[i,j] - sum([L[i][k]*U[k][j] for k in range(i)])
-        ((val, row), submatrix) = max(map(lambda x: (x, m), [m.LR_column_step(j, U[:,j]) for m in matrices]))
+            U[i,j] = old_rs[i,j] - sum([L[i,k]*U[k,j] for k in range(i)])
+        ((val, row), submatrix) = max(map(lambda x: x, [(m.LR_column_step(j, U[:,j]), m) for m in matrices]))
         old_rs[j] = submatrix.fetch_and_remove_row(row)
         for i in range(j+1):
-            U[i,j] = old_rs[i,j] - sum([L[i][k]*U[k][j] for k in range(i)])
+            U[i,j] = old_rs[i,j] - sum([L[i,k]*U[k,j] for k in range(i)])
             L[j,i] = old_rs[j,i]
         L[j,j] = 1
         for m in matrices: m.add_U_col(j, U[:,j])
         for m in matrices: m.multiply_column(j, 1/val)
     return (L, U)
 
+def LU_test1(seed):
+    np.random.seed(seed)
+    M = np.random.rand(10,3)
+    bwb = JacobianMatrix(None, M.copy())
+    (L,U) = LU_decomposition([bwb])
+    M1 = np.array(sorted(M.tolist()))
+    M2 = np.array(sorted((np.vstack((L,bwb.M)).dot(U)).tolist()))
+    return np.isclose(M1,M2).all()
+
+assert all([LU_test1(s) for s in range(100)])
+
+def LU_test2(seed):
+    np.random.seed(seed)
+    M = np.random.rand(10,3)
+    bwb1 = JacobianMatrix(None, M[0:5].copy())
+    bwb2 = JacobianMatrix(None, M[5:].copy())
+    (L,U) = LU_decomposition([bwb1, bwb2])
+    M1 = np.array(sorted(M.tolist()))
+    M2 = np.array(sorted((np.vstack((L,bwb1.M,bwb2.M)).dot(U)).tolist()))
+    return np.isclose(M1,M2).all()
+
+assert all([LU_test2(s) for s in range(100)])
 
 def optimize_step(vec):
     r"""x
