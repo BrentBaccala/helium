@@ -538,7 +538,23 @@ Token.__eq__ = Token_eq
 
 from rfoo.utils import rconsole
 
-class Autoself:
+class JoinThreads:
+    r"""
+    Inherit from this class to obtain the `join_threads` method, which
+    waits for all @async_method and @async_result methods to complete,
+    except for the thread that called `join_threads` (if
+    `join_threads` was called from an @async_method or @async_result
+    method)
+    """
+
+    def join_threads(self):
+        if hasattr(self, 'threads'):
+            for th in self.threads:
+                if th is not threading.currentThread():
+                    logger.debug('join %s', th)
+                    th.join()
+
+class Autoself(JoinThreads):
     def autoself(self):
         server = getattr(multiprocessing.current_process(), '_manager_server', None)
         classname = self.__class__.__name__
@@ -557,12 +573,6 @@ class Autoself:
         proxy = multiprocessing.managers.AutoProxy(token, 'pickle', authkey=server.authkey)
         server.decref(None, ident)
         return proxy
-
-    def join_threads(self):
-        if hasattr(self, 'threads'):
-            for th in self.threads:
-                logger.debug('join %s', th)
-                th.join()
 
     # convenience functions for development
     def getpid(self):
@@ -715,7 +725,7 @@ def delete_rows_csr(mat, indices):
     mask[indices] = False
     return mat[mask]
 
-class LUMatrix():
+class LUMatrix(JoinThreads):
     r"""
     Proxy class that wraps a matrix and provides methods to operate on
     it to do an LU decomposition.  An instance of this class is
@@ -731,9 +741,11 @@ class LUMatrix():
         self.U = np.zeros((cols, cols))
 
     def get(self):
+        self.join_threads()
         return self.M
 
     def shape(self):
+        self.join_threads()
         return self.M.shape
 
     @async_result
@@ -756,6 +768,7 @@ class LUMatrix():
         simple `max` operation in the main process will allow it to
         select the best overall candidate.
         """
+        self.join_threads()
         if col > 0:
             self.multiply_column(col-1, 1/oldval)
         self.U[:,col] = Ucol
@@ -783,7 +796,7 @@ class LUMatrix():
         for row in range(self.rows):
             self.M[row,col] = val * (self.M[row,col] - self.M[row].dot(self.U[:,col]))
 
-class JacobianMatrix(Autoself):
+class JacobianMatrix(LUMatrix):
     r"""
     Proxy class that wraps a Jacobian matrix.
 
@@ -796,49 +809,13 @@ class JacobianMatrix(Autoself):
     """
 
     @async_method
-    def _start_calculation(self):
-        start_time = time.time()
-        self.M = np.stack([self.collector.dot(self.collector.generate_multi_D_vector(self.vec, var)) for var in coeff_vars], axis=1)
-        self.U = np.array([])
-        self._time = time.time() - start_time
-        self.cond.acquire()
-        self.ready = True
-        self.cond.notify_all()
-        self.cond.release()
-
-    def _wait_for_result(self):
-        self.cond.acquire()
-        if not self.ready:
-            self.cond.wait()
-        self.cond.release()
+    def _start_calculation(self, vec):
+        M = np.stack([self.collector.dot(self.collector.generate_multi_D_vector(vec, var)) for var in coeff_vars], axis=1)
+        LUMatrix.__init__(self, M)
 
     def __init__(self, collector, vec):
-        self.cond = threading.Condition()
-        if collector is None:
-            self.ready = True
-            self.M = vec
-            (rows, cols) = vec.shape
-            return
-        self.ready = False
         self.collector = collector
-        self.vec = vec
-        self._start_calculation()
-
-    def get(self):
-        self._wait_for_result()
-        return self.M
-
-    def time(self):
-        self._wait_for_result()
-        return self._time
-
-    @async_result
-    def max_in_column(self, col, offset):
-        self._wait_for_result()
-        b = abs(self.M.T[col] + offset)
-        row = b.argmax()
-        return (b[row], row)
-
+        self._start_calculation(vec)
 
 class CollectorClass(Autoself):
     result = {}
