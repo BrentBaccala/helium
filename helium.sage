@@ -715,6 +715,74 @@ def delete_rows_csr(mat, indices):
     mask[indices] = False
     return mat[mask]
 
+class LUMatrix():
+    r"""
+    Proxy class that wraps a matrix and provides methods to operate on
+    it to do an LU decomposition.  An instance of this class is
+    expected to be one of many, each managing a block of rows in a
+    larger matrix.  The matrix is modified in place.  At the end of
+    the calculation the remaining matrices in the LUMatrix instances
+    hold the lower blocks of the L matrix in the decomposition.
+    """
+
+    def __init__(self, matrix):
+        self.M = matrix
+        (self.rows, cols) = matrix.shape
+        self.U = np.zeros((cols, cols))
+
+    def get(self):
+        return self.M
+
+    def shape(self):
+        return self.M.shape
+
+    @async_result
+    def LU_step(self, col, oldval, Ucol):
+        r"""
+        Execute one parallel step in the LU decomposition algorithm.
+
+        First, if col > 0, multiply `oldval` through column `col-1`
+        (the last substep in the previous step).
+
+        Then, update our copy of the U matrix by adding the next column,
+        that was included in our arguments.
+
+        Next, search our portion of the matrix to find our candidate
+        for the next row to pivot.
+
+        Finally, return the index of that row along with the value
+        used to select it, and the value that it would produce on the
+        diagonal, ordering with the selection value first so that a
+        simple `max` operation in the main process will allow it to
+        select the best overall candidate.
+        """
+        if col > 0:
+            self.multiply_column(col-1, 1/oldval)
+        self.U[:,col] = Ucol
+        b = np.array([self.M[row,col] - self.M[row].dot(Ucol) for row in range(self.rows)])
+        (val, row) = self.select_next_row(b)
+        return (val, row, b[row])
+
+    def select_next_row(self, b_vector):
+        r"""
+        Default routine to select our candidate for the next row to
+        pivot.  Picks the row that will produce the largest absolute
+        value on the U diagonal.  Designed to be overridden.
+        """
+        abs_b = abs(b_vector)
+        row = abs_b.argmax()
+        return (abs_b[row], row)
+
+    def fetch_and_remove_row(self, row):
+        res = self.M[row]
+        self.M = np.delete(self.M, row, axis=0)
+        self.rows -= 1
+        return res
+
+    def multiply_column(self, col, val):
+        for row in range(self.rows):
+            self.M[row,col] = val * (self.M[row,col] - self.M[row].dot(self.U[:,col]))
+
 class JacobianMatrix(Autoself):
     r"""
     Proxy class that wraps a Jacobian matrix.
@@ -750,7 +818,6 @@ class JacobianMatrix(Autoself):
             self.ready = True
             self.M = vec
             (rows, cols) = vec.shape
-            self.U = np.zeros((cols, cols))
             return
         self.ready = False
         self.collector = collector
@@ -765,10 +832,6 @@ class JacobianMatrix(Autoself):
         self._wait_for_result()
         return self._time
 
-    def shape(self):
-        self._wait_for_result()
-        return self.M.shape
-
     @async_result
     def max_in_column(self, col, offset):
         self._wait_for_result()
@@ -776,48 +839,6 @@ class JacobianMatrix(Autoself):
         row = b.argmax()
         return (b[row], row)
 
-    @async_result
-    def LU_step(self, col, oldval, Ucol):
-        r"""
-        Execute one parallel step in the LU decomposition algorithm.
-
-        First, if col > 0, multiply `oldval` through column `col-1`
-        (the last substep in the previous step).
-
-        Then, update our copy of the U matrix by adding the next column,
-        that was included in our arguments.
-
-        Next, search our portion of the matrix to find our candidate
-        for the next row to pivot, which is currently selected by
-        computing the values that would be produced on the U diagonal
-        and picking the largest one in absolute value.
-
-        Finally, return the index of that row along with the value
-        used to select it, and the value that it would produce on the
-        diagonal, ordering with the selection value first so that a
-        simple `max` operation in the main process will allow it to
-        select the best overall candidate.
-
-        """
-        self._wait_for_result()
-        (rows, cols) = self.M.shape
-        if col > 0:
-            self.multiply_column(col-1, 1/oldval)
-        self.U[:,col] = Ucol
-        b = np.array([self.M[row,col] - self.M[row].dot(Ucol) for row in range(rows)])
-        abs_b = abs(b)
-        row = abs_b.argmax()
-        return (abs_b[row], row, b[row])
-
-    def fetch_and_remove_row(self, row):
-        res = self.M[row]
-        self.M = np.delete(self.M, row, axis=0)
-        return res
-
-    def multiply_column(self, col, val):
-        (rows, cols) = self.M.shape
-        for row in range(rows):
-            self.M[row,col] = val * (self.M[row,col] - self.M[row].dot(self.U[:,col]))
 
 class CollectorClass(Autoself):
     result = {}
@@ -1322,7 +1343,7 @@ def LU_decomposition(matrices):
 def LU_test1(seed):
     np.random.seed(seed)
     M = np.random.rand(10,3)
-    bwb = JacobianMatrix(None, M.copy())
+    bwb = LUMatrix(M.copy())
     (L,U) = LU_decomposition([bwb])
     M1 = np.array(sorted(M.tolist()))
     M2 = np.array(sorted((np.vstack((L,bwb.M)).dot(U)).tolist()))
@@ -1333,8 +1354,8 @@ def LU_test1(seed):
 def LU_test2(seed):
     np.random.seed(seed)
     M = np.random.rand(10,3)
-    bwb1 = JacobianMatrix(None, M[0:5].copy())
-    bwb2 = JacobianMatrix(None, M[5:].copy())
+    bwb1 = LUMatrix(M[0:5].copy())
+    bwb2 = LUMatrix(M[5:].copy())
     (L,U) = LU_decomposition([bwb1, bwb2])
     M1 = np.array(sorted(M.tolist()))
     M2 = np.array(sorted((np.vstack((L,bwb1.M,bwb2.M)).dot(U)).tolist()))
