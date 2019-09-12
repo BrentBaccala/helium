@@ -773,8 +773,8 @@ class LUMatrix(JoinThreads):
             self.multiply_column(col-1, 1/oldval)
         self.U[:,col] = Ucol
         b = np.array([self.M[row,col] - self.M[row].dot(Ucol) for row in range(self.rows)])
-        (val, row) = self.select_next_row(b)
-        return (val, row, b[row])
+        (val, row, f_val) = self.select_next_row(b)
+        return (val, row, b[row], f_val)
 
     def select_next_row(self, b_vector):
         r"""
@@ -784,7 +784,7 @@ class LUMatrix(JoinThreads):
         """
         abs_b = abs(b_vector)
         row = abs_b.argmax()
-        return (abs_b[row], row)
+        return (abs_b[row], row, 0)
 
     def fetch_and_remove_row(self, row):
         res = self.M[row]
@@ -1300,28 +1300,30 @@ def LU_decomposition(matrices):
 
     L = np.zeros((cols,cols))
     U = np.zeros((cols,cols))
+    f = np.zeros(cols)
     diag_val = 0
     for j in range(cols):
         for i in range(j):
             U[i,j] = L[i,j] - sum(L[i,:].dot(U[:,j]))
         worker_results = map(lambda x: (x[0].get(), x[1]), [(m.LU_step(j, diag_val, U[:,j]), m) for m in matrices])
-        ((selection_val, row, diag_val), submatrix) = max(worker_results)
+        ((selection_val, row, diag_val, f_val), submatrix) = max(worker_results)
         # This is a second RPC exchange that could be avoided by
         # having LU_step() return the row and collapsing the remove
         # operation into the next call to LU_step().
         L[j] = submatrix.fetch_and_remove_row(row)
         U[j,j] = diag_val
+        f[j] = f_val
     for j in range(cols):
         L[j,j] = 1
         L[j,j+1:] = 0
     for m in matrices: m.multiply_column(j, 1/diag_val)
-    return (L, U)
+    return (L, U, f)
 
 def LU_test1(seed):
     np.random.seed(seed)
     M = np.random.rand(10,3)
     bwb = LUMatrix(M.copy())
-    (L,U) = LU_decomposition([bwb])
+    (L,U,f) = LU_decomposition([bwb])
     M1 = np.array(sorted(M.tolist()))
     M2 = np.array(sorted((np.vstack((L,bwb.M)).dot(U)).tolist()))
     return np.isclose(M1,M2).all()
@@ -1333,7 +1335,7 @@ def LU_test2(seed):
     M = np.random.rand(10,3)
     bwb1 = LUMatrix(M[0:5].copy())
     bwb2 = LUMatrix(M[5:].copy())
-    (L,U) = LU_decomposition([bwb1, bwb2])
+    (L,U,f) = LU_decomposition([bwb1, bwb2])
     M1 = np.array(sorted(M.tolist()))
     M2 = np.array(sorted((np.vstack((L,bwb1.M,bwb2.M)).dot(U)).tolist()))
     return np.isclose(M1,M2).all()
@@ -1371,11 +1373,16 @@ def optimize_step(vec):
     sense to do a few more function evaluations at each step.
 
     """
-    # pick a step size in the direction of 'gradient'
+
+    # solve J d = f to find a direction vector
+    jacobians = [cc.jacobian_fns(v) for cc in ccs]
+    (L, U, f) = LU_decomposition(jacobians)
+    direction = scipy.linalg.lu_solve((lu, piv), f)
+
+    # pick a step size in the `direction`
     v0 = minfunc(vec)
-    gradient = jac(vec)
-    norm = sum(square(gradient))
-    evalstep = gradient*v0/norm
+    norm = sum(square(direction))
+    evalstep = direction*v0/norm
 
     # We want to sample at seven points to fit a sixth degree polynomial.
     # We expect a zero "close" to -1, so this will sample three points
@@ -1430,22 +1437,36 @@ def random_numerical(iv=0):
     Aindices = [i for i,c in enumerate(coeff_vars) if c in Avars]
 
     global SciMin
-    #SciMin = scipy.optimize.minimize(minfunc, iv, jac=jac, method='BFGS', options={'return_all':True})
 
-    #i = 0
-    #while i < 50:
-    #    iv = optimize_step(iv)
-    #    i += 1
+    # optimize.minimize searchs for minimums of a scalar-valued
+    # function, in our case the sum of squares of the variety's
+    # defining polynomials.  The problem, as explained in Numerical
+    # Recipes at the end of section 9.6, in the subsection titled
+    # "Newton’s Method versus Minimization", is that the sum of
+    # squares has many local minima that aren't global minima, and any
+    # of these minimization algorithms will tend to latch on to a
+    # local minimum instead of the global minimum.  The solution is to
+    # use an algorithm that searches for zeros of the vector-valued
+    # function instead of the sum of its squares.
 
-    # This only optimizes the vector function itself, and doesn't do
-    # anything to remove the superfluous zeros from zero_variety.
+    # SciMin = scipy.optimize.minimize(minfunc, iv, jac=jac, method='BFGS', options={'return_all':True})
 
     # optimize.root methods:
     # 'hybr' (the default) requires same num of eqns as vars
     # 'lm' uses a QR factorization of the Jacobian, then the Levenberg–Marquardt line search algorithm
     # the others uses various approximations to the Jacobian
+
     SciMin = scipy.optimize.root(fndivA, iv, jac=jac_fndivA, method='lm')
-    #print SciMin
+
+    # Our root-finding algorithm:
+    #
+    # - LU factorization of the Jacobian, computed in parallel
+    # - exact-fit line search algorithm
+
+    #i = 0
+    #while i < 50:
+    #    iv = optimize_step(iv)
+    #    i += 1
 
     print
     print
