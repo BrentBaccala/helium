@@ -738,6 +738,8 @@ class LUMatrix(JoinThreads):
     def __init__(self, matrix):
         self.M = matrix
         (self.rows, cols) = matrix.shape
+        # XXX might be a bit slow
+        self.scaling = np.amax(abs(matrix), axis=1)
         self.U = np.zeros((cols, cols))
 
     def get(self):
@@ -780,15 +782,23 @@ class LUMatrix(JoinThreads):
         r"""
         Default routine to select our candidate for the next row to
         pivot.  Picks the row that will produce the largest absolute
-        value on the U diagonal.  Designed to be overridden.
+        value on the U diagonal, scaled by the maximum value in each
+        row.
+
+        INPUT:
+
+        - ``b_vector`` -- a precomputed vector of the diagonal
+        elements that would appear on the U matrix for any given row
+
         """
         abs_b = abs(b_vector)
-        row = abs_b.argmax()
+        row = (abs_b / self.scaling).argmax()
         return (abs_b[row], row, 0)
 
     def fetch_and_remove_row(self, row):
         res = self.M[row]
         self.M = np.delete(self.M, row, axis=0)
+        self.scaling = np.delete(self.scaling, row)
         self.rows -= 1
         return res
 
