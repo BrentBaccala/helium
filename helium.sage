@@ -733,10 +733,18 @@ class LUMatrix(JoinThreads):
     larger matrix.  The matrix is modified in place.  At the end of
     the calculation the remaining matrices in the LUMatrix instances
     hold the lower blocks of the L matrix in the decomposition.
+
+    Optionally, a second matrix can be supplied, which is expected to
+    have the same number of rows as the matrix being decomposed.  Row
+    pivoting operations are mimicked on the second matrix, and its
+    rows are returned along with candidate rows from the main matrix.
+    The expected use is that the second matrix is the right-hand side
+    of a matrix equation.
     """
 
-    def __init__(self, matrix):
+    def __init__(self, matrix, f=None):
         self.M = matrix
+        self.f = f
         (self.rows, cols) = matrix.shape
         # XXX might be a bit slow
         self.scaling = np.amax(abs(matrix), axis=1)
@@ -793,12 +801,17 @@ class LUMatrix(JoinThreads):
         """
         abs_b = abs(b_vector)
         row = (abs_b / self.scaling).argmax()
-        return (abs_b[row], row, 0)
+        if self.f is not None:
+            return (abs_b[row], row, self.f[row])
+        else:
+            return (abs_b[row], row, None)
 
     def fetch_and_remove_row(self, row):
         res = self.M[row]
         self.M = np.delete(self.M, row, axis=0)
         self.scaling = np.delete(self.scaling, row)
+        if self.f is not None:
+            self.f = np.delete(self.f, row)
         self.rows -= 1
         return res
 
@@ -821,23 +834,12 @@ class JacobianMatrix(LUMatrix):
     @async_method
     def _start_calculation(self, vec):
         M = np.stack([self.collector.dot(self.collector.generate_multi_D_vector(vec, var)) for var in coeff_vars], axis=1)
-        self.f = self.collector.eval_fns(vec).get()
-        LUMatrix.__init__(self, M)
+        f = self.collector.eval_fns(vec).get()
+        LUMatrix.__init__(self, M, f)
 
     def __init__(self, collector, vec):
         self.collector = collector
         self._start_calculation(vec)
-
-    def select_next_row(self, b_vector):
-        #abs_b = abs(b_vector / self.f)
-        #row = abs_b.argmax()
-        #return (abs_b[row], row, self.f[row])
-        (val, row, f_val) = super(JacobianMatrix, self).select_next_row(b_vector)
-        return (val, row, self.f[row])
-
-    def fetch_and_remove_row(self, row):
-        self.f = np.delete(self.f, row)
-        return LUMatrix.fetch_and_remove_row(self, row)
 
 class CollectorClass(Autoself):
     result = {}
