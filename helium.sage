@@ -1307,6 +1307,8 @@ def LU_decomposition(matrices):
             U[i,j] = L[i,j] - sum(L[i,:].dot(U[:,j]))
         worker_results = map(lambda x: (x[0].get(), x[1]), [(m.LU_step(j, diag_val, U[:,j]), m) for m in matrices])
         ((selection_val, row, diag_val, f_val), submatrix) = max(worker_results)
+        if diag_val == 0:
+            diag_val = 1e-20
         # This is a second RPC exchange that could be avoided by
         # having LU_step() return the row and collapsing the remove
         # operation into the next call to LU_step().
