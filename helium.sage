@@ -821,11 +821,23 @@ class JacobianMatrix(LUMatrix):
     @async_method
     def _start_calculation(self, vec):
         M = np.stack([self.collector.dot(self.collector.generate_multi_D_vector(vec, var)) for var in coeff_vars], axis=1)
+        self.f = self.collector.eval_fns(vec).get()
         LUMatrix.__init__(self, M)
 
     def __init__(self, collector, vec):
         self.collector = collector
         self._start_calculation(vec)
+
+    def select_next_row(self, b_vector):
+        #abs_b = abs(b_vector / self.f)
+        #row = abs_b.argmax()
+        #return (abs_b[row], row, self.f[row])
+        (val, row, f_val) = super(JacobianMatrix, self).select_next_row(b_vector)
+        return (val, row, self.f[row])
+
+    def fetch_and_remove_row(self, row):
+        self.f = np.delete(self.f, row)
+        return LUMatrix.fetch_and_remove_row(self, row)
 
 class CollectorClass(Autoself):
     result = {}
@@ -1387,8 +1399,10 @@ def optimize_step(vec):
     """
 
     # solve J d = f to find a direction vector
-    jacobians = [cc.jacobian_fns(v) for cc in ccs]
+    jacobians = [cc.jacobian_fns(vec) for cc in ccs]
     (L, U, f) = LU_decomposition(jacobians)
+    lu = np.tril(L, -1) + U
+    piv = np.array(range(lu.shape[0]))
     direction = scipy.linalg.lu_solve((lu, piv), f)
 
     # pick a step size in the `direction`
@@ -1402,6 +1416,7 @@ def optimize_step(vec):
     points = [vec + i*evalstep for i in [-4,-3,-2,-1,0,1,2]]
     values = map(sum_of_squares, points)
 
+    global N,D
     # Now fit a polynomial to this data
     N = np.polynomial.polynomial.Polynomial.fit([-4,-3,-2,-1,0,1,2],values,6,[])
 
@@ -1423,7 +1438,7 @@ def optimize_step(vec):
     nextstep = vec + evalstep*value_root[1]
     return nextstep
 
-def random_numerical(iv=0):
+def random_numerical(iv=0, limit=1):
 
     import scipy.optimize
 
@@ -1468,25 +1483,25 @@ def random_numerical(iv=0):
     # 'lm' uses a QR factorization of the Jacobian, then the Levenberg–Marquardt line search algorithm
     # the others uses various approximations to the Jacobian
 
-    SciMin = scipy.optimize.root(fndivA, iv, jac=jac_fndivA, method='lm')
+    # SciMin = scipy.optimize.root(fndivA, iv, jac=jac_fndivA, method='lm')
 
     # Our root-finding algorithm:
     #
     # - LU factorization of the Jacobian, computed in parallel
     # - exact-fit line search algorithm
 
-    #i = 0
-    #while i < 50:
-    #    iv = optimize_step(iv)
-    #    i += 1
+    i = 0
+    while i < limit:
+        iv = optimize_step(iv)
+        i += 1
 
     print
     print
 
-    if SciMin.success:
-        for pair in zip(coeff_vars, SciMin.x): print pair
-    else:
-        print SciMin.message
+    # if SciMin.success:
+    #     for pair in zip(coeff_vars, SciMin.x): print pair
+    # else:
+    #     print SciMin.message
 
 def random_numerical_ten(limit=10):
     for i in range(limit):
