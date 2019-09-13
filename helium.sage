@@ -1455,8 +1455,9 @@ def optimize_step(vec):
     # use gradient descent on the sum of squares to find a direction vector
 
     # v0 = minfunc(vec)
-    # norm = sum(square(direction))
-    # evalstep = direction*v0/norm
+    # gradient = jac(vec)
+    # norm = sum(square(gradient))
+    # evalstep = gradient*v0/norm
 
     use_exact_linesearch = False
 
@@ -1490,6 +1491,15 @@ def optimize_step(vec):
 
     else:
         nextstep = vec - evalstep
+
+        current_val = minfunc(vec)
+        newton_val = minfunc(nextstep)
+        gradient = jac(vec)
+
+        g_deriv = gradient.dot(evalstep)
+
+        if newton_val > current_val - abs(g_deriv)/1000:
+            print 'newton step not acceptable'
 
     return nextstep
 
@@ -1547,7 +1557,7 @@ def random_numerical(iv=0, limit=1):
 
     i = 0
     while i < limit:
-        minfunc(iv)
+        #minfunc(iv)
         iv = optimize_step(iv)
         i += 1
 
