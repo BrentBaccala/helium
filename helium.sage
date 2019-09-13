@@ -841,6 +841,32 @@ class JacobianMatrix(LUMatrix):
         self.collector = collector
         self._start_calculation(vec)
 
+class JacobianDivAMatrix(LUMatrix):
+    r"""
+    Proxy class that wraps a Jacobian matrix.
+
+    This Jacobian is for the functions divided by the norm of the A vectors.
+
+    The idea is to drive the solution away from the hyperplane where
+    the A coefficients are all zero.
+    """
+
+    @async_method
+    def _start_calculation(self, vec):
+        N = self.collector.eval_fns(vec).get()
+        dN = np.stack([self.collector.dot(self.collector.generate_multi_D_vector(vec, var)) for var in coeff_vars], axis=1)
+
+        Amask = np.array([c in Avars for c in coeff_vars])
+        Av = vec * Amask
+        Adenom = np.linalg.norm(Av)
+        M = dN/Adenom - np.outer(N,Av)/(Adenom^3)
+
+        LUMatrix.__init__(self, M, N/Adenom)
+
+    def __init__(self, collector, vec):
+        self.collector = collector
+        self._start_calculation(vec)
+
 class CollectorClass(Autoself):
     result = {}
     M = None
@@ -1056,6 +1082,23 @@ class CollectorClass(Autoself):
         """
         return self.autocreate('JacobianMatrix', self, vec)
 
+    def jacobian_fns_divA(self, vec):
+        r"""
+        Evaluate the Jacobian matrix (the matrix of first-order
+        partial derivatives) of our polynomials divided by
+        the norm of the A-vectors.
+
+        INPUT:
+
+        - ``vec`` -- a vector of real values for all coeff_vars
+
+        OUTPUT:
+
+        - the Jacobian matrix, evaluated at ``vec``, as a numpy
+        matrix wrapped in a proxy object
+        """
+        return self.autocreate('JacobianDivAMatrix', self, vec)
+
     @async_result
     def sum_of_squares(self, vec):
         r"""
@@ -1165,6 +1208,7 @@ BaseManager.register('ExpanderClass', ExpanderClass)
 BaseManager.register('CollectorClass', CollectorClass)
 BaseManager.register('AsyncResult', AsyncResult)
 BaseManager.register('JacobianMatrix', JacobianMatrix)
+BaseManager.register('JacobianDivAMatrix', JacobianDivAMatrix)
 
 def start_manager_process():
     global manager, mc
@@ -1401,43 +1445,52 @@ def optimize_step(vec):
     """
 
     # solve J d = f to find a direction vector
-    jacobians = [cc.jacobian_fns(vec) for cc in ccs]
+
+    jacobians = [cc.jacobian_fns_divA(vec) for cc in ccs]
     (L, U, f) = LU_decomposition(jacobians)
     lu = np.tril(L, -1) + U
     piv = np.array(range(lu.shape[0]))
-    direction = scipy.linalg.lu_solve((lu, piv), f)
+    evalstep = scipy.linalg.lu_solve((lu, piv), f)
 
-    # pick a step size in the `direction`
-    v0 = minfunc(vec)
-    norm = sum(square(direction))
-    evalstep = direction*v0/norm
+    # use gradient descent on the sum of squares to find a direction vector
 
-    # We want to sample at seven points to fit a sixth degree polynomial.
-    # We expect a zero "close" to -1, so this will sample three points
-    # on either size of it
-    points = [vec + i*evalstep for i in [-4,-3,-2,-1,0,1,2]]
-    values = map(sum_of_squares, points)
+    # v0 = minfunc(vec)
+    # norm = sum(square(direction))
+    # evalstep = direction*v0/norm
 
-    global N,D
-    # Now fit a polynomial to this data
-    N = np.polynomial.polynomial.Polynomial.fit([-4,-3,-2,-1,0,1,2],values,6,[])
+    use_exact_linesearch = False
 
-    # The denominator is the sum of (A_0 + lambda A_d)^2 for all As
-    D = sum([square(np.polynomial.polynomial.Polynomial((vec[i], evalstep[i]))) for i in Aindices])
+    if use_exact_linesearch:
+        # We want to sample at seven points to fit a sixth degree polynomial.
+        # We expect a zero "close" to -1, so this will sample three points
+        # on either size of it
+        points = [vec + i*evalstep for i in [-4,-3,-2,-1,0,1,2]]
+        values = map(sum_of_squares, points)
 
-    # the numerator of the first derivative of the function we're trying to minimize
-    f = (D * N.deriv() - N * D.deriv())
+        global N,D
+        # Now fit a polynomial to this data
+        N = np.polynomial.polynomial.Polynomial.fit([-4,-3,-2,-1,0,1,2],values,6,[])
 
-    # find the real roots of the first derivative
-    all_roots = np.roots(list(reversed(list(f.coef))))
-    roots = [c.real for c in all_roots if np.isclose(c.imag, 0)]
+        # The denominator is the sum of (A_0 + lambda A_d)^2 for all As
+        D = sum([square(np.polynomial.polynomial.Polynomial((vec[i], evalstep[i]))) for i in Aindices])
 
-    # find the minimum and its location
-    value_root_pairs = [(N(r)/D(r), r) for r in roots]
-    value_root = min(value_root_pairs)
+        # the numerator of the first derivative of the function we're trying to minimize
+        f = (D * N.deriv() - N * D.deriv())
 
-    # return the computed step
-    nextstep = vec + evalstep*value_root[1]
+        # find the real roots of the first derivative
+        all_roots = np.roots(list(reversed(list(f.coef))))
+        roots = [c.real for c in all_roots if np.isclose(c.imag, 0)]
+
+        # find the minimum and its location
+        value_root_pairs = [(N(r)/D(r), r) for r in roots]
+        value_root = min(value_root_pairs)
+
+        # return the computed step
+        nextstep = vec + evalstep*value_root[1]
+
+    else:
+        nextstep = vec - evalstep
+
     return nextstep
 
 def random_numerical(iv=0, limit=1):
@@ -1494,11 +1547,13 @@ def random_numerical(iv=0, limit=1):
 
     i = 0
     while i < limit:
+        minfunc(iv)
         iv = optimize_step(iv)
         i += 1
 
-    print
-    print
+    global final_iv
+    final_iv = iv
+    for pair in zip(coeff_vars, iv): print pair
 
     # if SciMin.success:
     #     for pair in zip(coeff_vars, SciMin.x): print pair
