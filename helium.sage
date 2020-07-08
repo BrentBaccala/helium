@@ -314,8 +314,8 @@ def SRdict_expander2(expr):
         else:
             sign='+'
         vs = s.split('*')
-        key = '*'.join(ifilter(lambda x: any([x.startswith(c) for c in ('x', 'y', 'z', 'r', 'P')]), vs))
-        value = '*'.join(ifilterfalse(lambda x: any([x.startswith(c) for c in ('x', 'y', 'z', 'r', 'P')]), vs))
+        key = '*'.join(filter(lambda x: any([x.startswith(c) for c in ('x', 'y', 'z', 'r', 'P')]), vs))
+        value = '*'.join(filterfalse(lambda x: any([x.startswith(c) for c in ('x', 'y', 'z', 'r', 'P')]), vs))
         SRdict[key] = SRdict.get(key, '') + sign + value
 
 # this version returns a dictionary instead of using a global
@@ -331,8 +331,8 @@ def SRdict_expander2a(expr):
         else:
             sign='+'
         vs = s.split('*')
-        key = '*'.join(ifilter(lambda x: any([x.startswith(c) for c in ('x', 'y', 'z', 'r', 'P')]), vs))
-        value = '*'.join(ifilterfalse(lambda x: any([x.startswith(c) for c in ('x', 'y', 'z', 'r', 'P')]), vs))
+        key = '*'.join(filter(lambda x: any([x.startswith(c) for c in ('x', 'y', 'z', 'r', 'P')]), vs))
+        value = '*'.join(filterfalse(lambda x: any([x.startswith(c) for c in ('x', 'y', 'z', 'r', 'P')]), vs))
         SRdict[key] = SRdict.get(key, '') + sign + value
     return SRdict
 
@@ -789,8 +789,8 @@ class ExpanderClass(Autoself):
             else:
                 sign='+'
             vs = s.split('*')
-            key = '*'.join(ifilter(lambda x: any([x.startswith(c) for c in ('x', 'y', 'z', 'r', 'P')]), vs))
-            value = '*'.join(ifilterfalse(lambda x: any([x.startswith(c) for c in ('x', 'y', 'z', 'r', 'P')]), vs))
+            key = '*'.join(filter(lambda x: any([x.startswith(c) for c in ('x', 'y', 'z', 'r', 'P')]), vs))
+            value = '*'.join(filterfalse(lambda x: any([x.startswith(c) for c in ('x', 'y', 'z', 'r', 'P')]), vs))
             dictnum = hash(key) % len(self.collectors)
             self.dicts[dictnum][key] = self.dicts[dictnum].get(key, '') + sign + value
         for i in range(len(self.collectors)):
@@ -979,7 +979,7 @@ class CollectorClass(Autoself):
         self.dok = scipy.sparse.dok_matrix((len(self.result), veclen), np.int64)
         for value in self.result.values():
             terms = re.split('([+-][^+-]+)', value)
-            for term in ifilter(bool, terms):
+            for term in filter(bool, terms):
                 if term[0] == '-':
                     sign = -1
                     term = term[1:]
