@@ -122,7 +122,7 @@ def rosenfeld_groebner():
 
     #print RDC
 
-    for id in RDC: print id
+    for id in RDC: print(id)
 
 
 
@@ -296,7 +296,7 @@ def SR_expander(expr, vars):
 def SRdict_expander(expr, vars_expanded, vars_to_expand):
     if isinstance(expr, Expression) and len(vars_to_expand) > 0:
         v = vars_to_expand[0]
-	map(lambda l: SRdict_expander(l[0], vars_expanded * v^l[1], vars_to_expand[1:]), expr.coefficients(v))
+        map(lambda l: SRdict_expander(l[0], vars_expanded * v^l[1], vars_to_expand[1:]), expr.coefficients(v))
     else:
         SRdict[vars_expanded] = SRdict.get(vars_expanded, 0) + expr
 
@@ -424,11 +424,11 @@ def extract_ops():
 def multi_init():
     prep_hydrogen()
     t = timeit.timeit(lambda: create_bwb4(), number=1)
-    print 'create_bwb4() : %s sec'%(t)
+    print( 'create_bwb4() : %s sec'%(t) )
     t = timeit.timeit(lambda: SR_expand2a(), number=1)
-    print 'SR_expand2a() : %s sec'%(t)
+    print( 'SR_expand2a() : %s sec'%(t) )
     t = timeit.timeit(lambda: extract_ops(), number=1)
-    print 'extract_ops() : %s sec'%(t)
+    print( 'extract_ops() : %s sec'%(t) )
     start_manager_process()
     mc.set_range(len(ops), blocksize)
 
@@ -533,7 +533,7 @@ def remove_duplicates():
     remaining_iterations = sum(sizes) - len(value_to_count)
     while len(dups) > 0:
         if remaining_iterations % 1000 == 0:
-            print remaining_iterations, 'iterations remaining'
+            print( remaining_iterations, 'iterations remaining' )
         maxsize = max(sizes)
         try:
             i = (i for i,c in enumerate(sizes) if c == maxsize and generators[i] is not None).next()
@@ -1213,7 +1213,7 @@ def bwb_expand():
     map(operator.add, index, [0,0,0,1,1,1] * monomial.degree(SR.var('r2'))/2)
     map(operator.add, index, [1,1,1,-1,-1,-1] * monomial.degree(SR.var('r12'))/2)
     index = index + [monomial.degree(SR.var('r1')) % 2, monomial.degree(SR.var('r2')) % 2, monomial.degree(SR.var('r12')) % 2]
-    print count, monomial, index, monomial.coefficient(map(operator.mul, v_s, index))
+    print( count, monomial, index, monomial.coefficient(map(operator.mul, v_s, index)) )
 
 import numpy as np
 term_expansion = dict()
@@ -1239,12 +1239,12 @@ def numpy_expand():
     multiplier = monomial.coefficient(mul(map(operator.pow, v_s, index2)))
     for term in terms:
         equations[tuple(index + term)] = equations.get(tuple(index + term), 0) + multiplier
-    if count % 100 == 0: print count
+    if count % 100 == 0: print( count)
 
 #raise(None)
 
-print
-print
+print()
+print()
 
 #Ss = solve (map(SR, eqns), *((E,) + Avars + Bvars), algorithm='sympy')
 #for s in Ss: print s
@@ -1266,7 +1266,7 @@ def associated_primes():
     primes = bwbI.associated_primes()
 
     for prime in primes:
-        print prime._repr_short()
+        print( prime._repr_short() )
 
 
 # Look for solutions using an approximate numerical technique
@@ -1322,9 +1322,9 @@ if use_multiprocessing:
         res = real_type(sum_of_squares / zero_variety.subs(d))
         global last_time
         if last_time == 0:
-            print res
+            print( res )
         else:
-            print "{:<30} {:20} sec".format(res, time.time()-last_time)
+            print( "{:<30} {:20} sec".format(res, time.time()-last_time) )
         last_time = time.time()
         return res
 
@@ -1344,7 +1344,7 @@ else:
 
     def minfunc(v):
         res = real_type(minpoly.subs(dict(zip(coeff_vars, v))) / zero_variety.subs(dict(zip(coeff_vars, v))))
-        print res
+        print( res )
         return res
 
     def jac(v):
@@ -1386,17 +1386,17 @@ def random_numerical(iv=0):
 
     #print SciMin
 
-    print
-    print
+    print()
+    print()
 
     if SciMin.success:
-        for pair in zip(coeff_vars, SciMin.x): print pair
+        for pair in zip(coeff_vars, SciMin.x): print( pair)
     else:
-        print SciMin.message
+        print( SciMin.message)
 
 def random_numerical_ten(limit=10):
     for i in range(limit):
-        print "Random seed", i
+        print( "Random seed", i)
         random_numerical(i)
 
 
@@ -1409,27 +1409,27 @@ def find_relation():
     norm = 1/min(abs(SciMin.x))
     ints = [ZZ(round(v)) for v in  norm * SciMin.x] + [ZZ(round(norm))]
 
-    print ints
+    print( ints )
 
     L = matrix(list(matrix.identity(len(ints))) + [tuple(ints)]).transpose().LLL()
 
-    print L
+    print( L)
 
     for Lrow in L:
 
         rel = matrix(BWB.gens() + (1,)) * Lrow[0:-1]
 
-        print rel
+        print( rel)
 
         V = Lrow[0:-1]
 
         # len(V)-1 so as to drop the "1" term at the end
         for i in range(len(V)-1):
             if V[i] == 1:
-                print i,Lrow
-	        V[i] = 0
-	        ints[i] = - (matrix(V) * matrix(ints).transpose())[0,0]
-	        break
+                print( i,Lrow)
+                V[i] = 0
+                ints[i] = - (matrix(V) * matrix(ints).transpose())[0,0]
+                break
 
         if Lrow[-1] != 0:
             break
@@ -1437,19 +1437,19 @@ def find_relation():
 # print an input file for Bertini to numerically find all irreducible components
 
 def bertini():
-    print '''
+    print( '''
 CONFIG
   TrackType:1;
 END;
 
 INPUT
 
-'''
-    print 'variable_group ', ','.join(map(str, BWB.gens())), ';'
+''')
+    print( 'variable_group ', ','.join(map(str, BWB.gens())), ';')
 
-    print 'function ', ','.join(['f{}'.format(i) for i in range(len(eqns))]), ';'
+    print( 'function ', ','.join(['f{}'.format(i) for i in range(len(eqns))]), ';')
 
     for i in range(len(eqns)):
-        print 'f{} = '.format(i), eqns[i], ';'
+        print( 'f{} = '.format(i), eqns[i], ';')
 
-    print 'END;'
+    print( 'END;')
