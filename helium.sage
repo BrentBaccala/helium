@@ -681,7 +681,7 @@ Token.__eq__ = Token_eq
 # https://stackoverflow.com/a/55303121/1493790 suggests that this
 # might not be needed in newer versions of Python.
 
-from rfoo.utils import rconsole
+# from rfoo.utils import rconsole
 
 class Autoself:
     def autoself(self):
@@ -706,8 +706,8 @@ class Autoself:
         return os.getpid()
     def load(self, filename):
         load(filename)
-    def rconsole(self, port=54321):
-        rconsole.spawn_server(port=port)
+#    def rconsole(self, port=54321):
+#        rconsole.spawn_server(port=port)
 
 import queue
 
