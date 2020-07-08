@@ -770,7 +770,7 @@ class ExpanderClass(Autoself):
         self.mc = mc
     def register_collectors(self, collectors):
         self.collectors = collectors
-        self.dicts = map(dict, [[]] * len(collectors))
+        self.dicts = list(map(dict, [[]] * len(collectors)))
     @async_method
     def shutdown(self):
         for i in range(len(self.collectors)):
