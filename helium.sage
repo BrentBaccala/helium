@@ -270,11 +270,11 @@ def extract_ops():
 def multi_init():
     prep_hydrogen()
     t = timeit.timeit(lambda: create_bwb4(), number=1)
-    print 'create_bwb4() : %s sec'%(t)
+    print('create_bwb4() : %s sec'%(t))
     t = timeit.timeit(lambda: SR_expand2a(), number=1)
-    print 'SR_expand2a() : %s sec'%(t)
+    print('SR_expand2a() : %s sec'%(t))
     t = timeit.timeit(lambda: extract_ops(), number=1)
-    print 'extract_ops() : %s sec'%(t)
+    print('extract_ops() : %s sec'%(t))
     start_manager_process()
     mc.set_range(len(ops), blocksize)
 
@@ -380,7 +380,7 @@ def remove_duplicates():
     remaining_iterations = sum(sizes) - len(value_to_count)
     while len(dups) > 0:
         if remaining_iterations % 1000 == 0:
-            print remaining_iterations, 'iterations remaining'
+            print(remaining_iterations, 'iterations remaining')
         maxsize = max(sizes)
         try:
             i = (i for i,c in enumerate(sizes) if c == maxsize and generators[i] is not None).next()
@@ -536,7 +536,7 @@ Token.__eq__ = Token_eq
 # https://stackoverflow.com/a/55303121/1493790 suggests that this
 # might not be needed in newer versions of Python.
 
-from rfoo.utils import rconsole
+# from rfoo.utils import rconsole
 
 class JoinThreads:
     r"""
@@ -579,8 +579,8 @@ class Autoself(JoinThreads):
         return os.getpid()
     def load(self, filename):
         load(filename)
-    def rconsole(self, port=54321):
-        rconsole.spawn_server(port=port)
+#    def rconsole(self, port=54321):
+#        rconsole.spawn_server(port=port)
 
 import queue
 
@@ -643,7 +643,7 @@ class ExpanderClass(Autoself):
         self.mc = mc
     def register_collectors(self, collectors):
         self.collectors = collectors
-        self.dicts = map(dict, [[]] * len(collectors))
+        self.dicts = list(map(dict, [[]] * len(collectors)))
     @async_method
     def shutdown(self):
         for i in range(len(self.collectors)):
@@ -662,8 +662,8 @@ class ExpanderClass(Autoself):
             else:
                 sign='+'
             vs = s.split('*')
-            key = '*'.join(ifilter(lambda x: any([x.startswith(c) for c in ('x', 'y', 'z', 'r', 'P')]), vs))
-            value = '*'.join(ifilterfalse(lambda x: any([x.startswith(c) for c in ('x', 'y', 'z', 'r', 'P')]), vs))
+            key = '*'.join(filter(lambda x: any([x.startswith(c) for c in ('x', 'y', 'z', 'r', 'P')]), vs))
+            value = '*'.join(filterfalse(lambda x: any([x.startswith(c) for c in ('x', 'y', 'z', 'r', 'P')]), vs))
             dictnum = hash(key) % len(self.collectors)
             self.dicts[dictnum][key] = self.dicts[dictnum].get(key, '') + sign + value
         for i in range(len(self.collectors)):
@@ -975,7 +975,7 @@ class CollectorClass(Autoself):
         self.dok = scipy.sparse.dok_matrix((len(self.result), veclen), np.int64)
         for value in self.result.values():
             terms = re.split('([+-][^+-]+)', value)
-            for term in ifilter(bool, terms):
+            for term in filter(bool, terms):
                 if term[0] == '-':
                     sign = -1
                     term = term[1:]
@@ -1290,9 +1290,9 @@ def fndivA(v):
     global last_time
     sum_of_squares = sum(square(res/Adenom))
     if last_time == 0:
-        print sum_of_squares
+        print(sum_of_squares)
     else:
-        print "{:<30} {:20} sec".format(sum_of_squares, time.time()-last_time)
+        print("{:<30} {:20} sec".format(sum_of_squares, time.time()-last_time))
     last_time = time.time()
     return res/Adenom
 
@@ -1343,9 +1343,9 @@ def minfunc(v):
     res = real_type(sum_of_squares / zero_variety.subs(d))
     global last_time
     if last_time == 0:
-        print res
+        print(res)
     else:
-        print "{:<30} {:20} sec".format(res, time.time()-last_time)
+        print("{:<30} {:20} sec".format(res, time.time()-last_time))
     last_time = time.time()
     return res
 
@@ -1499,7 +1499,7 @@ def optimize_step(vec):
         g_deriv = gradient.dot(evalstep)
 
         if newton_val > current_val - abs(g_deriv)/1000:
-            print 'newton step not acceptable'
+            print('newton step not acceptable')
 
     return nextstep
 
@@ -1563,16 +1563,16 @@ def random_numerical(iv=0, limit=1):
 
     global final_iv
     final_iv = iv
-    for pair in zip(coeff_vars, iv): print pair
+    for pair in zip(coeff_vars, iv): print(pair)
 
     # if SciMin.success:
-    #     for pair in zip(coeff_vars, SciMin.x): print pair
+    #     for pair in zip(coeff_vars, SciMin.x): print(pair)
     # else:
-    #     print SciMin.message
+    #     print(SciMin.message)
 
 def random_numerical_ten(limit=10):
     for i in range(limit):
-        print "Random seed", i
+        print("Random seed", i)
         random_numerical(i)
 
 
@@ -1585,27 +1585,27 @@ def find_relation():
     norm = 1/min(abs(SciMin.x))
     ints = [ZZ(round(v)) for v in  norm * SciMin.x] + [ZZ(round(norm))]
 
-    print ints
+    print(ints)
 
     L = matrix(list(matrix.identity(len(ints))) + [tuple(ints)]).transpose().LLL()
 
-    print L
+    print(L)
 
     for Lrow in L:
 
         rel = matrix(BWB.gens() + (1,)) * Lrow[0:-1]
 
-        print rel
+        print(rel)
 
         V = Lrow[0:-1]
 
         # len(V)-1 so as to drop the "1" term at the end
         for i in range(len(V)-1):
             if V[i] == 1:
-                print i,Lrow
-	        V[i] = 0
-	        ints[i] = - (matrix(V) * matrix(ints).transpose())[0,0]
-	        break
+                print(i,Lrow)
+                V[i] = 0
+                ints[i] = - (matrix(V) * matrix(ints).transpose())[0,0]
+                break
 
         if Lrow[-1] != 0:
             break
