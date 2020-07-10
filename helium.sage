@@ -50,6 +50,13 @@
 # - optimize creation of multi-vectors
 # - allow workers to be added or removed on the fly
 
+# "old" algorithm tries to minimize a scalar function: the sum of the
+# squares of the coefficient polynomials, divided by the value of the
+# zero variety (sum of a's squared).  It works pretty well for hydrogen,
+# but doesn't seem to converge well for helium.
+
+use_old_algorithm = True
+
 from itertools import *
 
 # from python docs
@@ -1554,7 +1561,19 @@ def random_numerical(iv=0, limit=1):
     # use an algorithm that searches for zeros of the vector-valued
     # function instead of the sum of its squares.
 
-    # SciMin = scipy.optimize.minimize(minfunc, iv, jac=jac, method='BFGS', options={'return_all':True})
+    if use_old_algorithm:
+
+        SciMin = scipy.optimize.minimize(minfunc, iv, jac=jac, method='BFGS', options={'return_all':True})
+
+        print()
+        print()
+
+        if SciMin.success:
+            for pair in zip(coeff_vars, SciMin.x): print( pair)
+        else:
+            print( SciMin.message)
+
+        return
 
     # optimize.root methods:
     # 'hybr' (the default) requires same num of eqns as vars
@@ -1577,11 +1596,6 @@ def random_numerical(iv=0, limit=1):
     global final_iv
     final_iv = iv
     for pair in zip(coeff_vars, iv): print(pair)
-
-    # if SciMin.success:
-    #     for pair in zip(coeff_vars, SciMin.x): print(pair)
-    # else:
-    #     print(SciMin.message)
 
 def random_numerical_ten(limit=10):
     for i in range(limit):
