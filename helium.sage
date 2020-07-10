@@ -1,3 +1,4 @@
+# -*- mode: python -*-
 #
 # Python code to search for solutions of Hydrogen and Helium
 # non-relativistic time-invariant Schrodinger equation
