@@ -410,10 +410,10 @@ def SRdict_expander4():
 blocksize = 100
 
 # number of collector processes
-num_collectors = 2
+num_collectors = 1
 
 # number of simultaneous expander processes
-num_expanders = 2
+num_expanders = 1
 
 import timeit
 
