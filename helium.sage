@@ -1340,7 +1340,14 @@ def minfunc(v):
 
     d = dict(zip(coeff_vars, v))
     sum_of_squares = sum(map(lambda x: x.get(), [cc.sum_of_squares(v) for cc in ccs]))
-    res = real_type(sum_of_squares / zero_variety.subs(d))
+
+    # Compute zero_var on operands() to make the order of addition consistent
+    # for testing purposes (otherwise we see variance in LSBs)
+    #zero_var = v.dtype.type(zero_variety.subs(d))
+    zero_var = v.dtype.type(sum(map(lambda bwb: bwb.subs(d), zero_variety.operands())))
+
+    res = real_type(sum_of_squares / zero_var)
+
     global last_time
     if last_time == 0:
         print(res)
@@ -1356,7 +1363,12 @@ def jac(v):
     d = dict(zip(coeff_vars, v))
     sum_of_squares = sum(map(lambda x: x.get(), [cc.sum_of_squares(v) for cc in ccs]))
     jacobian_sum_of_squares = sum(map(lambda x: np.array(x.get()), [cc.jacobian_sum_of_squares(v) for cc in ccs]))
-    zero_var = v.dtype.type(zero_variety.subs(d))
+
+    # Compute zero_var on operands() to make the order of addition consistent
+    # for testing purposes (otherwise we see variance in LSBs)
+    #zero_var = v.dtype.type(zero_variety.subs(d))
+    zero_var = v.dtype.type(sum(map(lambda bwb: bwb.subs(d), zero_variety.operands())))
+
     Av = v * np.array([c in Avars for c in coeff_vars])
     res = ((jacobian_sum_of_squares*zero_var - 2*np.array(Av)*sum_of_squares)/zero_var^2)
     return res
