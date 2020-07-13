@@ -379,7 +379,7 @@ def remove_duplicates():
     iv = [random.random() for i in coeff_vars]
     global results
     results = [cc.eval_fns(iv) for cc in ccs]
-    fetched_results = map(lambda x: x.get(), results)
+    fetched_results = list(map(lambda x: x.get(), results))
     sizes = [cc.nrows() for cc in ccs]
     value_to_count = dict(zip(*np.unique(np.hstack(fetched_results), return_counts=True)))
     dups = set((u for u,c in value_to_count.items() if c>1))
@@ -391,11 +391,11 @@ def remove_duplicates():
             print(remaining_iterations, 'iterations remaining')
         maxsize = max(sizes)
         try:
-            i = (i for i,c in enumerate(sizes) if c == maxsize and generators[i] is not None).next()
+            i = (i for i,c in enumerate(sizes) if c == maxsize and generators[i] is not None).__next__()
         except StopIteration:
             break
         try:
-            (index, value) = generators[i].next()
+            (index, value) = generators[i].__next__()
         except StopIteration:
             generators[i] = None
             continue
