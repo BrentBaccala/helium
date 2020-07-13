@@ -853,7 +853,7 @@ class JacobianDivAMatrix(LUMatrix):
     r"""
     Proxy class that wraps a Jacobian matrix.
 
-    This Jacobian is for the functions divided by the norm of the A vectors.
+    This Jacobian is for the squares of the functions divided by the norm of the A vectors.
 
     The idea is to drive the solution away from the hyperplane where
     the A coefficients are all zero.
@@ -861,13 +861,22 @@ class JacobianDivAMatrix(LUMatrix):
 
     @async_method
     def _start_calculation(self, vec):
+        # n is number of functions; c is number of variables
+        # the values - vec.shape = (c)
+
+        # the functions - N.shape = (n)
         N = self.collector.eval_fns(vec).get()
+        # their derivatives - dN.shape = (n,c)
         dN = np.stack([self.collector.dot(self.collector.generate_multi_D_vector(vec, var)) for var in coeff_vars], axis=1)
 
+        # the A values - Av.shape = (c)
         Amask = np.array([c in Avars for c in coeff_vars])
         Av = vec * Amask
-        Adenom = np.linalg.norm(Av)
-        M = dN/Adenom - np.outer(N,Av)/(Adenom^3)
+        # sum A^2 - a scalar
+        Adenom = sum(Av*Av)
+
+        # output - M.shape = (n,c)
+        M = 2*(N.reshape(-1,1))*dN/Adenom - 2*np.outer(N*N,Av)/(Adenom^2)
 
         LUMatrix.__init__(self, M, N/Adenom)
 
@@ -1364,21 +1373,37 @@ def minfunc(v):
     last_time = time.time()
     return res
 
+# jac(v) - the Jacobian matrix of minfunc()
+#
+# For testing purposes, we can compute this either by letting the
+# collectors compute the jacobian of the sum of the squares and then
+# modifying that result to take the denominator into account, or
+# we can have the collectors compute the jacobian matrix for the
+# individual functions (taking the denominator into account - divA)
+# and summing it up.  The result should be the same in either case,
+# up to floating point inaccuracies.
+
+use_matrix_jacobian = True
+
 def jac(v):
     global last_v
     last_v = v
 
-    d = dict(zip(coeff_vars, v))
-    sum_of_squares = sum(map(lambda x: x.get(), [cc.sum_of_squares(v) for cc in ccs]))
-    jacobian_sum_of_squares = sum(map(lambda x: np.array(x.get()), [cc.jacobian_sum_of_squares(v) for cc in ccs]))
+    if use_matrix_jacobian:
+        res = sum(map(lambda x: np.array(x.get().sum(axis=0)), [cc.jacobian_fns_divA(v) for cc in ccs]))
+    else:
+        d = dict(zip(coeff_vars, v))
+        sum_of_squares = sum(map(lambda x: x.get(), [cc.sum_of_squares(v) for cc in ccs]))
+        jacobian_sum_of_squares = sum(map(lambda x: np.array(x.get()), [cc.jacobian_sum_of_squares(v) for cc in ccs]))
 
-    # Compute zero_var on operands() to make the order of addition consistent
-    # for testing purposes (otherwise we see variance in LSBs)
-    #zero_var = v.dtype.type(zero_variety.subs(d))
-    zero_var = v.dtype.type(sum(map(lambda bwb: bwb.subs(d), zero_variety.operands())))
+        # Compute zero_var on operands() to make the order of addition consistent
+        # for testing purposes (otherwise we see variance in LSBs)
+        #zero_var = v.dtype.type(zero_variety.subs(d))
+        zero_var = v.dtype.type(sum(map(lambda bwb: bwb.subs(d), zero_variety.operands())))
 
-    Av = v * np.array([c in Avars for c in coeff_vars])
-    res = ((jacobian_sum_of_squares*zero_var - 2*np.array(Av)*sum_of_squares)/zero_var^2)
+        Av = v * np.array([c in Avars for c in coeff_vars])
+        res = ((jacobian_sum_of_squares*zero_var - 2*np.array(Av)*sum_of_squares)/zero_var^2)
+
     return res
 
 import random
