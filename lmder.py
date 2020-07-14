@@ -197,23 +197,22 @@ dpmpar = (2.22044604926e-16, 2.22507385852e-308, 1.79769313485e+308)
 #     burton s. garbow, kenneth e. hillstrom, jorge j. more
 #
 #     **********
+
 def lmder(fcn,m,n,x,fvec,fjac,ldfjac,ftol,xtol,gtol,
           maxfev,diag,mode,factor,nprint,info,nfev,njev,
           ipvt,qtf,wa1,wa2,wa3,wa4):
 
+    # epsmch is the machine precision.
 
-#
-#     epsmch is the machine precision.
-#
     epsmch = dpmpar[0]
-#
+
     info = 0
     iflag = 0
     nfev = 0
     njev = 0
-#
-#     check the input parameters for errors.
-#
+
+    # check the input parameters for errors.
+
     if (n < 0 or m < n or ldfjac < m
            or ftol < zero or xtol < zero or gtol < zero
            or maxfev <= 0 or factor <= zero):
@@ -229,10 +228,10 @@ def lmder(fcn,m,n,x,fvec,fjac,ldfjac,ftol,xtol,gtol,
                 iflag = 0
                 if (nprint > 0): fcn(m,n,x,fvec,fjac,ldfjac,iflag)
                 return
-#
-#     evaluate the function at the starting point
-#     and calculate its norm.
-#
+
+    # evaluate the function at the starting point
+    # and calculate its norm.
+
     iflag = 1
     fcn(m,n,x,fvec,fjac,ldfjac,iflag)
     nfev = 1
@@ -243,19 +242,18 @@ def lmder(fcn,m,n,x,fvec,fjac,ldfjac,ftol,xtol,gtol,
         return
 
     fnorm = enorm(m,fvec)
-#
-#     initialize levenberg-marquardt parameter and iteration counter.
-#
+
+    # initialize levenberg-marquardt parameter and iteration counter.
+
     par = zero
     fiter = 1
-#
-#     beginning of the outer loop.
-#
+
+    # beginning of the outer loop.
+
     while True:
    
-#
-#        calculate the jacobian matrix.
-#
+        # calculate the jacobian matrix.
+
         iflag = 2
         fcn(m,n,x,fvec,fjac,ldfjac,iflag)
         njev = njev + 1
@@ -264,9 +262,9 @@ def lmder(fcn,m,n,x,fvec,fjac,ldfjac,ftol,xtol,gtol,
             iflag = 0
             if (nprint > 0): fcn(m,n,x,fvec,fjac,ldfjac,iflag)
             return
-#
-#        if requested, call fcn to enable printing of iterates.
-#
+
+        # if requested, call fcn to enable printing of iterates.
+
         if (nprint > 0):
             iflag = 0
             if ((fiter-1) % nprint == 0):
@@ -276,32 +274,32 @@ def lmder(fcn,m,n,x,fvec,fjac,ldfjac,ftol,xtol,gtol,
                 iflag = 0
                 if (nprint > 0): fcn(m,n,x,fvec,fjac,ldfjac,iflag)
                 return
-#
-#        compute the qr factorization of the jacobian.
-#
+
+        # compute the qr factorization of the jacobian.
+
         qrfac(m,n,fjac,ldfjac,True,ipvt,n,wa1,wa2,wa3)
-#
-#        on the first iteration and if mode is 1, scale according
-#        to the norms of the columns of the initial jacobian.
-#
-        if (fiter == 1): # 80
+
+        # on the first iteration and if mode is 1, scale according
+        # to the norms of the columns of the initial jacobian.
+
+        if (fiter == 1):
             if (mode != 2):
                 for j in range(1,n+1):
                     diag[j-1] = wa2[j-1]
                 if (wa2[j-1] == zero): diag[j-1] = one
-#
-#        on the first iteration, calculate the norm of the scaled x
-#        and initialize the step bound delta.
-#
+
+            # on the first iteration, calculate the norm of the scaled x
+            # and initialize the step bound delta.
+
             for j in range(1,n+1):
                 wa3[j-1] = diag[j-1]*x[j-1]
             xnorm = enorm(n,wa3)
             delta = factor*xnorm
             if (delta == zero): delta = factor
-#
-#        form (q transpose)*fvec and store the first n components in
-#        qtf.
-#
+
+        # form (q transpose)*fvec and store the first n components in
+        # qtf.
+
         for i in range(1,m+1):
             wa4[i-1] = fvec[i-1]
 
@@ -316,9 +314,9 @@ def lmder(fcn,m,n,x,fvec,fjac,ldfjac,ftol,xtol,gtol,
             fjac[j-1,j-1] = wa1[j-1]
             qtf[j-1] = wa4[j-1]
 
-#
-#        compute the norm of the scaled gradient.
-#
+
+        # compute the norm of the scaled gradient.
+
         gnorm = zero
         if (fnorm != zero):
             for j in range(1,n+1):
@@ -329,45 +327,45 @@ def lmder(fcn,m,n,x,fvec,fjac,ldfjac,ftol,xtol,gtol,
                         sum = sum + fjac[i-1,j-1]*(qtf[i-1]/fnorm)
                     gnorm = max(gnorm,abs(sum/wa2(l)))
 
-#
-#        test for convergence of the gradient norm.
-#
+
+        # test for convergence of the gradient norm.
+
         if (gnorm <= gtol): info = 4
         if (info != 0):
             if (iflag < 0): info = iflag
             iflag = 0
             if (nprint > 0): fcn(m,n,x,fvec,fjac,ldfjac,iflag)
             return
-#
-#        rescale if necessary.
-#
+
+        # rescale if necessary.
+
         if (mode != 2):
             for j in range(1,n+1):
                 diag[j-1] = max(diag[j-1],wa2[j-1])
-#
-#        beginning of the inner loop.
-#
+
+        # beginning of the inner loop.
+
         while True:
-#
-#           determine the levenberg-marquardt parameter.
-#
+
+            # determine the levenberg-marquardt parameter.
+
             lmpar(n,fjac,ldfjac,ipvt,diag,qtf,delta,par,wa1,wa2,wa3,wa4)
-#
-#           store the direction p and x + p. calculate the norm of p.
-#
+
+            # store the direction p and x + p. calculate the norm of p.
+
             for j in range(1,n+1):
                 wa1[j-1] = -wa1[j-1]
                 wa2[j-1] = x[j-1] + wa1[j-1]
                 wa3[j-1] = diag[j-1]*wa1[j-1]
             pnorm = enorm(n,wa3)
-#
-#           on the first iteration, adjust the initial step bound.
-#
+
+            # on the first iteration, adjust the initial step bound.
+
             if (fiter == 1):
                 delta = min(delta,pnorm)
-#
-#           evaluate the function at x + p and calculate its norm.
-#
+
+            # evaluate the function at x + p and calculate its norm.
+
             iflag = 1
             fcn(m,n,wa2,wa4,fjac,ldfjac,iflag)
             nfev = nfev + 1
@@ -377,15 +375,15 @@ def lmder(fcn,m,n,x,fvec,fjac,ldfjac,ftol,xtol,gtol,
                 if (nprint > 0): fcn(m,n,x,fvec,fjac,ldfjac,iflag)
                 return
             fnorm1 = enorm(m,wa4)
-#
-#           compute the scaled actual reduction.
-#
+
+            # compute the scaled actual reduction.
+
             actred = -one
             if (p1*fnorm1 < fnorm): actred = one - (fnorm1/fnorm)**2
-#
-#           compute the scaled predicted reduction and
-#           the scaled directional derivative.
-#
+
+            # compute the scaled predicted reduction and
+            # the scaled directional derivative.
+
             for j in range(1,n+1):
                 wa3[j-1] = zero
                 l = ipvt[j-1]
@@ -397,15 +395,15 @@ def lmder(fcn,m,n,x,fvec,fjac,ldfjac,ftol,xtol,gtol,
             temp2 = (sqrt(par)*pnorm)/fnorm
             prered = temp1**2 + temp2**2/p5
             dirder = -(temp1**2 + temp2**2)
-#
-#           compute the ratio of the actual to the predicted
-#           reduction.
-#
+
+            # compute the ratio of the actual to the predicted
+            # reduction.
+
             ratio = zero
             if (prered != zero): ratio = actred/prered
-#
-#           update the step bound.
-#
+
+            # update the step bound.
+
             if (ratio <= p25):
                 if (actred >= zero): temp = p5
                 if (actred < zero):
@@ -416,13 +414,13 @@ def lmder(fcn,m,n,x,fvec,fjac,ldfjac,ftol,xtol,gtol,
             elif par == zero or ratio >= p75:
                 delta = pnorm/p5
                 par = p5*par
-#
-#           test for successful iteration.
-#
+
+            # test for successful iteration.
+
             if (ratio >= p0001):
-#
-#           successful iteration. update x, fvec, and their norms.
-#
+
+                # successful iteration. update x, fvec, and their norms.
+
                 for j in range(1,n+1):
                     x[j-1] = wa2[j-1]
                     wa2[j-1] = diag[j-1]*x[j-1]
@@ -432,9 +430,8 @@ def lmder(fcn,m,n,x,fvec,fjac,ldfjac,ftol,xtol,gtol,
                 fnorm = fnorm1
                 fiter = fiter + 1
 
-#
-#           tests for convergence.
-#
+            # tests for convergence.
+
             if (abs(actred) <= ftol and prered <= ftol and p5*ratio <= one): info = 1
             if (delta <= xtol*xnorm): info = 2
             if (abs(actred) <= ftol and prered <= ftol and p5*ratio <= one and info == 2): info = 3
@@ -443,9 +440,9 @@ def lmder(fcn,m,n,x,fvec,fjac,ldfjac,ftol,xtol,gtol,
                 iflag = 0
                 if (nprint > 0): fcn(m,n,x,fvec,fjac,ldfjac,iflag)
                 return
-#
-#           tests for termination and stringent tolerances.
-#
+
+            # tests for termination and stringent tolerances.
+
             if (nfev >= maxfev): info = 5
             if (abs(actred) <= epsmch and prered <= epsmch and p5*ratio <= one): info = 6
             if (delta <= epsmch*xnorm): info = 7
@@ -455,16 +452,15 @@ def lmder(fcn,m,n,x,fvec,fjac,ldfjac,ftol,xtol,gtol,
                 iflag = 0
                 if (nprint > 0): fcn(m,n,x,fvec,fjac,ldfjac,iflag)
                 return
-#
-#           end of the inner loop. repeat if iteration unsuccessful.
-#
+
+            # end of the inner loop. repeat if iteration unsuccessful.
+
             if (ratio >= p0001): break
-#
-#        end of the outer loop.
-#
-#
-#     last card of subroutine lmder.
-#
+
+        # end of the outer loop.
+
+    # last card of subroutine lmder.
+
 
 #     **********
 #
@@ -563,14 +559,13 @@ def lmder(fcn,m,n,x,fvec,fjac,ldfjac,ftol,xtol,gtol,
 
 def lmpar (n,r,ldr,ipvt,diag,qtb,delta,par,x,sdiag,wa1,wa2):
 
-#
-#     dwarf is the smallest positive magnitude.
-#
+    # dwarf is the smallest positive magnitude.
+
     dwarf = dpmpar[1]
-#
-#     compute and store in x the gauss-newton direction. if the
-#     jacobian is rank-deficient, obtain a least squares solution.
-#
+
+    # compute and store in x the gauss-newton direction. if the
+    # jacobian is rank-deficient, obtain a least squares solution.
+
     nsing = n
     for j in range(1,n+1):
         wa1[j-1] = qtb[j-1]
@@ -590,11 +585,11 @@ def lmpar (n,r,ldr,ipvt,diag,qtb,delta,par,x,sdiag,wa1,wa2):
     for j in range(1,n+1):
         l = ipvt[j-1]
         x[l-1] = wa1[j-1]
-#
-#     initialize the iteration counter.
-#     evaluate the function at the origin, and test
-#     for acceptance of the gauss-newton direction.
-#
+
+    # initialize the iteration counter.
+    # evaluate the function at the origin, and test
+    # for acceptance of the gauss-newton direction.
+
     fiter = 0
 
     for j in range(1,n+1):
@@ -605,11 +600,11 @@ def lmpar (n,r,ldr,ipvt,diag,qtb,delta,par,x,sdiag,wa1,wa2):
     if (fp <= p1*delta):
         if (fiter == 0): par = 0
         return
-#
-#     if the jacobian is not rank deficient, the newton
-#     step provides a lower bound, parl, for the zero of
-#     the function. otherwise set this bound to zero.
-#
+
+    # if the jacobian is not rank deficient, the newton
+    # step provides a lower bound, parl, for the zero of
+    # the function. otherwise set this bound to zero.
+
     parl = 0
     if (nsing >= n):
         for j in range(1,n+1):
@@ -626,9 +621,9 @@ def lmpar (n,r,ldr,ipvt,diag,qtb,delta,par,x,sdiag,wa1,wa2):
 
         temp = enorm(n,wa1)
         parl = ((fp/delta)/temp)/temp
-#
-#     calculate an upper bound, paru, for the zero of the function.
-#
+
+    # calculate an upper bound, paru, for the zero of the function.
+
     for j in range(1,n+1): # 140
         sum = zero
         for i in range(1,j+1):
@@ -638,22 +633,21 @@ def lmpar (n,r,ldr,ipvt,diag,qtb,delta,par,x,sdiag,wa1,wa2):
     gnorm = enorm(n,wa1)
     paru = gnorm/delta
     if (paru == 0): paru = dwarf/min(delta,p1)
-#
-#     if the input par lies outside of the interval (parl,paru),
-#     set par to the closer endpoint.
-#
+
+    # if the input par lies outside of the interval (parl,paru),
+    # set par to the closer endpoint.
+
     par = max(par,parl)
     par = min(par,paru)
     if (par == 0): par = gnorm/dxnorm
-#
-#     beginning of an iteration.
-#
 
-    while True: # 150
+    # beginning of an iteration.
+
+    while True:
         fiter = fiter + 1
-#
-#        evaluate the function at the current value of par.
-#
+
+        # evaluate the function at the current value of par.
+
         if (par == zero): par = max(dwarf,p001*paru)
         temp = sqrt(par)
         for j in range(1,n+1):
@@ -664,17 +658,17 @@ def lmpar (n,r,ldr,ipvt,diag,qtb,delta,par,x,sdiag,wa1,wa2):
         dxnorm = enorm(n,wa2)
         temp = fp
         fp = dxnorm - delta
-#
-#        if the function is small enough, accept the current value
-#        of par. also test for the exceptional cases where parl
-#        is zero or the number of iterations has reached 10.
-#
+
+        # if the function is small enough, accept the current value
+        # of par. also test for the exceptional cases where parl
+        # is zero or the number of iterations has reached 10.
+
         if (abs(fp) < p1*delta or parl == zero and fp <= temp and temp < 0 or fiter == 10):
             if (fiter == 0): par = zero
             return
-#
-#        compute the newton correction.
-#
+
+        # compute the newton correction.
+
         for j in range(1,n+1):
             l = ipvt[j-1]
             wa1[j-1] = diag[l-1]*(wa2[l-1]/dxnorm)
@@ -689,15 +683,18 @@ def lmpar (n,r,ldr,ipvt,diag,qtb,delta,par,x,sdiag,wa1,wa2):
 
         temp = enorm(n,wa1)
         parc = ((fp/delta)/temp)/temp
-#
-#        depending on the sign of the function, update parl or paru.
-#
+
+        # depending on the sign of the function, update parl or paru.
+
         if (fp > 0): parl = max(parl,par)
         if (fp < 0): paru = min(paru,par)
-#
-#        compute an improved estimate for par.
-#
+
+        # compute an improved estimate for par.
+
         par = max(parl,par+parc)
-#
-#        end of an iteration.
-#
+
+        # end of an iteration.
+
+
+def enorm(n,v):
+    return np.linalg.norm(np.array(v))
