@@ -269,7 +269,7 @@ def lmder(fcn,m,n,x,fvec,fjac,ldfjac,ftol,xtol,gtol,
 #
         if (nprint > 0):
             iflag = 0
-            if (mod(fiter-1,nprint) == 0):
+            if ((fiter-1) % nprint == 0):
                 fcn(m,n,x,fvec,fjac,ldfjac,iflag)
             if (iflag < 0):
                 if (iflag < 0): info = iflag
@@ -327,7 +327,7 @@ def lmder(fcn,m,n,x,fvec,fjac,ldfjac,ftol,xtol,gtol,
                     sum = zero
                     for i in range(1,j+1):
                         sum = sum + fjac[i-1,j-1]*(qtf[i-1]/fnorm)
-                    gnorm = dmax1(gnorm,dabs(sum/wa2(l)))
+                    gnorm = max(gnorm,abs(sum/wa2(l)))
 
 #
 #        test for convergence of the gradient norm.
@@ -343,7 +343,7 @@ def lmder(fcn,m,n,x,fvec,fjac,ldfjac,ftol,xtol,gtol,
 #
         if (mode != 2):
             for j in range(1,n+1):
-                diag[j-1] = dmax1(diag[j-1],wa2[j-1])
+                diag[j-1] = max(diag[j-1],wa2[j-1])
 #
 #        beginning of the inner loop.
 #
@@ -364,7 +364,7 @@ def lmder(fcn,m,n,x,fvec,fjac,ldfjac,ftol,xtol,gtol,
 #           on the first iteration, adjust the initial step bound.
 #
             if (fiter == 1):
-                delta = dmin1(delta,pnorm)
+                delta = min(delta,pnorm)
 #
 #           evaluate the function at x + p and calculate its norm.
 #
@@ -394,7 +394,7 @@ def lmder(fcn,m,n,x,fvec,fjac,ldfjac,ftol,xtol,gtol,
                     wa3[i-1] = wa3[i-1] + fjac[i-1,j-1]*temp
 
             temp1 = enorm(n,wa3)/fnorm
-            temp2 = (dsqrt(par)*pnorm)/fnorm
+            temp2 = (sqrt(par)*pnorm)/fnorm
             prered = temp1**2 + temp2**2/p5
             dirder = -(temp1**2 + temp2**2)
 #
@@ -411,7 +411,7 @@ def lmder(fcn,m,n,x,fvec,fjac,ldfjac,ftol,xtol,gtol,
                 if (actred < zero):
                     temp = p5*dirder/(dirder + p5*actred)
                 if (p1*fnorm1 >= fnorm or temp < p1): temp = p1
-                delta = temp*dmin1(delta,pnorm/p1)
+                delta = temp*min(delta,pnorm/p1)
                 par = par/temp
             elif par == zero or ratio >= p75:
                 delta = pnorm/p5
@@ -435,9 +435,9 @@ def lmder(fcn,m,n,x,fvec,fjac,ldfjac,ftol,xtol,gtol,
 #
 #           tests for convergence.
 #
-            if (dabs(actred) <= ftol and prered <= ftol and p5*ratio <= one): info = 1
+            if (abs(actred) <= ftol and prered <= ftol and p5*ratio <= one): info = 1
             if (delta <= xtol*xnorm): info = 2
-            if (dabs(actred) <= ftol and prered <= ftol and p5*ratio <= one and info == 2): info = 3
+            if (abs(actred) <= ftol and prered <= ftol and p5*ratio <= one and info == 2): info = 3
             if (info != 0):
                 if (iflag < 0): info = iflag
                 iflag = 0
@@ -447,7 +447,7 @@ def lmder(fcn,m,n,x,fvec,fjac,ldfjac,ftol,xtol,gtol,
 #           tests for termination and stringent tolerances.
 #
             if (nfev >= maxfev): info = 5
-            if (dabs(actred) <= epsmch and prered <= epsmch and p5*ratio <= one): info = 6
+            if (abs(actred) <= epsmch and prered <= epsmch and p5*ratio <= one): info = 6
             if (delta <= epsmch*xnorm): info = 7
             if (gnorm <= epsmch): info = 8
             if (info != 0):
@@ -637,13 +637,13 @@ def lmpar (n,r,ldr,ipvt,diag,qtb,delta,par,x,sdiag,wa1,wa2):
         wa1[j-1] = sum/diag[l-1]
     gnorm = enorm(n,wa1)
     paru = gnorm/delta
-    if (paru == 0): paru = dwarf/dmin1(delta,p1)
+    if (paru == 0): paru = dwarf/min(delta,p1)
 #
 #     if the input par lies outside of the interval (parl,paru),
 #     set par to the closer endpoint.
 #
-    par = dmax1(par,parl)
-    par = dmin1(par,paru)
+    par = max(par,parl)
+    par = min(par,paru)
     if (par == 0): par = gnorm/dxnorm
 #
 #     beginning of an iteration.
@@ -654,8 +654,8 @@ def lmpar (n,r,ldr,ipvt,diag,qtb,delta,par,x,sdiag,wa1,wa2):
 #
 #        evaluate the function at the current value of par.
 #
-        if (par == zero): par = dmax1(dwarf,p001*paru)
-        temp = dsqrt(par)
+        if (par == zero): par = max(dwarf,p001*paru)
+        temp = sqrt(par)
         for j in range(1,n+1):
             wa1[j-1] = temp*diag[j-1]
         qrsolv(n,r,ldr,ipvt,wa1,qtb,x,sdiag,wa2)
@@ -669,7 +669,7 @@ def lmpar (n,r,ldr,ipvt,diag,qtb,delta,par,x,sdiag,wa1,wa2):
 #        of par. also test for the exceptional cases where parl
 #        is zero or the number of iterations has reached 10.
 #
-        if (dabs(fp) < p1*delta or parl == zero and fp <= temp and temp < 0 or fiter == 10):
+        if (abs(fp) < p1*delta or parl == zero and fp <= temp and temp < 0 or fiter == 10):
             if (fiter == 0): par = zero
             return
 #
@@ -692,12 +692,12 @@ def lmpar (n,r,ldr,ipvt,diag,qtb,delta,par,x,sdiag,wa1,wa2):
 #
 #        depending on the sign of the function, update parl or paru.
 #
-        if (fp > 0): parl = dmax1(parl,par)
-        if (fp < 0): paru = dmin1(paru,par)
+        if (fp > 0): parl = max(parl,par)
+        if (fp < 0): paru = min(paru,par)
 #
 #        compute an improved estimate for par.
 #
-        par = dmax1(parl,par+parc)
+        par = max(parl,par+parc)
 #
 #        end of an iteration.
 #
