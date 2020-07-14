@@ -29,7 +29,7 @@
 # by Brent Baccala
 #
 # first version - August 2019
-# latest version - September 2019
+# latest version - July 2020
 #
 # no rights reserved; you may freely copy, modify, or distribute this
 # program
@@ -50,14 +50,28 @@
 # - optimize creation of multi-vectors
 # - allow workers to be added or removed on the fly
 
-# "old" algorithm tries to minimize a scalar function: the sum of the
+# scipy.minimize tries to minimize a scalar function: the sum of the
 # squares of the coefficient polynomials, divided by the value of the
-# zero variety (sum of a's squared).  It works pretty well for hydrogen,
-# but doesn't seem to converge well for helium.
+# zero variety (sum of a's squared).  It works pretty well for
+# hydrogen, but doesn't seem to converge well for helium.
 
-use_old_algorithm = True
+use_scipy_minimize = False
+
+# scipy.root minimizes the least squares of a vector function
+
+use_scipy_root = True
+
+# If neither of the last two options are True, we use my (first)
+# custom root finding algorithm, based on the Numerical Recipes text.
+# We can either do an exact line search by fitting to a rational
+# function, use the scipy built-in line search, or default to the NR
+# text algorithm.
+
+use_exact_linesearch = False
+use_scipy_line_search = True
 
 from itertools import *
+import scipy.optimize
 
 # from python docs
 def flatten(listOfLists):
@@ -808,7 +822,12 @@ class LUMatrix(JoinThreads):
 
         """
         abs_b = abs(b_vector)
+        # pick row to maximize diagonal, scaled by maximum value in each row
         row = (abs_b / self.scaling).argmax()
+        # pick row with largest value of f
+        #row = self.f.argmax()
+        # pick row with largest value of f/gradient
+        #row = (self.f / abs_b).argmax()
         if self.f is not None:
             return (abs_b[row], row, self.f[row])
         else:
@@ -878,7 +897,7 @@ class JacobianDivAMatrix(LUMatrix):
         # output - M.shape = (n,c)
         M = 2*(N.reshape(-1,1))*dN/Adenom - 2*np.outer(N*N,Av)/(Adenom^2)
 
-        LUMatrix.__init__(self, M, N/Adenom)
+        LUMatrix.__init__(self, M, N*N/Adenom)
 
     def __init__(self, collector, vec):
         self.collector = collector
@@ -1301,7 +1320,7 @@ def fndivA(v):
     global last_v
     last_v = v
 
-    res = np.hstack(map(lambda x: x.get(), [cc.eval_fns(v) for cc in ccs]))
+    res = np.hstack(list(map(lambda x: x.get(), [cc.eval_fns(v) for cc in ccs])))
     Adenom = sqrt(sum([square(v[i]) for i in Aindices]))
 
     global last_time
@@ -1339,8 +1358,8 @@ def jacfn(v):
 
 def jac_fndivA(v):
     global N,dN,Av,Adenom
-    N = np.hstack(map(lambda x: x.get(), [cc.eval_fns(v) for cc in ccs]))
-    dN = np.vstack(map(lambda x: x.get(), [cc.jacobian_fns(v) for cc in ccs]))
+    N = np.hstack(list(map(lambda x: x.get(), [cc.eval_fns(v) for cc in ccs])))
+    dN = np.vstack(list(map(lambda x: x.get(), [cc.jacobian_fns(v) for cc in ccs])))
     Av = v * np.array([c in Avars for c in coeff_vars])   # could form a global vector for this
     Adenomsq = sum([square(v[i]) for i in Aindices])
     Adenom = sqrt(Adenomsq)
@@ -1504,14 +1523,12 @@ def optimize_step(vec):
     # norm = sum(square(gradient))
     # evalstep = gradient*v0/norm
 
-    use_exact_linesearch = False
-
     if use_exact_linesearch:
         # We want to sample at seven points to fit a sixth degree polynomial.
         # We expect a zero "close" to -1, so this will sample three points
         # on either size of it
         points = [vec + i*evalstep for i in [-4,-3,-2,-1,0,1,2]]
-        values = map(sum_of_squares, points)
+        values = list(map(sum_of_squares, points))
 
         global N,D
         # Now fit a polynomial to this data
@@ -1534,6 +1551,14 @@ def optimize_step(vec):
         # return the computed step
         nextstep = vec + evalstep*value_root[1]
 
+        # just do this to print the value
+        minfunc(nextstep)
+
+    elif use_scipy_line_search:
+
+        (alpha, *_) = scipy.optimize.line_search(minfunc, jac, vec, -evalstep)
+        nextstep = vec - evalstep*alpha
+
     else:
         nextstep = vec - evalstep
 
@@ -1541,16 +1566,43 @@ def optimize_step(vec):
         newton_val = minfunc(nextstep)
         gradient = jac(vec)
 
-        g_deriv = gradient.dot(evalstep)
+        g_deriv = - gradient.dot(evalstep)
 
         if newton_val > current_val - abs(g_deriv)/1000:
-            print('newton step not acceptable')
+
+            l = - g_deriv / (2*(newton_val - current_val - g_deriv))
+            #if l < 0.1:
+            #    l = 0.1
+
+            nextstep = vec - l*evalstep
+
+            print('newton step not acceptable - using l =', l)
+
+            nextval = minfunc(nextstep)
+
+            if nextval > current_val - abs(g_deriv)/1000:
+
+                ls = [l, 1.0]
+                gs = [nextval, newton_val]
+
+                while nextval > current_val - abs(g_deriv)/1000:
+                    # A = g(l) - g'(0) l - g(0)
+                    A = [gs[i] - g_deriv * ls[i] - current_val for i in [0,1]]
+                    a = (A[0]/ls[0]^2 - A[1]/ls[1]^2) / (ls[0] - ls[1])
+                    b = (-A[0]*ls[1]/ls[0]^2 + A[1]*ls[0]/ls[1]^2) / (ls[0] - ls[1])
+
+                    nextl = (- b + sqrt(b^2 - 3*a*g_deriv))/(3*a)
+                    nextstep = vec - nextl*evalstep
+                    nextval = minfunc(nextstep)
+
+                    ls.insert(0,nextl)
+                    gs.insert(0,nextval)
+
+                print('second step not acceptable - using ls = ', ls)
 
     return nextstep
 
-def random_numerical(iv=0, limit=1):
-
-    import scipy.optimize
+def random_numerical(iv=0, limit=None):
 
     # eqns.append(E+1/4)
     # eqns.append(BWB.gen(1) - 1)
@@ -1586,7 +1638,7 @@ def random_numerical(iv=0, limit=1):
     # use an algorithm that searches for zeros of the vector-valued
     # function instead of the sum of its squares.
 
-    if use_old_algorithm:
+    if use_scipy_minimize:
 
         SciMin = scipy.optimize.minimize(minfunc, iv, jac=jac, method='BFGS', options={'return_all':True})
 
@@ -1598,29 +1650,43 @@ def random_numerical(iv=0, limit=1):
         else:
             print( SciMin.message)
 
-        return
+    elif use_scipy_root:
 
-    # optimize.root methods:
-    # 'hybr' (the default) requires same num of eqns as vars
-    # 'lm' uses a QR factorization of the Jacobian, then the Levenberg–Marquardt line search algorithm
-    # the others uses various approximations to the Jacobian
+        # optimize.root methods:
+        # 'hybr' (the default) requires same num of eqns as vars
+        # 'lm' uses a QR factorization of the Jacobian, then the Levenberg–Marquardt line search algorithm
+        # the others uses various approximations to the Jacobian
 
-    # SciMin = scipy.optimize.root(fndivA, iv, jac=jac_fndivA, method='lm')
+        SciMin = scipy.optimize.root(fndivA, iv, jac=jac_fndivA, method='lm')
 
-    # Our root-finding algorithm:
-    #
-    # - LU factorization of the Jacobian, computed in parallel
-    # - exact-fit line search algorithm
+        print()
+        print()
 
-    i = 0
-    while i < limit:
-        #minfunc(iv)
-        iv = optimize_step(iv)
-        i += 1
+        if SciMin.success:
+            for pair in zip(coeff_vars, SciMin.x): print( pair)
+        else:
+            print( SciMin.message)
 
-    global final_iv
-    final_iv = iv
-    for pair in zip(coeff_vars, iv): print(pair)
+    else:
+
+        # Custom root-finding algorithm, based on Numerical Recipes
+        #
+        # - LU factorization of the Jacobian, computed in parallel
+        # - exact-fit line search algorithm
+
+        i = 0
+        gtol = 1e-5
+        gnorm = np.linalg.norm(jac(iv))
+
+        while (not limit or i < limit) and gnorm > gtol:
+            #minfunc(iv)
+            iv = optimize_step(iv)
+            gnorm = np.linalg.norm(jac(iv))
+            i += 1
+
+        global final_iv
+        final_iv = iv
+        for pair in zip(coeff_vars, iv): print(pair)
 
 def random_numerical_ten(limit=10):
     for i in range(limit):
