@@ -65,10 +65,13 @@ use_scipy_root = True
 # custom root finding algorithm, based on the Numerical Recipes text.
 # We can either do an exact line search by fitting to a rational
 # function, use the scipy built-in line search, or default to the NR
-# text algorithm.
+# text algorithm.  We also have the option of using my distributed LU
+# decomposition code to solve the least squares problem, or use
+# scipy's built-in routine.
 
 use_exact_linesearch = False
 use_scipy_line_search = True
+use_scipy_lstsq = True
 
 from itertools import *
 import scipy.optimize
@@ -1510,11 +1513,15 @@ def optimize_step(vec):
 
     # solve J d = f to find a direction vector
 
-    jacobians = [cc.jacobian_fns_divA(vec) for cc in ccs]
-    (L, U, f) = LU_decomposition(jacobians)
-    lu = np.tril(L, -1) + U
-    piv = np.array(range(lu.shape[0]))
-    evalstep = scipy.linalg.lu_solve((lu, piv), f)
+    if use_scipy_lstsq:
+        jacobian = jac_fndivA(vec)
+        (evalstep, *_) = scipy.linalg.lstsq(jacobian, fndivA(vec))
+    else:
+        jacobians = [cc.jacobian_fns_divA(vec) for cc in ccs]
+        (L, U, f) = LU_decomposition(jacobians)
+        lu = np.tril(L, -1) + U
+        piv = np.array(range(lu.shape[0]))
+        evalstep = scipy.linalg.lu_solve((lu, piv), f)
 
     # use gradient descent on the sum of squares to find a direction vector
 
