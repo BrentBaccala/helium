@@ -71,7 +71,8 @@ use_scipy_root = True
 
 use_exact_linesearch = False
 use_scipy_line_search = True
-use_scipy_lstsq = True
+use_scipy_lstsq = False
+use_scipy_lu = True
 
 from itertools import *
 import scipy.optimize
@@ -1516,6 +1517,14 @@ def optimize_step(vec):
     if use_scipy_lstsq:
         jacobian = jac_fndivA(vec)
         (evalstep, *_) = scipy.linalg.lstsq(jacobian, fndivA(vec))
+    elif use_scipy_lu:
+        jacobian = jac_fndivA(vec)
+        (p,l,u) = scipy.linalg.lu(jacobian)
+        pb = scipy.linalg.inv(p).dot(fndivA(vec))
+        n = u.shape[0]
+        lu = scipy.linalg.tril(l[0:n], -1) + u
+        piv = np.array(range(0,n))
+        evalstep = scipy.linalg.lu_solve((lu, piv), pb[0:n])
     else:
         jacobians = [cc.jacobian_fns_divA(vec) for cc in ccs]
         (L, U, f) = LU_decomposition(jacobians)
