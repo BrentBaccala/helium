@@ -1,3 +1,5 @@
 interface Echo {
+  typedef sequence <double> VecDoub;
   string echoString(in string mesg);
+  VecDoub vecfunc(in VecDoub x);
 };

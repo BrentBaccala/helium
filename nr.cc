@@ -15,99 +15,29 @@
 #include "NR3/qrdcmp.h"
 #include "NR3/roots_multidim.h"
 
-VecDoub vecfunc(VecDoub_I &x)
-{
-  return x;
-}
-
-Int mymain(void)
-{
-  const Int NTOT=20;
-  Int i,jd,nph=2;
-  Doub frac,ave,vrnce;
-  VecDoub data(NTOT);
-  Bool check;
-  for (i=0;i<NTOT;i++) {
-    flmoon(i,nph,jd,frac);
-    data[i]=jd;
-  }
-
-  newt(data, check, vecfunc);
-
-  cout << "newt = ";
-  for (i=0;i<NTOT;i++) {
-    std::cout << data[i] << ' ';
-  }
-  cout << endl;
-
-  return 0;
-}
-
 #include "nr.hh"
 
-// This is the object implementation.
+Echo_var echoref;
 
-class Echo_i : public POA_Echo
+VecDoub vecfunc(VecDoub_I &x)
 {
-public:
-  inline Echo_i() {}
-  virtual ~Echo_i() {}
-  virtual char* echoString(const char* mesg);
-};
-
-
-char* Echo_i::echoString(const char* mesg)
-{
-  // Memory management rules say we must return a newly allocated
-  // string.
-  return CORBA::string_dup(mesg);
-}
-
-
-//////////////////////////////////////////////////////////////////////
-
-// This function acts as a client to the object.
-
-static void hello(Echo_ptr e)
-{
-  if( CORBA::is_nil(e) ) {
-    cerr << "hello: The object reference is nil!" << endl;
-    return;
+  Echo::VecDoub echodata;
+  echodata.length(x.size());
+  for (int i=0; i < x.size(); i++) {
+    echodata[i] = x[i];
   }
 
-  CORBA::String_var src = (const char*) "Hello!";
-  // String literals are (char*) rather than (const char*) on some
-  // old compilers.  Thus it is essential to cast to (const char*)
-  // here to ensure that the string is copied, so that the
-  // CORBA::String_var does not attempt to 'delete' the string
-  // literal.
+  Echo::VecDoub *retval;
 
-  CORBA::String_var dest = e->echoString(src);
+  retval = echoref->vecfunc(echodata);
 
-  cout << "I said, \"" << (char*)src << "\"." << endl
-       << "The Echo object replied, \"" << (char*)dest <<"\"." << endl;
-}
+  VecDoub retdata(x.size());
 
-int
-colocated_main(int argc, char **argv)
-{
-  CORBA::ORB_ptr orb = CORBA::ORB_init(argc, argv, "omniORB4");
+  for (int i=0; i < x.size(); i++) {
+    retdata[i] = (*retval)[i];
+  }
 
-  CORBA::Object_var       obj = orb->resolve_initial_references("RootPOA");
-  PortableServer::POA_var poa = PortableServer::POA::_narrow(obj);
-
-  PortableServer::Servant_var<Echo_i> myecho = new Echo_i();
-  PortableServer::ObjectId_var myechoid = poa->activate_object(myecho);
-
-  Echo_var myechoref = myecho->_this();
-
-  PortableServer::POAManager_var pman = poa->the_POAManager();
-  pman->activate();
-
-  hello(myechoref);
-
-  orb->destroy();
-  return 0;
+  return retdata;
 }
 
 int main(int argc, char** argv)
@@ -122,15 +52,30 @@ int main(int argc, char** argv)
 
     CORBA::Object_var obj = orb->string_to_object(argv[1]);
 
-    Echo_var echoref = Echo::_narrow(obj);
+    echoref = Echo::_narrow(obj);
 
     if (CORBA::is_nil(echoref)) {
       cerr << "Can't narrow reference to type Echo (or it was nil)." << endl;
       return 1;
     }
 
-    for (CORBA::ULong count=0; count<10; count++)
-      hello(echoref);
+    const Int NTOT=17;
+    Int i,jd,nph=2;
+    Doub frac,ave,vrnce;
+    VecDoub data(NTOT);
+    Bool check;
+    for (i=0;i<NTOT;i++) {
+      flmoon(i,nph,jd,frac);
+      data[i]=jd;
+    }
+
+    newt(data, check, vecfunc);
+
+    cout << "newt = ";
+    for (i=0;i<NTOT;i++) {
+      std::cout << data[i] << ' ';
+    }
+    cout << endl;
 
     orb->destroy();
   }

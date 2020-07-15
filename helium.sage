@@ -1743,3 +1743,46 @@ def find_relation():
 
         if Lrow[-1] != 0:
             break
+
+# REST server to allow testing with the C++ code from Numerical Recipes
+
+from http.server import HTTPServer, BaseHTTPRequestHandler
+from io import BytesIO
+
+class SimpleHTTPRequestHandler(BaseHTTPRequestHandler):
+
+    def do_GET(self):
+        self.send_response(200)
+        self.end_headers()
+        self.wfile.write(b'Hello, world!')
+
+    def log_request(self, *args):
+        pass
+
+    def do_POST(self):
+        content_length = int(self.headers['Content-Length'])
+        body = self.rfile.read(content_length)
+        self.send_response(200)
+        self.end_headers()
+
+        arg = json.loads(body)
+
+        if self.path == '/vecfunc':
+            val = fndivA(arg)
+        elif self.path == '/jac':
+            val = jac_fndivA(arg)
+        elif self.path == '/iv':
+            val = iv
+        else:
+            val = None
+
+        response = BytesIO()
+        response.write(json.dumps(list(val)).encode('utf-8'))
+        self.wfile.write(response.getvalue())
+
+
+def REST_server():
+
+    httpd = HTTPServer(('localhost', 4443), SimpleHTTPRequestHandler)
+
+    httpd.serve_forever()
