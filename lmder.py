@@ -349,7 +349,7 @@ def lmder(fcn,m,n,x,fvec,fjac,ldfjac,ftol,xtol,gtol,
 
             # determine the levenberg-marquardt parameter.
 
-            lmpar(n,fjac,ldfjac,ipvt,diag,qtf,delta,par,wa1,wa2,wa3,wa4)
+            par = lmpar(n,fjac,ldfjac,ipvt,diag,qtf,delta,par,wa1,wa2,wa3,wa4)
 
             # store the direction p and x + p. calculate the norm of p.
 
@@ -557,6 +557,9 @@ def lmder(fcn,m,n,x,fvec,fjac,ldfjac,ftol,xtol,gtol,
 #
 #     **********
 
+# par is returned
+# r, x, sdiag, wa1, and wa2 are numpy arrays modified in-place
+
 def lmpar (n,r,ldr,ipvt,diag,qtb,delta,par,x,sdiag,wa1,wa2):
 
     # dwarf is the smallest positive magnitude.
@@ -599,7 +602,7 @@ def lmpar (n,r,ldr,ipvt,diag,qtb,delta,par,x,sdiag,wa1,wa2):
     fp = dxnorm - delta
     if (fp <= p1*delta):
         if (fiter == 0): par = 0
-        return
+        return par
 
     # if the jacobian is not rank deficient, the newton
     # step provides a lower bound, parl, for the zero of
@@ -665,7 +668,7 @@ def lmpar (n,r,ldr,ipvt,diag,qtb,delta,par,x,sdiag,wa1,wa2):
 
         if (abs(fp) < p1*delta or parl == zero and fp <= temp and temp < 0 or fiter == 10):
             if (fiter == 0): par = zero
-            return
+            return par
 
         # compute the newton correction.
 
