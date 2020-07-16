@@ -1622,9 +1622,6 @@ def optimize_step(vec):
 
 def random_numerical(iv=0, limit=None):
 
-    # eqns.append(E+1/4)
-    # eqns.append(BWB.gen(1) - 1)
-
     nvars = len(coeff_vars)
 
     # even though we're using numpy, we don't need to set its PRNG
@@ -1635,13 +1632,6 @@ def random_numerical(iv=0, limit=None):
         random.seed(iv)        # for random
         set_random_seed(iv)    # for RR.random_element()
         iv = np.array([random.random() for i in range(nvars)])
-
-    # We know the zero variety (all Avar's zero, so Psi is zero) will be
-    # a "solution", but we want to avoid it
-
-    global zero_variety, Aindices
-    zero_variety = sum(map(square, Avars))
-    Aindices = [i for i,c in enumerate(coeff_vars) if c in Avars]
 
     global SciMin
 
