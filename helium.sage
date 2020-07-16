@@ -115,23 +115,21 @@ var('E')
 def Del(Psi,vars):
     return sum([diff(Psi,v,2) for v in vars])
 
-def prep_hydrogen():
-    global eq, H, Psi, coeff_vars, A, B, Avars, Bvars, cvars, rvars
+def finish_prep():
+    global eq, H, Phi, Psi, coeff_vars, A, B, Avars, Bvars, cvars, rvars
+    global zero_variety, Aindices
 
-    cvars = (x1,y1,z1)
-    rvars = (r1,)
     (Avars, A) = trial_polynomial('a', cvars, rvars, 1)
     (Bvars, B) = trial_polynomial('b', cvars, rvars, 1)
 
     coeff_vars = (E,) + Avars + Bvars
 
-    global Phi
+    zero_variety = sum(map(square, Avars))
+    Aindices = [i for i,c in enumerate(coeff_vars) if c in Avars]
+
     Phi = function('Phi')(*cvars)
 
     Psi = A*Phi
-
-    def H(Psi):
-        return - 1/2 * Del(Psi,[x1,y1,z1]) - (1/r1)*Psi
 
     eq = H(Psi) - E*Psi
 
@@ -155,32 +153,28 @@ def prep_hydrogen():
     eq = eq.subs(dict2).subs(dict1).subs({Phi: SR.var('Phi')})
     Phi = SR.var('Phi')
 
+def prep_hydrogen():
+    global H, cvars, rvars
+
+    cvars = (x1,y1,z1)
+    rvars = (r1,)
+
+    def H(Psi):
+        return - 1/2 * Del(Psi,[x1,y1,z1]) - (1/r1)*Psi
+
+    finish_prep()
+
 def prep_helium():
-    global eq, H, Psi, coeff_vars, A, B, Avars, Bvars, cvars, rvars
+    global H, cvars, rvars
 
     cvars = (x1,y1,z1, x2,y2,z2)
     rvars = (r1,r2,r12)
-    (Avars, A) = trial_polynomial('a', cvars, rvars, 1)
-    (Bvars, B) = trial_polynomial('b', cvars, rvars, 1)
-
-    coeff_vars = (E,) + Avars + Bvars
-
-    global Phi
-    Phi = function('Phi')(*cvars)
-
-    Psi = A*Phi
 
     def H(Psi):
         return - 1/2 * Del(Psi,[x1,y1,z1]) - 1/2 * Del(Psi,[x2,y2,z2]) - (2/r1)*Psi - (2/r2)*Psi + (1/r12)*Psi
 
-    eq = H(Psi) - E*Psi
+    finish_prep()
 
-    dict1 = {diff(Phi,v): diff(B,v)*Phi for v in cvars}
-    dict2 = {diff(Phi,v,2): diff(dict1[diff(Phi,v)],v) for v in cvars}
-
-    # replace Phi(x1,y1,z1) with Phi to reduce ginac's memory utilization
-    eq = eq.subs(dict2).subs(dict1).subs({Phi: SR.var('Phi')})
-    Phi = SR.var('Phi')
 
 # Now we want to replace all of the sqrt(...) factors with 'r',
 # and we use a clever Python trick to build a dictionary
@@ -1790,3 +1784,8 @@ def REST_server():
     httpd = HTTPServer(('localhost', 4443), SimpleHTTPRequestHandler)
 
     httpd.serve_forever()
+
+# Initialize program when this file is loaded
+
+multi_init()
+multi_expand()
