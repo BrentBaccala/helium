@@ -1308,7 +1308,7 @@ def fn(v):
     res = np.hstack(map(lambda x: x.get(), [cc.eval_fns(v) for cc in ccs]))
     return res
 
-def fns_divA(v):
+def fns_divSqrtA(v):
     r"""
     The vector function we're trying to minimize: the polys that
     define the solution variety, divided by the square root of the
@@ -1355,7 +1355,7 @@ def jac_fn(v):
     res = np.vstack(map(lambda x: x.get(), [cc.jac_fns(v) for cc in ccs]))
     return res
 
-def jac_fns_divA(v):
+def jac_fns_divSqrtA(v):
     global N,dN,Av,Adenom
     N = np.hstack(list(map(lambda x: x.get(), [cc.eval_fns(v) for cc in ccs])))
     dN = np.vstack(list(map(lambda x: x.get(), [cc.jac_fns(v) for cc in ccs])))
@@ -1516,18 +1516,19 @@ def optimize_step(vec):
     # solve J d = f to find a direction vector
 
     if use_scipy_lstsq:
-        jacobian = jac_fns_divA(vec)
-        (evalstep, *_) = scipy.linalg.lstsq(jacobian, fns_divA(vec))
+        jacobian = jac_fns_divSqrtA(vec)
+        (evalstep, *_) = scipy.linalg.lstsq(jacobian, fns_divSqrtA(vec))
     elif use_scipy_lu:
-        jacobian = jac_fns_divA(vec)
+        jacobian = jac_fns_divSqrtA(vec)
         (p,l,u) = scipy.linalg.lu(jacobian)
-        pb = scipy.linalg.inv(p).dot(fns_divA(vec))
+        pb = scipy.linalg.inv(p).dot(fns_divSqrtA(vec))
         n = u.shape[0]
         lu = scipy.linalg.tril(l[0:n], -1) + u
         piv = np.array(range(0,n))
         evalstep = scipy.linalg.lu_solve((lu, piv), pb[0:n])
     else:
-        jacobians = [cc.jac_fns_divA(vec) for cc in ccs]
+        # XXX - our collector class currently doesn't implement jac_fns_divSqrtA
+        jacobians = [cc.jac_fns_divSqrtA(vec) for cc in ccs]
         (L, U, f) = LU_decomposition(jacobians)
         lu = np.tril(L, -1) + U
         piv = np.array(range(lu.shape[0]))
@@ -1674,7 +1675,7 @@ def random_numerical(iv=0, limit=None):
         # 'lm' uses a QR factorization of the Jacobian, then the Levenberg–Marquardt line search algorithm
         # the others uses various approximations to the Jacobian
 
-        SciMin = scipy.optimize.root(fns_divA, iv, jac=jac_fns_divA, method='lm')
+        SciMin = scipy.optimize.root(fns_divSqrtA, iv, jac=jac_fns_divSqrtA, method='lm')
 
         print()
         print()
@@ -1770,9 +1771,9 @@ class SimpleHTTPRequestHandler(BaseHTTPRequestHandler):
         arg = json.loads(body)
 
         if self.path == '/vecfunc':
-            val = fns_divA(arg)
+            val = fns_divSqrtA(arg)
         elif self.path == '/jac':
-            val = jac_fns_divA(arg)
+            val = jac_fns_divSqrtA(arg)
         elif self.path == '/iv':
             random.seed(arg)        # for random
             set_random_seed(arg)    # for RR.random_element()
