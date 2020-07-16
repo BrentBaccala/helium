@@ -870,7 +870,7 @@ class JacobianDivAMatrix(LUMatrix):
     r"""
     Proxy class that wraps a Jacobian matrix.
 
-    This Jacobian is for the squares of the functions divided by the norm of the A vectors.
+    This Jacobian is for the squares of the functions divided by the sum of the squares of the A vectors.
 
     The idea is to drive the solution away from the hyperplane where
     the A coefficients are all zero.
@@ -1100,7 +1100,7 @@ class CollectorClass(Autoself):
         multivec = self.generate_multi_vector(vec)
         return self.dot(multivec)
 
-    def jacobian_fns(self, vec):
+    def jac_fns(self, vec):
         r"""
         Evaluate the Jacobian matrix (the matrix of first-order
         partial derivatives) of our polynomials
@@ -1116,11 +1116,11 @@ class CollectorClass(Autoself):
         """
         return self.autocreate('JacobianMatrix', self, vec)
 
-    def jacobian_fns_divA(self, vec):
+    def jac_fns_divA(self, vec):
         r"""
         Evaluate the Jacobian matrix (the matrix of first-order
         partial derivatives) of our polynomials divided by
-        the norm of the A-vectors.
+        the sum of the squares of the A-vectors.
 
         INPUT:
 
@@ -1151,7 +1151,7 @@ class CollectorClass(Autoself):
         return sum(square(self.dot(multivec)))
 
     @async_result
-    def jacobian_sum_of_squares(self, vec):
+    def jac_sum_of_squares(self, vec):
         r"""
         Compute the Jacobian vector (aka gradient) of the sum of
         squares of our polynomials
@@ -1285,11 +1285,6 @@ real_type = np.float64
 #real_type = RR
 #real_type = RealField(100)
 
-# The function we're trying to minimize: the sum of squares of the polys
-# that define the solution variety, divided by two factors we're trying
-# to avoid: the norm of 'v' (avoid the origin), and zero_variety (which
-# includes the origin).
-
 last_time = 0
 
 def fn(v):
@@ -1313,7 +1308,13 @@ def fn(v):
     res = np.hstack(map(lambda x: x.get(), [cc.eval_fns(v) for cc in ccs]))
     return res
 
-def fndivA(v):
+def fns_divA(v):
+    r"""
+    The vector function we're trying to minimize: the polys that
+    define the solution variety, divided by the square root of the
+    zero variety we're trying to avoid.
+    """
+
     # Save a copy of vector to aid in stopping and restarting the calculation
     global last_v
     last_v = v
@@ -1330,7 +1331,7 @@ def fndivA(v):
     last_time = time.time()
     return res/Adenom
 
-def jacfn(v):
+def jac_fn(v):
     r"""
     Evaluate the Jacobian matrix (the matrix of first-order
     partial derivatives) of our polynomials
@@ -1346,18 +1347,18 @@ def jacfn(v):
 
     ALGORITHM:
 
-    Call the `jacobian_fns` method for all CollectionClass's in
+    Call the `jac_fns` method for all CollectionClass's in
     parallel, then concatenate all of the results together
     (and transpose them).
     """
 
-    res = np.vstack(map(lambda x: x.get(), [cc.jacobian_fns(v) for cc in ccs]))
+    res = np.vstack(map(lambda x: x.get(), [cc.jac_fns(v) for cc in ccs]))
     return res
 
-def jac_fndivA(v):
+def jac_fns_divA(v):
     global N,dN,Av,Adenom
     N = np.hstack(list(map(lambda x: x.get(), [cc.eval_fns(v) for cc in ccs])))
-    dN = np.vstack(list(map(lambda x: x.get(), [cc.jacobian_fns(v) for cc in ccs])))
+    dN = np.vstack(list(map(lambda x: x.get(), [cc.jac_fns(v) for cc in ccs])))
     Av = v * np.array([c in Avars for c in coeff_vars])   # could form a global vector for this
     Adenomsq = sum([square(v[i]) for i in Aindices])
     Adenom = sqrt(Adenomsq)
@@ -1368,6 +1369,12 @@ def sum_of_squares(v):
     return sum(map(lambda x: x.get(), [cc.sum_of_squares(v) for cc in ccs]))
 
 def minfunc(v):
+    r"""
+    The function we're trying to minimize: the sum of squares of the
+    polys that define the solution variety, divided by the zero
+    variety we're trying to avoid.
+    """
+
     # Save a copy of vector to aid in stopping and restarting the calculation
     global last_v
     last_v = v
@@ -1390,7 +1397,7 @@ def minfunc(v):
     last_time = time.time()
     return res
 
-# jac(v) - the Jacobian matrix of minfunc()
+# jac_minfunc(v) - the Jacobian matrix of minfunc()
 #
 # For testing purposes, we can compute this either by letting the
 # collectors compute the jacobian of the sum of the squares and then
@@ -1402,16 +1409,16 @@ def minfunc(v):
 
 use_matrix_jacobian = True
 
-def jac(v):
+def jac_minfunc(v):
     global last_v
     last_v = v
 
     if use_matrix_jacobian:
-        res = sum(map(lambda x: np.array(x.get().sum(axis=0)), [cc.jacobian_fns_divA(v) for cc in ccs]))
+        res = sum(map(lambda x: np.array(x.get().sum(axis=0)), [cc.jac_fns_divA(v) for cc in ccs]))
     else:
         d = dict(zip(coeff_vars, v))
         sum_of_squares = sum(map(lambda x: x.get(), [cc.sum_of_squares(v) for cc in ccs]))
-        jacobian_sum_of_squares = sum(map(lambda x: np.array(x.get()), [cc.jacobian_sum_of_squares(v) for cc in ccs]))
+        jac_sum_of_squares = sum(map(lambda x: np.array(x.get()), [cc.jac_sum_of_squares(v) for cc in ccs]))
 
         # Compute zero_var on operands() to make the order of addition consistent
         # for testing purposes (otherwise we see variance in LSBs)
@@ -1419,7 +1426,7 @@ def jac(v):
         zero_var = v.dtype.type(sum(map(lambda bwb: bwb.subs(d), zero_variety.operands())))
 
         Av = v * np.array([c in Avars for c in coeff_vars])
-        res = ((jacobian_sum_of_squares*zero_var - 2*np.array(Av)*sum_of_squares)/zero_var^2)
+        res = ((jac_sum_of_squares*zero_var - 2*np.array(Av)*sum_of_squares)/zero_var^2)
 
     return res
 
@@ -1509,18 +1516,18 @@ def optimize_step(vec):
     # solve J d = f to find a direction vector
 
     if use_scipy_lstsq:
-        jacobian = jac_fndivA(vec)
-        (evalstep, *_) = scipy.linalg.lstsq(jacobian, fndivA(vec))
+        jacobian = jac_fns_divA(vec)
+        (evalstep, *_) = scipy.linalg.lstsq(jacobian, fns_divA(vec))
     elif use_scipy_lu:
-        jacobian = jac_fndivA(vec)
+        jacobian = jac_fns_divA(vec)
         (p,l,u) = scipy.linalg.lu(jacobian)
-        pb = scipy.linalg.inv(p).dot(fndivA(vec))
+        pb = scipy.linalg.inv(p).dot(fns_divA(vec))
         n = u.shape[0]
         lu = scipy.linalg.tril(l[0:n], -1) + u
         piv = np.array(range(0,n))
         evalstep = scipy.linalg.lu_solve((lu, piv), pb[0:n])
     else:
-        jacobians = [cc.jacobian_fns_divA(vec) for cc in ccs]
+        jacobians = [cc.jac_fns_divA(vec) for cc in ccs]
         (L, U, f) = LU_decomposition(jacobians)
         lu = np.tril(L, -1) + U
         piv = np.array(range(lu.shape[0]))
@@ -1529,7 +1536,7 @@ def optimize_step(vec):
     # use gradient descent on the sum of squares to find a direction vector
 
     # v0 = minfunc(vec)
-    # gradient = jac(vec)
+    # gradient = jac_minfunc(vec)
     # norm = sum(square(gradient))
     # evalstep = gradient*v0/norm
 
@@ -1566,7 +1573,7 @@ def optimize_step(vec):
 
     elif use_scipy_line_search:
 
-        (alpha, *_) = scipy.optimize.line_search(minfunc, jac, vec, -evalstep)
+        (alpha, *_) = scipy.optimize.line_search(minfunc, jac_minfunc, vec, -evalstep)
         nextstep = vec - evalstep*alpha
 
     else:
@@ -1574,7 +1581,7 @@ def optimize_step(vec):
 
         current_val = minfunc(vec)
         newton_val = minfunc(nextstep)
-        gradient = jac(vec)
+        gradient = jac_minfunc(vec)
 
         g_deriv = - gradient.dot(evalstep)
 
@@ -1650,7 +1657,7 @@ def random_numerical(iv=0, limit=None):
 
     if use_scipy_minimize:
 
-        SciMin = scipy.optimize.minimize(minfunc, iv, jac=jac, method='BFGS', options={'return_all':True})
+        SciMin = scipy.optimize.minimize(minfunc, iv, jac=jac_minfunc, method='BFGS', options={'return_all':True})
 
         print()
         print()
@@ -1667,7 +1674,7 @@ def random_numerical(iv=0, limit=None):
         # 'lm' uses a QR factorization of the Jacobian, then the Levenberg–Marquardt line search algorithm
         # the others uses various approximations to the Jacobian
 
-        SciMin = scipy.optimize.root(fndivA, iv, jac=jac_fndivA, method='lm')
+        SciMin = scipy.optimize.root(fns_divA, iv, jac=jac_fns_divA, method='lm')
 
         print()
         print()
@@ -1686,12 +1693,12 @@ def random_numerical(iv=0, limit=None):
 
         i = 0
         gtol = 1e-5
-        gnorm = np.linalg.norm(jac(iv))
+        gnorm = np.linalg.norm(jac_minfunc(iv))
 
         while (not limit or i < limit) and gnorm > gtol:
             #minfunc(iv)
             iv = optimize_step(iv)
-            gnorm = np.linalg.norm(jac(iv))
+            gnorm = np.linalg.norm(jac_minfunc(iv))
             i += 1
 
         global final_iv
@@ -1763,9 +1770,9 @@ class SimpleHTTPRequestHandler(BaseHTTPRequestHandler):
         arg = json.loads(body)
 
         if self.path == '/vecfunc':
-            val = fndivA(arg)
+            val = fns_divA(arg)
         elif self.path == '/jac':
-            val = jac_fndivA(arg)
+            val = jac_fns_divA(arg)
         elif self.path == '/iv':
             random.seed(arg)        # for random
             set_random_seed(arg)    # for RR.random_element()
