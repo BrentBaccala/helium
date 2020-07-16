@@ -12,8 +12,14 @@ class Echo_i (_GlobalIDL__POA.Echo):
     def echoString(self, mesg):
         print("echoString() called with message:", mesg)
         return mesg
+    def iv(self, x):
+        val = requests.post("http://localhost:4443/iv", json=x).json()
+        return val
     def vecfunc(self, x):
         val = requests.post("http://localhost:4443/vecfunc", json=x).json()
+        return val
+    def jacobian(self, x):
+        val = requests.post("http://localhost:4443/jacobian", json=x).json()
         return val
 
 orb = CORBA.ORB_init(sys.argv, CORBA.ORB_ID)

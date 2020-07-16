@@ -1,5 +1,8 @@
 interface Echo {
   typedef sequence <double> VecDoub;
+  typedef sequence <VecDoub> JacDoub;
   string echoString(in string mesg);
+  VecDoub iv(in long seed);
   VecDoub vecfunc(in VecDoub x);
+  JacDoub jacobian(in VecDoub x);
 };

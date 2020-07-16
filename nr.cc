@@ -19,6 +19,21 @@
 
 Echo_var echoref;
 
+VecDoub iv(long seed)
+{
+  Echo::VecDoub *retval;
+
+  retval = echoref->iv(seed);
+
+  VecDoub retdata(retval->length());
+
+  for (int i=0; i < retval->length(); i++) {
+    retdata[i] = (*retval)[i];
+  }
+
+  return retdata;
+}
+
 VecDoub vecfunc(VecDoub_I &x)
 {
   Echo::VecDoub echodata;
@@ -31,9 +46,9 @@ VecDoub vecfunc(VecDoub_I &x)
 
   retval = echoref->vecfunc(echodata);
 
-  VecDoub retdata(x.size());
+  VecDoub retdata(retval->length());
 
-  for (int i=0; i < x.size(); i++) {
+  for (int i=0; i < retval->length(); i++) {
     retdata[i] = (*retval)[i];
   }
 
@@ -59,20 +74,14 @@ int main(int argc, char** argv)
       return 1;
     }
 
-    const Int NTOT=17;
-    Int i,jd,nph=2;
-    Doub frac,ave,vrnce;
-    VecDoub data(NTOT);
     Bool check;
-    for (i=0;i<NTOT;i++) {
-      flmoon(i,nph,jd,frac);
-      data[i]=jd;
-    }
+
+    VecDoub data = iv(0);
 
     newt(data, check, vecfunc);
 
     cout << "newt = ";
-    for (i=0;i<NTOT;i++) {
+    for (int i=0; i<data.size();i++) {
       std::cout << data[i] << ' ';
     }
     cout << endl;
