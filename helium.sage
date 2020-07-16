@@ -1756,6 +1756,7 @@ class SimpleHTTPRequestHandler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(b'Hello, world!')
 
+    # Silence logging messages
     def log_request(self, *args):
         pass
 
@@ -1772,7 +1773,10 @@ class SimpleHTTPRequestHandler(BaseHTTPRequestHandler):
         elif self.path == '/jac':
             val = jac_fndivA(arg)
         elif self.path == '/iv':
-            val = iv
+            random.seed(arg)        # for random
+            set_random_seed(arg)    # for RR.random_element()
+            nvars = len(coeff_vars)
+            val = np.array([random.random() for i in range(nvars)])
         else:
             val = None
 
