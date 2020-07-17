@@ -1620,7 +1620,7 @@ def optimize_step(vec):
 
     return nextstep
 
-def random_numerical(iv=0, limit=None):
+def make_iv(seed):
 
     nvars = len(coeff_vars)
 
@@ -1628,10 +1628,14 @@ def random_numerical(iv=0, limit=None):
     # seed, (which would require calling numpy.random.seed()), since
     # the algorithm is deterministic after the iv is picked
 
-    if isinstance(iv, int) or isinstance(iv, Integer):
-        random.seed(iv)        # for random
-        set_random_seed(iv)    # for RR.random_element()
-        iv = np.array([random.random() for i in range(nvars)])
+    random.seed(seed)        # for random
+    set_random_seed(seed)    # for RR.random_element()
+    return np.array([random.random() for i in range(nvars)])
+
+
+def random_numerical(seed=0, limit=None):
+
+    iv = make_iv(seed)
 
     global SciMin
 
@@ -1765,10 +1769,7 @@ class SimpleHTTPRequestHandler(BaseHTTPRequestHandler):
         elif self.path == '/jac':
             val = jac_fns_divSqrtA(arg)
         elif self.path == '/iv':
-            random.seed(arg)        # for random
-            set_random_seed(arg)    # for RR.random_element()
-            nvars = len(coeff_vars)
-            val = np.array([random.random() for i in range(nvars)])
+            val = make_iv(arg)
         else:
             val = None
 
