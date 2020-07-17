@@ -934,13 +934,13 @@ class CollectorClass(Autoself):
     @async_method
     def dump_matrix(self):
         fn = '/tmp/' + str(os.getpid()) + '.pickle'
-        fp = open(fn, 'w')
+        fp = open(fn, 'wb')
         pickle.dump(self.M, fp)
         fp.close()
         logger.info('matrix dumped to %s', fn)
     @async_method
     def load_matrix(self, fn):
-        fp = open(fn)
+        fp = open(fn, 'rb')
         if self.M is None:
             self.M = pickle.load(fp)
         else:
