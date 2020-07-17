@@ -584,15 +584,27 @@ class Autoself(JoinThreads):
                     token = multiprocessing.managers.Token(typeid=classname, address=server.address, id=key)
                     proxy = multiprocessing.managers.AutoProxy(token, 'pickle', authkey=server.authkey)
                     return proxy
-        return None
+        else:
+            return self
 
-    def autocreate(self, classname, *args):
+    def autocreate(self, classname, *args, **kwds):
+        r"""
+        If called from a multiprocessing context, return a proxy
+        object that wraps a new object.  The proxy is suitable
+        for being returned over a remote procedure call.
+
+        If not called from a multiprocessing context, just
+        create the new object and return it.
+        """
         server = getattr(multiprocessing.current_process(), '_manager_server', None)
-        (ident, exposed) = server.create(None, classname, *args)
-        token = multiprocessing.managers.Token(typeid=classname, address=server.address, id=ident)
-        proxy = multiprocessing.managers.AutoProxy(token, 'pickle', authkey=server.authkey)
-        server.decref(None, ident)
-        return proxy
+        if server:
+            (ident, exposed) = server.create(None, classname, *args, **kwds)
+            token = multiprocessing.managers.Token(typeid=classname, address=server.address, id=ident)
+            proxy = multiprocessing.managers.AutoProxy(token, 'pickle', authkey=server.authkey)
+            server.decref(None, ident)
+            return proxy
+        else:
+            return globals()[classname](*args, **kwds)
 
     # convenience functions for development
     def getpid(self):
