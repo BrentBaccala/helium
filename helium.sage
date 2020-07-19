@@ -1003,6 +1003,36 @@ class CollectorClass(Autoself):
         self.multi_vec_calls += 1
         return res
 
+    # same idea, but for a first derivative
+
+    def generate_multi_D_vector(self, v, var):
+        start_time = time.time()
+        ind = coeff_vars.index(var)
+
+        npv = np.array(v)
+
+        firsts = np.zeros(npv.size)
+        firsts[ind] = int(1)
+        D_stack = [firsts]
+        stack = [npv]
+
+        for d in range(1, self.max_degree):
+            D_stack.append([np.hstack(stack[-1][i:]) * firsts[i] + np.hstack(D_stack[-1][i:]) * npv[i]
+                            for i in range(len(v))])
+            stack.append([np.hstack(stack[-1][i:]) * npv[i] for i in range(len(v))])
+
+        res = np.hstack(tuple(flatten(D_stack)))
+
+        self.multi_D_vec_times += time.time() - start_time
+        self.multi_D_vec_calls += 1
+        return res
+
+    # unused in operation; only for testing
+
+    def verify_D_vector(self):
+        return all([all([bool(diff(e,v)==d) for e,d in zip(self.generate_multi_vector(coeff_vars),
+                                                           self.generate_multi_D_vector(coeff_vars, v))]) for v in coeff_vars])
+
     def term_to_vector(self, term):
         if term[0] == '-':
             sign = -1
@@ -1078,31 +1108,6 @@ class CollectorClass(Autoself):
         set1 = set([eval(preparse(result)) for result in self.result])
         set2 = set(list(self.M.dot(vec)))
         return set1 == set2
-
-    def generate_multi_D_vector(self, v, var):
-        start_time = time.time()
-        ind = coeff_vars.index(var)
-
-        npv = np.array(v)
-
-        firsts = np.zeros(npv.size)
-        firsts[ind] = int(1)
-        D_stack = [firsts]
-        stack = [npv]
-
-        for d in range(1, self.max_degree):
-            D_stack.append([np.hstack(stack[-1][i:]) * firsts[i] + np.hstack(D_stack[-1][i:]) * npv[i]
-                            for i in range(len(v))])
-            stack.append([np.hstack(stack[-1][i:]) * npv[i] for i in range(len(v))])
-
-        res = np.hstack(tuple(flatten(D_stack)))
-
-        self.multi_D_vec_times += time.time() - start_time
-        self.multi_D_vec_calls += 1
-        return res
-
-    def verify_D_vector(self):
-        all([all([bool(diff(e,v)==d) for e,d in zip(generate_multi_vector(coeff_vars), generate_multi_D_vector(coeff_vars, v))]) for v in coeff_vars])
 
     def dot(self, multivec):
         start_time = time.time()
