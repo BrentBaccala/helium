@@ -1069,22 +1069,6 @@ class CollectorClass(Autoself):
         return all([all([bool(diff(e,v)==d) for e,d in zip(self.generate_multi_vector(coeff_vars),
                                                            self.generate_multi_D_vector(coeff_vars, v))]) for v in coeff_vars])
 
-    def term_to_vector(self, term):
-        if term[0] == '-':
-            sign = -1
-            term = term[1:]
-        else:
-            sign = 1
-            if term[0] == '+':
-                term = term[1:]
-        (coeff, monomial) = re.split(r'\*', term, 1)
-        if not re.match(r'^[0-9]*$', coeff):
-            monomial = coeff + '*' + monomial
-            coeff = '1'
-        coeff = sign * int(coeff)
-        index = self.indices[monomial]
-        return coeff * self.monomial_vectors[monomial]
-
     @async_method
     def convert_to_matrix(self):
         self.i = 0
