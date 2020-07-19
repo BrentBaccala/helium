@@ -1095,8 +1095,10 @@ class CollectorClass(Autoself):
         self.indices = {str(pair[1]) : pair[0] for pair in enumerate(self.generate_multi_vector(coeff_vars))}
         veclen = len(self.indices)
         self.dok = scipy.sparse.dok_matrix((len(self.result), veclen), np.int64)
+        terms_re = re.compile(r'([+-][^+-]+)')
+        number_re = re.compile(r'^[0-9]*$')
         for value in self.result.values():
-            terms = re.split(r'([+-][^+-]+)', value)
+            terms = re.split(terms_re, value)
             for term in filter(bool, terms):
                 if term[0] == '-':
                     sign = -1
@@ -1106,11 +1108,11 @@ class CollectorClass(Autoself):
                     if term[0] == '+':
                         term = term[1:]
                 try:
-                    (coeff, monomial) = re.split(r'\*', term, 1)
+                    (coeff, monomial) = term.split('*', 1)
                 except ValueError:
                     coeff = '1'
                     monomial = term
-                if not re.match(r'^[0-9]*$', coeff):
+                if not re.match(number_re, coeff):
                     monomial = coeff + '*' + monomial
                     coeff = '1'
                 coeff = sign * int(coeff)
