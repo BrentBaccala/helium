@@ -974,25 +974,31 @@ class CollectorClass(Autoself):
     def nterms(self):
         return sum([v.count('+')+v.count('-') for v in self.result.values()])
 
-    # Now we want to evaluate the sum of squares of polynomials p, as
-    # well as the first derivatives of the sum of squares, which is
-    # the sum of (2 p dp/dv).  Using Sage symbolic expressions is slow
-    # and consumes much memory, so this version of the code uses numpy
-    # matrices instead.
+    # Now we want to evaluate possibly millions of polynomials, as
+    # well as their first derivatives.  Using Sage symbolic
+    # expressions is slow and consumes much memory, so we use scipy
+    # sparse matrices instead.  Each row in the matrix is a polynomial
+    # and each column corresponds to a monomial.  The matrix entry is
+    # that monomial's coefficient.  We can then evaluate all the
+    # polynomials at once by forming a vector of all the monomials (up
+    # to a given maximum degree) and multiplying it by the matrix.
 
     # Given a vector, generate a multi-vector of the vector itself,
     # then all the biproducts of the vector elements, then all the
-    # triproducts of the vector elements.
+    # triproducts of the vector elements, etc.
     #
     # generate_multi_vector([a,b,c])
     #   -> [a,b,c,a^2,a*b,a*c,b^2,b*c,c^2,a^3,a^2*b,a^2*c,a*b^2,a*b*c,a*c^2,a*b^2,b^2*c,b*c^2,c^3]
 
+    # XXX don't really need this in a method
+
     def generate_multi_vector(self, v):
         start_time = time.time()
         npv = np.array(v)
-        two_products = [npv[i] * npv[i:] for i in range(len(v))]
-        three_products = [np.hstack(two_products[i:]) * npv[i] for i in range(len(coeff_vars))]
-        res = np.hstack([npv] + two_products + three_products)
+        stack = [npv]
+        for d in range(1, self.max_degree):
+            stack.append([np.hstack(stack[-1][i:]) * npv[i] for i in range(len(v))])
+        res = np.hstack(tuple(flatten(stack)))
         self.multi_vec_times += time.time() - start_time
         self.multi_vec_calls += 1
         return res
@@ -1016,6 +1022,10 @@ class CollectorClass(Autoself):
     @async_method
     def convert_to_matrix(self):
         self.i = 0
+        # I haven't calculated in advance the maximum degree of the monomials,
+        # so start at 1 and reshape the matrix every time we hit a monomial
+        # that's too big.
+        self.max_degree = 1
         self.indices = {str(pair[1]) : pair[0] for pair in enumerate(self.generate_multi_vector(coeff_vars))}
         veclen = len(self.indices)
         self.dok = scipy.sparse.dok_matrix((len(self.result), veclen), np.int64)
@@ -1038,7 +1048,17 @@ class CollectorClass(Autoself):
                     monomial = coeff + '*' + monomial
                     coeff = '1'
                 coeff = sign * int(coeff)
-                index = self.indices[monomial]
+
+                while True:
+                    try:
+                        index = self.indices[monomial]
+                        break
+                    except KeyError:
+                        self.max_degree += 1
+                        self.indices = {str(pair[1]) : pair[0] for pair in enumerate(self.generate_multi_vector(coeff_vars))}
+                        veclen = len(self.indices)
+                        self.dok.resize((len(self.result), veclen))
+
                 self.dok[self.i, index] += coeff
             self.i += 1
 
@@ -1067,13 +1087,16 @@ class CollectorClass(Autoself):
 
         firsts = np.zeros(npv.size)
         firsts[ind] = int(1)
+        D_stack = [firsts]
+        stack = [npv]
 
-        two_products = [npv[i] * npv[i:] for i in range(npv.size)]
-        two_products_D = [firsts[i] * npv[i:] + firsts[i:] * npv[i] for i in range(npv.size)]
+        for d in range(1, self.max_degree):
+            D_stack.append([np.hstack(stack[-1][i:]) * firsts[i] + np.hstack(D_stack[-1][i:]) * npv[i]
+                            for i in range(len(v))])
+            stack.append([np.hstack(stack[-1][i:]) * npv[i] for i in range(len(v))])
 
-        three_products = [np.hstack(two_products[i:]) * firsts[i] + np.hstack(two_products_D[i:]) * npv[i] for i in range(npv.size)]
+        res = np.hstack(tuple(flatten(D_stack)))
 
-        res = np.hstack([firsts] + two_products_D + three_products)
         self.multi_D_vec_times += time.time() - start_time
         self.multi_D_vec_calls += 1
         return res
