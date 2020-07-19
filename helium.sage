@@ -670,6 +670,22 @@ class ManagerClass(Autoself):
 import time
 
 class ExpanderClass(Autoself):
+    r"""
+    The equation we're trying to solve had now been converted to a big
+    polynomial with thousands of terms, each of which needs to be
+    expanded out to a sum of monomials.  Asking Sage to do this
+    directly results in memory exhaustion, plus we want to do this
+    operation in parallel anyway, so this worker process will expand
+    out only a subset of the polynomial's terms, split each resulting
+    monomial into a key (the variables we're grouping by) and a value
+    (the coefficients), and finally transfer the resulting key-value
+    dictionaries to a set of collector processes (each key is assigned
+    to a single collector process).
+
+    Since everything has to be serialized for IPC transfer to the
+    collector processes, it makes sense to handle the monomials
+    as strings, as counter-intuitive as that may seem.
+    """
 
     def register_manager(self, mc):
         self.mc = mc
@@ -686,18 +702,38 @@ class ExpanderClass(Autoself):
         # return back to the manager before we begin work
         time.sleep(0.1)
         expr = expand(sum(islice(ops, start, stop)))
+        # Each monomial is of the form 2*c0^2*x^3.  We will split on
+        # '*' to get the factors.  The coefficient factors are the
+        # ones that start with either a number or a coefficient
+        # variable.  The rest are key variables.
+        coeff_strs = tuple(map(str, coeff_vars)) + tuple("0123456789")
         for monomial in expr.operands():
             s = str(monomial)
-            if s[0] is '-':
+            if s[0] == '-':
                 sign='-'
                 s=s[1:]
             else:
                 sign='+'
-            vs = s.split('*')
-            key = '*'.join(filter(lambda x: any([x.startswith(c) for c in ('x', 'y', 'z', 'r', 'P')]), vs))
-            value = '*'.join(filterfalse(lambda x: any([x.startswith(c) for c in ('x', 'y', 'z', 'r', 'P')]), vs))
+            # sort to make sure that we can't get separate keys for
+            # something like x*y vs y*x.  Probably unnecessary; I
+            # suspect that the factors are already consistently
+            # sorted.  The collector code currently assumes that any
+            # number will be the leading factor, but sorted puts
+            # numbers before letters, so we're OK.
+            vs = sorted(s.split('*'))
+            # the coefficient variables go in the values
+            value = '*'.join(filter(lambda x: any([x.startswith(c) for c in coeff_strs]), vs))
+            # all the other variables (x,y,z,r,Phi,Xi) form the key
+            key = '*'.join(filterfalse(lambda x: any([x.startswith(c) for c in coeff_strs]), vs))
+            # hash the key to figure which collector its assigned to
             dictnum = hash(key) % len(self.collectors)
+            # XXX the collector code will later pick this stuff apart
+            # again using more regex/string operations.  Maybe it
+            # would be efficient to combine the sign, number, and
+            # variables into a tuple and store these dictionary values
+            # as a list of tuples here.
             self.dicts[dictnum][key] = self.dicts[dictnum].get(key, '') + sign + value
+        # expansion finished; send the expanded monomials to the collector processes
         for i in range(len(self.collectors)):
             self.collectors[i].combine_data(self.dicts[i])
         self.mc.notify_expand_done(self.autoself())
