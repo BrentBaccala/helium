@@ -116,42 +116,43 @@ def Del(Psi,vars):
     return sum([diff(Psi,v,2) for v in vars])
 
 def finish_prep():
-    global eq, H, Phi, Psi, coeff_vars, A, B, Avars, Bvars, cvars, rvars
+    global eq, H, coeff_vars, A, B, C, Avars, Bvars, Cvars, cvars, rvars
     global zero_variety, Aindices
 
     (Avars, A) = trial_polynomial('a', cvars, rvars, 1)
     (Bvars, B) = trial_polynomial('b', cvars, rvars, 1)
+    (Cvars, C) = trial_polynomial('c', cvars, rvars, 1)
 
+    #coeff_vars = (E,) + Avars + Bvars + Cvars
     coeff_vars = (E,) + Avars + Bvars
+    #coeff_vars = (E,) + Avars + Cvars
 
     zero_variety = sum(map(square, Avars))
     Aindices = [i for i,c in enumerate(coeff_vars) if c in Avars]
 
     Phi = function('Phi')(*cvars)
+    Xi = function('Xi')(*cvars)
 
     Psi = A*Phi
+    #Psi = A*Xi
 
     eq = H(Psi) - E*Psi
 
-    # Phi = e^B
-    # diff(Phi,B) = Phi
-    # diff(Phi,t) = diff(Phi,B) * diff(B,t)
-    # diff(Phi,t) = diff(B,t) * e^B = diff(B,t) * Phi
-    # diff(Phi,t,2) = diff(B,t,2) * Phi + diff(B,t) * diff(Phi,t) = diff(B,t,2) * Phi + diff(B,t)^2 * Phi
+    # This is where we set the differential relationships that define
+    # how Phi and Xi differentiate.
 
-    # eq = eq.subs({diff(Phi, x1):    diff(B, x1) * Phi,
-    #               diff(Phi, x1, 2): (diff(B,x1,2) + diff(B,x1)^2) * Phi,
-    #               diff(Phi, y1):    diff(B, y1) * Phi,
-    #               diff(Phi, y1, 2): (diff(B,y1,2) + diff(B,y1)^2) * Phi,
-    #               diff(Phi, z1):    diff(B, z1) * Phi,
-    #               diff(Phi, z1, 2): (diff(B,z1,2) + diff(B,z1)^2) * Phi})
+    # Phi is an exponential; Phi = e^B, so diff(Phi,B) = Phi and diff(Phi,v) = diff(B,v)*Phi
+    # Xi is a logarithm; Xi = ln C, so diff(Xi,C) = 1/C and diff(Xi,v) = diff(C,v)/C
 
     dict1 = {diff(Phi,v): diff(B,v)*Phi for v in cvars}
+    dict1.update({diff(Xi,v): diff(C,v)/C for v in cvars})
     dict2 = {diff(Phi,v,2): diff(dict1[diff(Phi,v)],v) for v in cvars}
+    dict2.update({diff(Xi,v,2): diff(dict1[diff(Xi,v)],v) for v in cvars})
 
     # replace Phi(x1,y1,z1) with Phi to reduce ginac's memory utilization
-    eq = eq.subs(dict2).subs(dict1).subs({Phi: SR.var('Phi')})
-    Phi = SR.var('Phi')
+    eq = eq.subs(dict2).subs(dict1).subs({Phi: SR.var('Phi'), Xi: SR.var('Xi')})
+    #Phi = SR.var('Phi')
+    #Xi = SR.var('Xi')
 
 def prep_hydrogen():
     global H, cvars, rvars
