@@ -129,7 +129,6 @@ def finish_prep():
     coeff_vars = (E,) + Avars + Bvars + Cvars + Dvars + Fvars + Gvars
 
     zero_variety = sum(map(square, Avars))
-    Aindices = [i for i,c in enumerate(coeff_vars) if c in Avars]
 
     Phi = function('Phi')(*cvars)
     Xi = function('Xi')(*cvars)
@@ -161,7 +160,8 @@ def finish_prep():
     eq = eq.subs(dict2).subs(dict1).subs({Phi: SR.var('Phi'), Xi: SR.var('Xi'), Chi: SR.var('Chi'), DChi: SR.var('DChi')})
 
     # reduce coeff_vars to those which actually appear in the equation
-    coeff_vars = sorted(set(eq.free_variables()).intersection(coeff_vars), key=lambda x:str(x))
+    coeff_vars = tuple(sorted(set(eq.free_variables()).intersection(coeff_vars), key=lambda x:str(x)))
+    Aindices = [i for i,c in enumerate(coeff_vars) if c in Avars]
 
 def prep_hydrogen():
     global H, cvars, rvars
