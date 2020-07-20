@@ -116,43 +116,52 @@ def Del(Psi,vars):
     return sum([diff(Psi,v,2) for v in vars])
 
 def finish_prep():
-    global eq, H, coeff_vars, A, B, C, Avars, Bvars, Cvars, cvars, rvars
+    global eq, H, coeff_vars, A, Avars, cvars, rvars
     global zero_variety, Aindices
 
     (Avars, A) = trial_polynomial('a', cvars, rvars, 1)
     (Bvars, B) = trial_polynomial('b', cvars, rvars, 1)
     (Cvars, C) = trial_polynomial('c', cvars, rvars, 1)
+    (Dvars, D) = trial_polynomial('d', cvars, rvars, 1)
+    (Fvars, F) = trial_polynomial('f', cvars, rvars, 1)
+    (Gvars, G) = trial_polynomial('g', cvars, rvars, 1)
 
-    #coeff_vars = (E,) + Avars + Bvars + Cvars
-    coeff_vars = (E,) + Avars + Bvars
-    #coeff_vars = (E,) + Avars + Cvars
+    coeff_vars = (E,) + Avars + Bvars + Cvars + Dvars + Fvars + Gvars
 
     zero_variety = sum(map(square, Avars))
     Aindices = [i for i,c in enumerate(coeff_vars) if c in Avars]
 
     Phi = function('Phi')(*cvars)
     Xi = function('Xi')(*cvars)
+    Chi = function('Chi')(*cvars)
+    DChi = function('DChi')(*cvars)
 
     Psi = A*Phi
     #Psi = A*Xi
+    #Psi = A*Chi
 
     eq = H(Psi) - E*Psi
 
     # This is where we set the differential relationships that define
-    # how Phi and Xi differentiate.
+    # how Phi, Xi, and Chi differentiate.
 
     # Phi is an exponential; Phi = e^B, so diff(Phi,B) = Phi and diff(Phi,v) = diff(B,v)*Phi
     # Xi is a logarithm; Xi = ln C, so diff(Xi,C) = 1/C and diff(Xi,v) = diff(C,v)/C
+    # Chi is a second-order ODE: C d^2 Chi/dB^2 - D dChi/dB - F Chi - G = 0
 
     dict1 = {diff(Phi,v): diff(B,v)*Phi for v in cvars}
     dict1.update({diff(Xi,v): diff(C,v)/C for v in cvars})
+    dict1.update({diff(Chi,v): diff(B,v)*DChi for v in cvars})
+
     dict2 = {diff(Phi,v,2): diff(dict1[diff(Phi,v)],v) for v in cvars}
     dict2.update({diff(Xi,v,2): diff(dict1[diff(Xi,v)],v) for v in cvars})
+    dict2.update({diff(Chi,v,2): diff(B,v,2)*DChi + diff(B,v)^2*(D/C*DChi+F/C*Chi+G/C) for v in cvars})
 
     # replace Phi(x1,y1,z1) with Phi to reduce ginac's memory utilization
-    eq = eq.subs(dict2).subs(dict1).subs({Phi: SR.var('Phi'), Xi: SR.var('Xi')})
-    #Phi = SR.var('Phi')
-    #Xi = SR.var('Xi')
+    eq = eq.subs(dict2).subs(dict1).subs({Phi: SR.var('Phi'), Xi: SR.var('Xi'), Chi: SR.var('Chi'), DChi: SR.var('DChi')})
+
+    # reduce coeff_vars to those which actually appear in the equation
+    coeff_vars = sorted(set(eq.free_variables()).intersection(coeff_vars), key=lambda x:str(x))
 
 def prep_hydrogen():
     global H, cvars, rvars
@@ -289,15 +298,12 @@ def extract_ops():
     ops = bwb4a.operands()
 
 def multi_init():
-    prep_hydrogen()
     t = timeit.timeit(lambda: create_bwb4(), number=1)
     print('create_bwb4() : %s sec'%(t))
     t = timeit.timeit(lambda: SR_expand2a(), number=1)
     print('SR_expand2a() : %s sec'%(t))
     t = timeit.timeit(lambda: extract_ops(), number=1)
     print('extract_ops() : %s sec'%(t))
-    start_manager_process()
-    mc.set_range(len(ops), blocksize)
 
 # I've found that starting workers as sub-sub-processes from the
 # manager subprocess is error prone because you get copies of the
@@ -344,6 +350,9 @@ def reap_worker():
     del worker_manager
 
 def multi_expand():
+
+    start_manager_process()
+    mc.set_range(len(ops), blocksize)
 
     for i in range(num_collectors):
         start_collector()
@@ -1847,7 +1856,12 @@ def REST_server():
 
     httpd.serve_forever()
 
-# Initialize program when this file is loaded
+# If we're running on my development laptop, initialize a simple calculation when this file is loaded
 
-multi_init()
-multi_expand()
+import platform
+
+if platform.node() == 'samsung':
+
+    prep_hydrogen()
+    multi_init()
+    multi_expand()
