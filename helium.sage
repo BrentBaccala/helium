@@ -110,12 +110,13 @@ def trial_polynomial(base, cvars, rvars, degree):
     poly = sum([var(base+str(c))*v for c,v in enumerate(terms)])
     return (coefficients, poly)
 
+# Energy constant in Schroedinger's equations
 var('E')
 
 def Del(Psi,vars):
     return sum([diff(Psi,v,2) for v in vars])
 
-def finish_prep():
+def finish_prep(ansatz):
     global eq, H, coeff_vars, A, Avars, cvars, rvars
     global zero_variety, Aindices
 
@@ -135,9 +136,14 @@ def finish_prep():
     Chi = function('Chi')(*cvars)
     DChi = function('DChi')(*cvars)
 
-    Psi = A*Phi
-    #Psi = A*Xi
-    #Psi = A*Chi
+    if ansatz == 1:
+        Psi = A*Phi
+    elif ansatz == 2:
+        Psi = A*Xi
+    elif ansatz == 3:
+        Psi = A*Chi
+    else:
+        raise 'Bad ansatz'
 
     eq = H(Psi) - E*Psi
 
@@ -172,7 +178,7 @@ def prep_hydrogen():
     def H(Psi):
         return - 1/2 * Del(Psi,[x1,y1,z1]) - (1/r1)*Psi
 
-    finish_prep()
+    finish_prep(ansatz=1)
 
 def prep_helium():
     global H, cvars, rvars
@@ -183,7 +189,7 @@ def prep_helium():
     def H(Psi):
         return - 1/2 * Del(Psi,[x1,y1,z1]) - 1/2 * Del(Psi,[x2,y2,z2]) - (2/r1)*Psi - (2/r2)*Psi + (1/r12)*Psi
 
-    finish_prep()
+    finish_prep(ansatz=3)
 
 
 # Now we want to replace all of the sqrt(...) factors with 'r',
