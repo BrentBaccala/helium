@@ -38,7 +38,6 @@
 # - collector should parse directly into matrix form
 # - compile a better regular expression to parse terms
 # - more easily turn multiprocessing on and off
-# - better naming of functions and variables like bwb4
 # - allow worker processes on different hosts
 # - remove unused code like Rosenfeld-Groebner
 # - allow second-order ODEs in trial form
@@ -214,48 +213,60 @@ def mk_maps(rvars):
     return {v.operands()[0] : SR.var(varName(v)) for v in rvars}
 
 # convert all (x^2+y^2+z^2)^(n/2) expressions to r^n
-def bwb(expr):
+# What if we have multiple x^2+y^2+z^2 expressions in a single power?
+def roots_to_rs(expr):
     if isinstance(expr, Expression) and expr.operator():
        if expr.operator() == operator.pow and bool(expr.operands()[0] in maps):
            return maps[expr.operands()[0]]^(expr.operands()[1] * 2)
-           #num = int(expr.operands()[1] * 2)
-           #return ((expr.operands()[0]^(int(num/2))) * (maps[expr.operands()[0]]^(int(num%2))))
        else:
-           return expr.operator()(*map(bwb, expr.operands()))
+           return expr.operator()(*map(roots_to_rs, expr.operands()))
     else:
        return expr
 
-def create_bwb4():
-    global maps, bwb4, bwb4a
+def create_polynomial_eq():
+    global polynomial_eq
     # first, build the dictionary that maps expressions like (x1^2+y1^2+z1^2) to variables like r1
+    # make 'maps' global to simplify the map function inside roots_to_rs()
+    global maps
     maps = mk_maps(rvars)
     # next, convert all of the roots in the equation to use the r-variables
-    bwb4a = bwb(eq)
+    eq_a = roots_to_rs(eq)
     # Find the least common denominator of all of the terms, then
     # clear the denominators and expand out all of the powers.
-    # This is faster than expand(bwb4a.numerator()).  One test
+    # This is faster than expand(eq_a.numerator()).  One test
     # on helium ran in 61 sec, vs 337 sec for expand/numerator.
-    lcm_denominator = lcm(map(denominator, bwb4a.operands()))
-    bwb4 = expand(bwb4a*lcm_denominator)
-    # bwb4 is now a polynomial, but it's got higher powers of r's in it
-    # assert bwb4.numerator() == bwb4
+    lcm_denominator = lcm(map(denominator, eq_a.operands()))
+    polynomial_eq = expand(eq_a * lcm_denominator)
+    # polynomial_eq is now a polynomial, but it's got higher powers of r's in it
+
+def reduce_polynomial_eq():
+    # Next, convert powers of r's to x,y,z's
+    global reduced_polynomial_eq
+    sdict = {SR.var(v)^d : (globals()[v]^d, SR.var(v)*globals()[v]^(d-1))[d%2] for d in range(2,8) for v in ('r1','r2','r12')}
+    reduced_polynomial_eq = polynomial_eq.subs(sdict)
+
+def extract_ops():
+    global ops
+    ops = reduced_polynomial_eq.operands()
 
 
+import timeit
 
-# Next... convert powers of r's to x,y,z's, expand out powers, and
-# collect like x,y,z's terms together to get a system of polynomials
+def multi_init():
+    t = timeit.timeit(lambda: create_polynomial_eq(), number=1)
+    print('create_polynomial_eq() : %s sec'%(t))
+    t = timeit.timeit(lambda: reduce_polynomial_eq(), number=1)
+    print('reduce_polynomial_eq() : %s sec'%(t))
+    t = timeit.timeit(lambda: extract_ops(), number=1)
+    print('extract_ops() : %s sec'%(t))
+
+
+# Now expand out powers, and collect like x,y,z's terms together to
+# get a system of polynomials
 #
 # This is a slow step, so I've tried several different ways to do it.
-
-# Runs at a reasonable speed after create_bwb4() has been called.
-# 'bwb4a' still needs to be expanded.
-
-def SR_expand2a():
-    global bwb4a
-    sdict = {SR.var(v)^d : (globals()[v]^d, SR.var(v)*globals()[v]^(d-1))[d%2] for d in range(2,8) for v in ('r1','r2','r12')}
-    bwb4a = bwb4.subs(sdict)
-
-# Perform the expansion step using multiple processes.
+#
+# We perform the expansion step using multiple processes.
 #
 # Python multithreading isn't useful for parallel processing because
 # of Python's global interpreter lock.  Multiple processes are used
@@ -287,14 +298,8 @@ def SR_expand2a():
 #
 # load('helium.sage')
 # prep_hydrogen()
-# create_bwb4()
-# SR_expand2a()
-# ops = bwb4a.operands()
-# start_manager_process()
-# mc.set_range(len(ops), 100)
-# mc.start_worker()
-# wc = mc.getq()[0]  (or wc = mc.get_workers()[0])
-# wc.get_data()
+# multi_init()
+# multi_expand()
 
 # number of operands to process in each expander worker
 blocksize = 100
@@ -304,20 +309,6 @@ num_collectors = 1
 
 # number of simultaneous expander processes
 num_expanders = 1
-
-import timeit
-
-def extract_ops():
-    global ops
-    ops = bwb4a.operands()
-
-def multi_init():
-    t = timeit.timeit(lambda: create_bwb4(), number=1)
-    print('create_bwb4() : %s sec'%(t))
-    t = timeit.timeit(lambda: SR_expand2a(), number=1)
-    print('SR_expand2a() : %s sec'%(t))
-    t = timeit.timeit(lambda: extract_ops(), number=1)
-    print('extract_ops() : %s sec'%(t))
 
 # I've found that starting workers as sub-sub-processes from the
 # manager subprocess is error prone because you get copies of the
