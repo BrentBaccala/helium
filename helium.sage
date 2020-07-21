@@ -105,14 +105,14 @@ r12 = sqrt((x2-x1)^2 + (y2-y1)^2 + (z2-z1)^2)
 
 SRr_s = (SR.var('r1'), SR.var('r2'), SR.var('r12'))
 
-def trial_polynomial(base, cvars, rvars, degree):
+def trial_polynomial(base, coordinates, radii, degree):
     # cterms are coefficient terms
     # rterms are radius terms
-    cterms = flatten([combinations_with_replacement(cvars, d) for d in range(degree+1)])
+    cterms = flatten([combinations_with_replacement(coordinates, d) for d in range(degree+1)])
     # use this 'terms' for real
-    terms = list(map(mul, (product(map(mul, cterms), map(mul, powerset(rvars))))))
+    terms = list(map(mul, (product(map(mul, cterms), map(mul, powerset(radii))))))
     # use this 'terms' for testing
-    # terms = list(map(mul,cterms)) + list(rvars)
+    # terms = list(map(mul,cterms)) + list(radii)
     coefficients = tuple(var(base+str(c)) for c in range(len(terms)))
     poly = sum([var(base+str(c))*v for c,v in enumerate(terms)])
     return (coefficients, poly)
@@ -124,24 +124,24 @@ def Del(Psi,vars):
     return sum([diff(Psi,v,2) for v in vars])
 
 def finish_prep(ansatz):
-    global eq, H, coeff_vars, A, Avars, cvars, rvars
+    global eq, H, coeff_vars, A, Avars, coordinates, radii
     global zero_variety, Aindices
 
-    (Avars, A) = trial_polynomial('a', cvars, rvars, 1)
-    (Bvars, B) = trial_polynomial('b', cvars, rvars, 1)
-    (Cvars, C) = trial_polynomial('c', cvars, rvars, 1)
-    (Dvars, D) = trial_polynomial('d', cvars, rvars, 1)
-    (Fvars, F) = trial_polynomial('f', cvars, rvars, 1)
-    (Gvars, G) = trial_polynomial('g', cvars, rvars, 1)
+    (Avars, A) = trial_polynomial('a', coordinates, radii, 1)
+    (Bvars, B) = trial_polynomial('b', coordinates, radii, 1)
+    (Cvars, C) = trial_polynomial('c', coordinates, radii, 1)
+    (Dvars, D) = trial_polynomial('d', coordinates, radii, 1)
+    (Fvars, F) = trial_polynomial('f', coordinates, radii, 1)
+    (Gvars, G) = trial_polynomial('g', coordinates, radii, 1)
 
     coeff_vars = (E,) + Avars + Bvars + Cvars + Dvars + Fvars + Gvars
 
     zero_variety = sum(map(square, Avars))
 
-    Phi = function('Phi')(*cvars)
-    Xi = function('Xi')(*cvars)
-    Chi = function('Chi')(*cvars)
-    DChi = function('DChi')(*cvars)
+    Phi = function('Phi')(*coordinates)
+    Xi = function('Xi')(*coordinates)
+    Chi = function('Chi')(*coordinates)
+    DChi = function('DChi')(*coordinates)
 
     if ansatz == 1:
         Psi = A*Phi
@@ -161,13 +161,13 @@ def finish_prep(ansatz):
     # Xi is a logarithm; Xi = ln C, so diff(Xi,C) = 1/C and diff(Xi,v) = diff(C,v)/C
     # Chi is a second-order ODE: C d^2 Chi/dB^2 - D dChi/dB - F Chi - G = 0
 
-    dict1 = {diff(Phi,v): diff(B,v)*Phi for v in cvars}
-    dict1.update({diff(Xi,v): diff(C,v)/C for v in cvars})
-    dict1.update({diff(Chi,v): diff(B,v)*DChi for v in cvars})
+    dict1 = {diff(Phi,v): diff(B,v)*Phi for v in coordinates}
+    dict1.update({diff(Xi,v): diff(C,v)/C for v in coordinates})
+    dict1.update({diff(Chi,v): diff(B,v)*DChi for v in coordinates})
 
-    dict2 = {diff(Phi,v,2): diff(dict1[diff(Phi,v)],v) for v in cvars}
-    dict2.update({diff(Xi,v,2): diff(dict1[diff(Xi,v)],v) for v in cvars})
-    dict2.update({diff(Chi,v,2): diff(B,v,2)*DChi + diff(B,v)^2*(D/C*DChi+F/C*Chi+G/C) for v in cvars})
+    dict2 = {diff(Phi,v,2): diff(dict1[diff(Phi,v)],v) for v in coordinates}
+    dict2.update({diff(Xi,v,2): diff(dict1[diff(Xi,v)],v) for v in coordinates})
+    dict2.update({diff(Chi,v,2): diff(B,v,2)*DChi + diff(B,v)^2*(D/C*DChi+F/C*Chi+G/C) for v in coordinates})
 
     # replace Phi(x1,y1,z1) with Phi to reduce ginac's memory utilization
     eq = eq.subs(dict2).subs(dict1).subs({Phi: SR.var('Phi'), Xi: SR.var('Xi'), Chi: SR.var('Chi'), DChi: SR.var('DChi')})
@@ -177,10 +177,10 @@ def finish_prep(ansatz):
     Aindices = [i for i,c in enumerate(coeff_vars) if c in Avars]
 
 def prep_hydrogen():
-    global H, cvars, rvars
+    global H, coordinates, radii
 
-    cvars = (x1,y1,z1)
-    rvars = (r1,)
+    coordinates = (x1,y1,z1)
+    radii = (r1,)
 
     def H(Psi):
         return - 1/2 * Del(Psi,[x1,y1,z1]) - (1/r1)*Psi
@@ -188,10 +188,10 @@ def prep_hydrogen():
     finish_prep(ansatz=1)
 
 def prep_helium():
-    global H, cvars, rvars
+    global H, coordinates, radii
 
-    cvars = (x1,y1,z1, x2,y2,z2)
-    rvars = (r1,r2,r12)
+    coordinates = (x1,y1,z1, x2,y2,z2)
+    radii = (r1,r2,r12)
 
     def H(Psi):
         return - 1/2 * Del(Psi,[x1,y1,z1]) - 1/2 * Del(Psi,[x2,y2,z2]) - (2/r1)*Psi - (2/r2)*Psi + (1/r12)*Psi
@@ -209,8 +209,8 @@ def varName(var):
             return name
     return None
 
-def mk_maps(rvars):
-    return {v.operands()[0] : SR.var(varName(v)) for v in rvars}
+def mk_maps(radii):
+    return {v.operands()[0] : SR.var(varName(v)) for v in radii}
 
 # convert all (x^2+y^2+z^2)^(n/2) expressions to r^n
 # What if we have multiple x^2+y^2+z^2 expressions in a single power?
@@ -228,7 +228,7 @@ def create_polynomial_eq():
     # first, build the dictionary that maps expressions like (x1^2+y1^2+z1^2) to variables like r1
     # make 'maps' global to simplify the map function inside roots_to_rs()
     global maps
-    maps = mk_maps(rvars)
+    maps = mk_maps(radii)
     # next, convert all of the roots in the equation to use the r-variables
     eq_a = roots_to_rs(eq)
     # Find the least common denominator of all of the terms, then
