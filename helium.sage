@@ -224,7 +224,7 @@ def roots_to_rs(expr):
        return expr
 
 def create_polynomial_eq():
-    global polynomial_eq
+    global polynomial_eq, eq_a, lcm_denominator
     # first, build the dictionary that maps expressions like (x1^2+y1^2+z1^2) to variables like r1
     # make 'maps' global to simplify the map function inside roots_to_rs()
     global maps
