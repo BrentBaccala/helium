@@ -74,6 +74,14 @@ use_scipy_line_search = True
 use_scipy_lstsq = False
 use_scipy_lu = True
 
+# If True, use TCP/IP connections to interconnect Python sub-processes,
+# otherwise use UNIX sockets.  TCP/IP has much slower connection setups,
+# but allows multiple hosts to be used.
+
+use_tcpip_multiprocessing = False
+
+import platform
+
 from itertools import *
 import scipy.optimize
 
@@ -329,8 +337,18 @@ def multi_init():
 if not 'managers' in vars():
     managers = {}
 
+if use_tcpip_multiprocessing:
+    hostname = platform.node() + ".fios-router.home"
+    collector_address = (hostname, 0)
+    worker_address = (hostname, 0)
+    manager_address = (hostname, 50000)
+else:
+    collector_address = None
+    worker_address = None
+    manager_address = None
+
 def start_collector():
-    collector_manager = BaseManager()
+    collector_manager = BaseManager(address=collector_address)
     collector_manager.start()
     cc = collector_manager.CollectorClass()
     mc.register_collector(cc)
@@ -338,7 +356,7 @@ def start_collector():
     return cc
 
 def start_worker():
-    worker_manager = BaseManager()
+    worker_manager = BaseManager(address=worker_address)
     worker_manager.start()
     wc = worker_manager.ExpanderClass()
     mc.register_worker(wc)
@@ -436,7 +454,10 @@ def remove_duplicates():
     for i in range(len(ccs)):
         ccs[i].delete_rows(indices[i])
 
-import multiprocessing, logging
+import multiprocessing
+multiprocessing.current_process().authkey = b"genius"
+
+import logging
 logger = multiprocessing.get_logger()
 logger.setLevel(logging.INFO)
 if len(logger.handlers) == 0:
@@ -646,6 +667,12 @@ class ManagerClass(Autoself):
     # remaining until this worker is ready to start a 'combine'
     worker_data_count = {}
 
+    # This can't be put in an __init__ method because autoself()
+    # doesn't work until after self has been created and registered
+    # with the multiprocessing server.
+    def register_self(self):
+        global mc
+        mc = self.autoself()
     def __del__(self):
         for i in range(len(self.collectors)):
             del self.collectors[-1]
@@ -1322,11 +1349,14 @@ BaseManager.register('AsyncResult', AsyncResult)
 BaseManager.register('JacobianMatrix', JacobianMatrix)
 BaseManager.register('JacobianDivAMatrix', JacobianDivAMatrix)
 
+BaseManager.register('mc', callable = lambda: mc)
+
 def start_manager_process():
     global manager, mc
-    manager = BaseManager()
+    manager = BaseManager(address=manager_address)
     manager.start()
     mc = manager.ManagerClass()
+    mc.register_self()
 
 
 # Look for solutions using an approximate numerical technique
