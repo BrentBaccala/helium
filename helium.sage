@@ -1822,7 +1822,7 @@ def find_relation():
 
 import platform
 
-if platform.node() == 'samsung':
+if platform.node() == 'samsung' and not 'no_init' in globals():
 
     prep_hydrogen()
     multi_init()
