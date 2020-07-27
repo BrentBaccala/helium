@@ -246,6 +246,8 @@ def create_polynomial_ring():
     R = PolynomialRing(ZZ, names=tuple(flatten((radii, coeff_vars, coordinates, ODE_vars))))
     F = Frac(R)
 
+from sage.symbolic.operators import add_vararg, mul_vararg
+
 def recursive_convert(eq, F):
     # Converting a Sage expression from the Symbolic Ring to a polynomial
     # ring or field is more efficient when we do it using this function.
