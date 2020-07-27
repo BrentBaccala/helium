@@ -233,6 +233,31 @@ def create_eq_a():
     # next, convert all of the roots in the equation to use the r-variables
     eq_a = roots_to_rs(eq)
 
+# Create a polynomial ring to hold our expressions.
+#
+# Sage does this using Singular, which stores polynomials internally in standard
+# form (i.e, fully expanded).
+
+def create_polynomial_ring():
+    radii = SR.var('r1,r2,r12')
+    ODE_vars = ('Chi', 'DChi')
+
+    global R,F
+    R = PolynomialRing(ZZ, names=tuple(flatten((radii, coeff_vars, coordinates, ODE_vars))))
+    F = Frac(R)
+
+def recursive_convert(eq, F):
+    # Converting a Sage expression from the Symbolic Ring to a polynomial
+    # ring or field is more efficient when we do it using this function.
+    def recursion(eq):
+        if eq.operator() == add_vararg:
+            return sum(map(recursion, eq.operands()))
+        elif eq.operator() == mul_vararg:
+            return mul(map(recursion, eq.operands()))
+        else:
+            return F(eq)
+    return recursion(eq)
+
 def create_lcm_denominator():
     # Find the least common denominator of all of the terms, then
     # clear the denominators and expand out all of the powers.
