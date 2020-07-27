@@ -149,6 +149,8 @@ def finish_prep(ansatz):
         Psi = A*Xi
     elif ansatz == 3:
         Psi = A*Chi
+    elif ansatz == 4:
+        Psi = Chi
     else:
         raise 'Bad ansatz'
 
@@ -176,7 +178,7 @@ def finish_prep(ansatz):
     coeff_vars = tuple(sorted(set(eq.free_variables()).intersection(coeff_vars), key=lambda x:str(x)))
     Aindices = [i for i,c in enumerate(coeff_vars) if c in Avars]
 
-def prep_hydrogen():
+def prep_hydrogen(ansatz=1):
     global H, coordinates, radii
 
     coordinates = (x1,y1,z1)
@@ -185,9 +187,9 @@ def prep_hydrogen():
     def H(Psi):
         return - 1/2 * Del(Psi,[x1,y1,z1]) - (1/r1)*Psi
 
-    finish_prep(ansatz=1)
+    finish_prep(ansatz=ansatz)
 
-def prep_helium():
+def prep_helium(ansatz=4):
     global H, coordinates, radii
 
     coordinates = (x1,y1,z1, x2,y2,z2)
@@ -196,7 +198,7 @@ def prep_helium():
     def H(Psi):
         return - 1/2 * Del(Psi,[x1,y1,z1]) - 1/2 * Del(Psi,[x2,y2,z2]) - (2/r1)*Psi - (2/r2)*Psi + (1/r12)*Psi
 
-    finish_prep(ansatz=3)
+    finish_prep(ansatz=ansatz)
 
 
 # Now we want to replace all of the sqrt(...) factors with 'r',
