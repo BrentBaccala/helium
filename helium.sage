@@ -223,19 +223,28 @@ def roots_to_rs(expr):
     else:
        return expr
 
-def create_polynomial_eq():
-    global polynomial_eq, eq_a, lcm_denominator
+def create_eq_a():
     # first, build the dictionary that maps expressions like (x1^2+y1^2+z1^2) to variables like r1
     # make 'maps' global to simplify the map function inside roots_to_rs()
-    global maps
+    global maps, eq_a
     maps = mk_maps(radii)
     # next, convert all of the roots in the equation to use the r-variables
     eq_a = roots_to_rs(eq)
+
+def create_lcm_denominator():
     # Find the least common denominator of all of the terms, then
     # clear the denominators and expand out all of the powers.
     # This is faster than expand(eq_a.numerator()).  One test
     # on helium ran in 61 sec, vs 337 sec for expand/numerator.
+    global lcm_denominator
     lcm_denominator = lcm(map(denominator, eq_a.operands()))
+
+def create_polynomial_eq():
+    # Next, we want to multiple by lcm_denominator and expand out the resulting polynomial,
+    # but the expansion step runs into memory exhaustion issues.  Therefore, we want
+    # to distribute the multiplication across eq_a's top-level sum and expand out
+    # each term individually.
+    global polynomial_eq
     polynomial_eq = expand(eq_a * lcm_denominator)
     # polynomial_eq is now a polynomial, but it's got higher powers of r's in it
 
@@ -250,16 +259,20 @@ def extract_ops():
     ops = reduced_polynomial_eq.operands()
 
 
-import timeit
+import time
+
+def timefunc(func):
+    start_time = time.perf_counter()
+    func()
+    end_time = time.perf_counter()
+    print('{:30} {:10.2f} sec'.format(func.__name__, end_time - start_time))
 
 def multi_init():
-    t = timeit.timeit(lambda: create_polynomial_eq(), number=1)
-    print('create_polynomial_eq() : %s sec'%(t))
-    t = timeit.timeit(lambda: reduce_polynomial_eq(), number=1)
-    print('reduce_polynomial_eq() : %s sec'%(t))
-    t = timeit.timeit(lambda: extract_ops(), number=1)
-    print('extract_ops() : %s sec'%(t))
-
+    timefunc(create_eq_a)
+    timefunc(create_lcm_denominator)
+    timefunc(create_polynomial_eq)
+    timefunc(reduce_polynomial_eq)
+    timefunc(extract_ops)
 
 # Now expand out powers, and collect like x,y,z's terms together to
 # get a system of polynomials
@@ -302,7 +315,7 @@ def multi_init():
 # multi_expand()
 
 # number of operands to process in each expander worker
-blocksize = 100
+blocksize = 1000
 
 # number of collector processes
 num_collectors = 1
