@@ -290,9 +290,9 @@ def extract_ops():
 
 import time
 
-def timefunc(func):
+def timefunc(func, *args):
     start_time = time.perf_counter()
-    func()
+    func(*args)
     end_time = time.perf_counter()
     print('{:30} {:10.2f} sec'.format(func.__name__, end_time - start_time))
 
