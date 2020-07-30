@@ -1965,3 +1965,7 @@ if platform.node() == 'samsung' and not 'no_init' in globals():
     prep_hydrogen()
     multi_init()
     multi_expand()
+
+if platform.node().startswith('c200') and not 'no_init' in globals():
+    timefunc(prep_helium)
+    timefunc(create_polynomial_ring)
