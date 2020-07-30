@@ -80,6 +80,7 @@ use_scipy_lu = True
 use_tcpip_multiprocessing = False
 
 import platform
+import glob
 
 from itertools import *
 import scipy.optimize
@@ -1269,6 +1270,13 @@ class CollectorClass(Autoself):
         up = pickle.Unpickler(f)
         up.load()
         f.close()
+
+    def load_from_glob(self, globstr, section=0, total_sections=1):
+        for fn in sorted(glob.glob(globstr)):
+            print("Loading", fn)
+            timefunc(self.load_from_pickle, fn, section, total_sections)
+        print("Converting to CSR")
+        self.M = sp_unique(self.dok, axis=0, new_format='csr')
 
     @async_method
     def delete_rows(self, indices):
