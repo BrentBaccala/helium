@@ -1027,6 +1027,10 @@ class JacobianDivAMatrix(LUMatrix):
 
 class CollectorClass(Autoself):
     result = {}
+    rows = {}
+    indices = {}
+    max_degree = 0
+    dok = scipy.sparse.dok_matrix((0, 0), np.int64)
     M = None
     multi_D_vec_times = 0
     multi_D_vec_calls = 0
@@ -1194,6 +1198,77 @@ class CollectorClass(Autoself):
         #self.M = self.dok.tocsr()
         self.M = sp_unique(self.dok, axis=0, new_format='csr')
         logger.info('convert_to_matrix done')
+
+    def load_from_pickle(self, fn, section=0, total_sections=1):
+        r"""
+        Loads a polynomial from a pickle file that was dumped using
+        the new Singular polynomial pickling code and stores it in a
+        sparse matrix.  Doesn't actually create a polynomial; instead,
+        overrides the unpickling routine to avoid the memory and CPU
+        overhead of converting to a polynomial.
+
+        The idea is call this method repeatedly to load a series of
+        pickle files, each containing terms that when added together
+        form the entire polynomial equation that we're trying to
+        solve.  When we're done, we convert the entire sparse matrix
+        from DOK to CSR form (not done in this method).
+
+        The optional "section" arguments allow only a section of the
+        row space to be loaded, to reduce the memory footprint.  The
+        resulting matrices will either have to be stacked together
+        to form a single matrix, or used with code designed to
+        distribute the matrix operations over several machines.
+        """
+
+        # Hardwired indices for Helium Ansatz 4
+
+        #row_indices = (0,1,2, 283,284,285,286,287,288,289,290)
+        #coeff_indices = tuple(range(3,283))
+        #all_indices = tuple(range(0,291))
+
+        R_coeff_vars = tuple(map(R, coeff_vars))
+
+        from sage.rings.polynomial.polydict import ETuple
+
+        class custom_unpickler:
+            def __init__(sself, R):
+                sself.R = R
+
+            def __setitem__(sself, mon_tuple, coeff):
+
+                #row_tuple = tuple([mon_tuple[i] for i in row_indices])
+                #coeff_tuple = ETuple([(mon_tuple[i] if i in coeff_indices else 0) for i in all_indices])
+
+                # Hardwired indices for Helium Ansatz 4
+                (start, mid_plus_end) = mon_tuple.split(2)
+                (coeff_tuple, end) = mid_plus_end.split(282)
+                row_tuple = start.eadd(end)
+
+                if hash(row_tuple) % total_sections == section:
+
+                    if row_tuple not in self.rows:
+                        self.rows[row_tuple] = len(self.rows)
+                        self.dok.resize((len(self.rows), len(self.indices)))
+                    row = self.rows[row_tuple]
+
+                    while coeff_tuple not in self.indices:
+                        self.max_degree += 1
+                        self.indices = {next(pair[1]._iter_ETuples())[0] : pair[0] for pair in enumerate(self.generate_multi_vector(R_coeff_vars))}
+                        # self.indices = {list(pair[1].dict().keys())[0] : pair[0] for pair in enumerate(self.generate_multi_vector(coeff_vars))}
+                        self.dok.resize((len(self.rows), len(self.indices)))
+                    index = self.indices[coeff_tuple]
+
+                    self.dok[row, index] += coeff
+
+            def new_MP(sself):
+                return sself.R(0)
+
+        sage.rings.polynomial.multi_polynomial_libsingular.MPolynomial_libsingular_unpickler = custom_unpickler
+
+        f = open(fn, 'rb')
+        up = pickle.Unpickler(f)
+        up.load()
+        f.close()
 
     @async_method
     def delete_rows(self, indices):
