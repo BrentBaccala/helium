@@ -77,7 +77,7 @@ use_scipy_lu = True
 # otherwise use UNIX sockets.  TCP/IP has much slower connection setups,
 # but allows multiple hosts to be used.
 
-use_tcpip_multiprocessing = False
+use_tcpip_multiprocessing = True
 
 import platform
 import glob
@@ -1271,12 +1271,18 @@ class CollectorClass(Autoself):
         up.load()
         f.close()
 
-    def load_from_glob(self, globstr, section=0, total_sections=1):
+    def load_from_glob(self, globstr, section=0, total_sections=1, dump_file=None):
         for fn in sorted(glob.glob(globstr)):
             print("Loading", fn)
             timefunc(self.load_from_pickle, fn, section, total_sections)
         print("Converting to CSR")
         self.M = sp_unique(self.dok, axis=0, new_format='csr')
+        self.dok = None
+        if dump_file:
+            f = open(dump_file, 'wb')
+            pickle.dump(self, f)
+            f.close()
+            print("Dumped to", dump_file)
 
     @async_method
     def delete_rows(self, indices):
@@ -1457,6 +1463,14 @@ def bind(instance, func, as_name=None):
 # single process with a ManagerClass, as all of the other processes
 # will be either workers or collectors.
 
+work_queue = queue.Queue()
+
+def get_work():
+    return work_queue.get()
+def add_work(l):
+    for i in l:
+        work_queue.put(i)
+
 from multiprocessing.managers import BaseManager
 BaseManager.register('ManagerClass', ManagerClass)
 BaseManager.register('ExpanderClass', ExpanderClass)
@@ -1466,6 +1480,8 @@ BaseManager.register('JacobianMatrix', JacobianMatrix)
 BaseManager.register('JacobianDivAMatrix', JacobianDivAMatrix)
 
 BaseManager.register('mc', callable = lambda: mc)
+BaseManager.register('get_work', get_work)
+BaseManager.register('add_work', add_work)
 
 def start_manager_process():
     global manager, mc
@@ -1963,6 +1979,24 @@ def find_relation():
 
         if Lrow[-1] != 0:
             break
+
+def convert_matrix(index):
+    dump_fn = 'csr0-' + str(index)
+    bwb = CollectorClass()
+    bwb.load_from_glob('newpickle[0246]*', index, 16, dump_fn)
+
+def do_work():
+    m = BaseManager(address=('c200-1.fios-router.home', 50000))
+    m.connect()
+    while True:
+        work = m.get_work()
+        print("Working on", work)
+        timefunc(convert_matrix, work)
+
+def prep_work():
+    m = BaseManager(address=('c200-1.fios-router.home', 50000))
+    m.connect()
+    m.add_work(list(range(16)))
 
 # If we're running on my development laptop, initialize a simple calculation when this file is loaded
 
