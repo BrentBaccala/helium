@@ -1221,6 +1221,9 @@ class CollectorClass(Autoself):
         distribute the matrix operations over several machines.
         """
 
+        assert type(section) == int
+        assert type(total_sections) == int
+
         # Hardwired indices for Helium Ansatz 4
 
         #row_indices = (0,1,2, 283,284,285,286,287,288,289,290)
@@ -1271,18 +1274,13 @@ class CollectorClass(Autoself):
         up.load()
         f.close()
 
-    def load_from_glob(self, globstr, section=0, total_sections=1, dump_file=None):
+    def load_from_glob(self, globstr, section=0, total_sections=1):
         for fn in sorted(glob.glob(globstr)):
             print("Loading", fn)
             timefunc(self.load_from_pickle, fn, section, total_sections)
         print("Converting to CSR")
         self.M = sp_unique(self.dok, axis=0, new_format='csr')
         self.dok = None
-        if dump_file:
-            f = open(dump_file, 'wb')
-            pickle.dump(self, f)
-            f.close()
-            print("Dumped to", dump_file)
 
     @async_method
     def delete_rows(self, indices):
@@ -1982,14 +1980,19 @@ def find_relation():
 
 def convert_matrix(index):
     dump_fn = 'csr0-' + str(index)
-    bwb = CollectorClass()
-    bwb.load_from_glob('newpickle[0246]*', index, 16, dump_fn)
+    collector = CollectorClass()
+    collector.load_from_glob('newpickle[0246]*', index, int(16))
+    f = open(dump_fn, 'wb')
+    pickle.dump(collector, f)
+    f.close()
+    print("Dumped to", dump_fn)
+
 
 def do_work():
     m = BaseManager(address=('c200-1.fios-router.home', 50000))
     m.connect()
     while True:
-        work = m.get_work()
+        work = m.get_work()._getvalue()
         print("Working on", work)
         timefunc(convert_matrix, work)
 
