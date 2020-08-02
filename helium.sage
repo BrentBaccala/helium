@@ -77,7 +77,7 @@ use_scipy_lu = True
 # otherwise use UNIX sockets.  TCP/IP has much slower connection setups,
 # but allows multiple hosts to be used.
 
-use_tcpip_multiprocessing = True
+use_tcpip_multiprocessing = False
 
 import platform
 import glob
@@ -126,7 +126,7 @@ def Del(Psi,vars):
 
 def finish_prep(ansatz):
     global eq, H, coeff_vars, coordinates, radii
-    global zero_variety, zero_variety_indices, zero_variety_mask
+    global zero_variety, zero_variety_mask
 
     (Avars, A) = trial_polynomial('a', coordinates, radii, 1)
     (Bvars, B) = trial_polynomial('b', coordinates, radii, 1)
@@ -180,9 +180,12 @@ def finish_prep(ansatz):
     # reduce coeff_vars to those which actually appear in the equation
     coeff_vars = tuple(sorted(set(eq.free_variables()).intersection(coeff_vars), key=lambda x:str(x)))
 
-    # we seek to avoid the zero variety; it's the trivial solution to the DE
+    # We seek to avoid the zero variety; it's the trivial solution to the DE.
+    # However, in the simple case where the zero variety is just the sum of squares of some coefficient variables,
+    # then we can compute the zero variety's function by masking off those variables and computing their norm.
+    # In fact, that's the only kind of zero variety the code currently supports (thus the assert).
     zero_variety_vars = tuple(sorted(set(zero_variety.free_variables()).intersection(coeff_vars), key=lambda x:str(x)))
-    zero_variety_indices = [i for i,c in enumerate(coeff_vars) if c in zero_variety_vars]
+    assert zero_variety == sum(map(square, zero_variety_vars))
     zero_variety_mask = np.array([c in zero_variety_vars for c in coeff_vars])
 
 def prep_hydrogen(ansatz=1):
@@ -1568,7 +1571,8 @@ def fns_divSqrtA(v):
     last_v = v.copy()
 
     res = np.hstack(list(map(lambda x: x.get(), [cc.eval_fns(v) for cc in ccs])))
-    Adenom = sqrt(sum([square(v[i]) for i in zero_variety_indices]))
+    Av = v * zero_variety_mask
+    Adenom = np.linalg.norm(Av)
 
     global last_time
     sum_of_squares = sum(square(res/Adenom))
@@ -1608,9 +1612,8 @@ def jac_fns_divSqrtA(v):
     N = np.hstack(list(map(lambda x: x.get(), [cc.eval_fns(v) for cc in ccs])))
     dN = np.vstack(list(map(lambda x: x.get(), [cc.jac_fns(v) for cc in ccs])))
     Av = v * zero_variety_mask
-    Adenomsq = sum([square(v[i]) for i in zero_variety_indices])
-    Adenom = sqrt(Adenomsq)
-    res = dN/Adenom - np.outer(N,Av)/Adenom/Adenomsq
+    Adenom = np.linalg.norm(Av)
+    res = dN/Adenom - np.outer(N,Av)/(Adenom^3)
     return res
 
 def sum_of_squares(v):
