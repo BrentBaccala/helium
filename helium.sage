@@ -125,8 +125,8 @@ def Del(Psi,vars):
     return sum([diff(Psi,v,2) for v in vars])
 
 def finish_prep(ansatz):
-    global eq, H, coeff_vars, A, Avars, coordinates, radii
-    global zero_variety, Aindices
+    global eq, H, coeff_vars, coordinates, radii
+    global zero_variety, zero_variety_indices, zero_variety_mask
 
     (Avars, A) = trial_polynomial('a', coordinates, radii, 1)
     (Bvars, B) = trial_polynomial('b', coordinates, radii, 1)
@@ -137,8 +137,6 @@ def finish_prep(ansatz):
 
     coeff_vars = (E,) + Avars + Bvars + Cvars + Dvars + Fvars + Gvars
 
-    zero_variety = sum(map(square, Avars))
-
     Phi = function('Phi')(*coordinates)
     Xi = function('Xi')(*coordinates)
     Chi = function('Chi')(*coordinates)
@@ -146,12 +144,16 @@ def finish_prep(ansatz):
 
     if ansatz == 1:
         Psi = A*Phi
+        zero_variety = sum(map(square, Avars))
     elif ansatz == 2:
         Psi = A*Xi
+        zero_variety = sum(map(square, Avars))
     elif ansatz == 3:
         Psi = A*Chi
+        zero_variety = sum(map(square, Avars))
     elif ansatz == 4:
         Psi = Chi
+        zero_variety = sum(map(square, flatten(Dvars, Fvars, Gvars)))
     else:
         raise 'Bad ansatz'
 
@@ -177,7 +179,11 @@ def finish_prep(ansatz):
 
     # reduce coeff_vars to those which actually appear in the equation
     coeff_vars = tuple(sorted(set(eq.free_variables()).intersection(coeff_vars), key=lambda x:str(x)))
-    Aindices = [i for i,c in enumerate(coeff_vars) if c in Avars]
+
+    # we seek to avoid the zero variety; it's the trivial solution to the DE
+    zero_variety_vars = tuple(sorted(set(zero_variety.free_variables()).intersection(coeff_vars), key=lambda x:str(x)))
+    zero_variety_indices = [i for i,c in enumerate(coeff_vars) if c in zero_variety_vars]
+    zero_variety_mask = np.array([c in zero_variety_vars for c in coeff_vars])
 
 def prep_hydrogen(ansatz=1):
     global H, coordinates, radii
@@ -1012,8 +1018,7 @@ class JacobianDivAMatrix(LUMatrix):
         dN = np.stack([self.collector.dot(self.collector.generate_multi_D_vector(vec, var)) for var in coeff_vars], axis=1)
 
         # the A values - Av.shape = (c)
-        Amask = np.array([c in Avars for c in coeff_vars])
-        Av = vec * Amask
+        Av = vec * zero_variety_mask
         # sum A^2 - a scalar
         Adenom = sum(Av*Av)
 
@@ -1563,7 +1568,7 @@ def fns_divSqrtA(v):
     last_v = v.copy()
 
     res = np.hstack(list(map(lambda x: x.get(), [cc.eval_fns(v) for cc in ccs])))
-    Adenom = sqrt(sum([square(v[i]) for i in Aindices]))
+    Adenom = sqrt(sum([square(v[i]) for i in zero_variety_indices]))
 
     global last_time
     sum_of_squares = sum(square(res/Adenom))
@@ -1602,8 +1607,8 @@ def jac_fns_divSqrtA(v):
     global N,dN,Av,Adenom
     N = np.hstack(list(map(lambda x: x.get(), [cc.eval_fns(v) for cc in ccs])))
     dN = np.vstack(list(map(lambda x: x.get(), [cc.jac_fns(v) for cc in ccs])))
-    Av = v * np.array([c in Avars for c in coeff_vars])   # could form a global vector for this
-    Adenomsq = sum([square(v[i]) for i in Aindices])
+    Av = v * zero_variety_mask
+    Adenomsq = sum([square(v[i]) for i in zero_variety_indices])
     Adenom = sqrt(Adenomsq)
     res = dN/Adenom - np.outer(N,Av)/Adenom/Adenomsq
     return res
@@ -1668,7 +1673,7 @@ def jac_minfunc(v):
         #zero_var = v.dtype.type(zero_variety.subs(d))
         zero_var = v.dtype.type(sum(map(lambda bwb: bwb.subs(d), zero_variety.operands())))
 
-        Av = v * np.array([c in Avars for c in coeff_vars])
+        Av = v * zero_variety_mask
         res = ((jac_sum_of_squares*zero_var - 2*np.array(Av)*sum_of_squares)/zero_var^2)
 
     return res
@@ -1796,7 +1801,7 @@ def optimize_step(vec):
         N = np.polynomial.polynomial.Polynomial.fit([-4,-3,-2,-1,0,1,2],values,6,[])
 
         # The denominator is the sum of (A_0 + lambda A_d)^2 for all As
-        D = sum([square(np.polynomial.polynomial.Polynomial((vec[i], evalstep[i]))) for i in Aindices])
+        D = sum([square(np.polynomial.polynomial.Polynomial((vec[i], evalstep[i]))) for i in zero_variety_indices])
 
         # the numerator of the first derivative of the function we're trying to minimize
         f = (D * N.deriv() - N * D.deriv())
