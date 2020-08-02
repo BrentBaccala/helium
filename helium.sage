@@ -1628,7 +1628,7 @@ def minfunc(v):
 
     # Save a copy of vector to aid in stopping and restarting the calculation
     global last_v
-    last_v = v
+    last_v = v.copy()
 
     d = dict(zip(coeff_vars, v))
     sum_of_squares = sum(map(lambda x: x.get(), [cc.sum_of_squares(v) for cc in ccs]))
@@ -1662,7 +1662,7 @@ use_matrix_jacobian = True
 
 def jac_minfunc(v):
     global last_v
-    last_v = v
+    last_v = v.copy()
 
     if use_matrix_jacobian:
         res = sum(map(lambda x: np.array(x.get().sum(axis=0)), [cc.jac_fns_divA(v) for cc in ccs]))
