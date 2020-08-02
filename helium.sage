@@ -1553,9 +1553,14 @@ def fns_divSqrtA(v):
     zero variety we're trying to avoid.
     """
 
-    # Save a copy of vector to aid in stopping and restarting the calculation
+    # Save a copy of vector to aid in stopping and restarting the
+    # calculation An explicit call to the copy method is required if
+    # we're using the Fortran minpack code (i.e, scipy's optimize
+    # package) because in that case, 'v' is only a pointer to a
+    # Fortran array that gets deallocated once the Fortran code exits.
+    # (I think - the copy's definitely needed, though)
     global last_v
-    last_v = v
+    last_v = v.copy()
 
     res = np.hstack(list(map(lambda x: x.get(), [cc.eval_fns(v) for cc in ccs])))
     Adenom = sqrt(sum([square(v[i]) for i in Aindices]))
