@@ -1086,6 +1086,17 @@ class CollectorClass(Autoself):
         logger.info('matrix loaded from %s', fn)
         logger.info(repr(self.M))
 
+        # compute max_degree based on the number of columns in the loaded matrix,
+        # which should match up with the number of elements in a multi_vector
+        self.max_degree = 0
+        columns = 0
+        while columns < self.M.shape[1]:
+            self.max_degree += 1
+            columns += binomial(self.max_degree+len(coeff_vars)-1,self.max_degree)
+        logger.info("max_degree set to %d", self.max_degree)
+        if columns != self.M.shape[1]:
+            logger.info("Warning: max_degree inconsistent with matrix dimensions: %d != %d", columns, self.M.shape[1])
+
     def times(self):
         return (self.dot_calls, self.dot_times, self.multi_vec_calls, self.multi_vec_times, self.multi_D_vec_calls, self.multi_D_vec_times)
     def nrows(self):
