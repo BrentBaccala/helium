@@ -85,6 +85,8 @@ import glob
 from itertools import *
 import scipy.optimize
 
+from sage.symbolic.operators import add_vararg, mul_vararg
+
 # from python docs
 def flatten(listOfLists):
     "Flatten one level of nesting"
@@ -126,7 +128,7 @@ def Del(Psi,vars):
 
 def finish_prep(ansatz):
     global eq, H, coeff_vars, coordinates, radii
-    global zero_variety, zero_variety_mask
+    global zero_variety, zero_variety_masks
 
     (Avars, A) = trial_polynomial('a', coordinates, radii, 1)
     (Bvars, B) = trial_polynomial('b', coordinates, radii, 1)
@@ -153,7 +155,7 @@ def finish_prep(ansatz):
         zero_variety = sum(map(square, Avars))
     elif ansatz == 4:
         Psi = Chi
-        zero_variety = sum(map(square, flatten((Dvars, Fvars, Gvars))))
+        zero_variety = sum(map(square, flatten((Dvars, Fvars, Gvars)))) * sum(map(square, Bvars[1:]))
     else:
         raise 'Bad ansatz'
 
@@ -181,12 +183,23 @@ def finish_prep(ansatz):
     coeff_vars = tuple(sorted(set(eq.free_variables()).intersection(coeff_vars), key=lambda x:str(x)))
 
     # We seek to avoid the zero variety; it's the trivial solution to the DE.
-    # However, in the simple case where the zero variety is just the sum of squares of some coefficient variables,
-    # then we can compute the zero variety's function by masking off those variables and computing their norm.
-    # In fact, that's the only kind of zero variety the code currently supports (thus the assert).
-    zero_variety_vars = tuple(sorted(set(zero_variety.free_variables()).intersection(coeff_vars), key=lambda x:str(x)))
-    assert zero_variety == sum(map(square, zero_variety_vars))
-    zero_variety_mask = np.array([c in zero_variety_vars for c in coeff_vars])
+    #
+    # However, in the simple case where the zero variety is just a
+    # product of factors, each the sum of squares of some coefficient
+    # variables, then we can compute the zero variety's function by
+    # masking off those variables and computing their norm.
+    #
+    # In fact, that's the only kind of zero variety the code currently
+    # supports (thus the assert).
+
+    if zero_variety.operator() is add_vararg:
+        zero_variety_vars = tuple(sorted(set(zero_variety.free_variables()).intersection(coeff_vars), key=lambda x:str(x)))
+        assert zero_variety == sum(map(square, zero_variety_vars))
+        zero_variety_masks = (np.array([c in zero_variety_vars for c in coeff_vars]), )
+    else:
+        zero_variety_vars = tuple(tuple(set(f.free_variables()).intersection(coeff_vars)) for f in zero_variety.operands())
+        assert zero_variety == mul((sum(map(square, vars)) for vars in zero_variety_vars))
+        zero_variety_masks = tuple((np.array([c in vars for c in coeff_vars]) for vars in zero_variety_vars))
 
 def prep_hydrogen(ansatz=1):
     global H, coordinates, radii
@@ -255,8 +268,6 @@ def create_polynomial_ring():
     global R,F
     R = PolynomialRing(ZZ, names=tuple(flatten((radii, coeff_vars, coordinates, ODE_vars))))
     F = Frac(R)
-
-from sage.symbolic.operators import add_vararg, mul_vararg
 
 def recursive_convert(eq, F):
     # Converting a Sage expression from the Symbolic Ring to a polynomial
@@ -1643,7 +1654,7 @@ def fns_divSqrtA(v):
     """
 
     # Save a copy of vector to aid in stopping and restarting the
-    # calculation An explicit call to the copy method is required if
+    # calculation.  An explicit call to the copy method is required if
     # we're using the Fortran minpack code (i.e, scipy's optimize
     # package) because in that case, 'v' is only a pointer to a
     # Fortran array that gets deallocated once the Fortran code exits.
@@ -1652,17 +1663,17 @@ def fns_divSqrtA(v):
     last_v = v.copy()
 
     res = np.hstack(list(map(lambda x: x.get(), [cc.eval_fns(v) for cc in ccs])))
-    Av = v * zero_variety_mask
-    Adenom = np.linalg.norm(Av)
+
+    denom = mul(map(np.linalg.norm, (v * mask for mask in zero_variety_masks)))
 
     global last_time
-    sum_of_squares = sum(square(res/Adenom))
+    sum_of_squares = sum(square(res/denom))
     if last_time == 0:
         print(sum_of_squares)
     else:
         print("{:<30} {:20} sec".format(sum_of_squares, time.time()-last_time))
     last_time = time.time()
-    return res/Adenom
+    return res/denom
 
 def jac_fn(v):
     r"""
@@ -1727,9 +1738,9 @@ def jac_fns_divSqrtA(v):
     dN = np.vstack(list(map(get_nparray(shms), [cc.jac_fns(v, mdv_shm.name) for cc in ccs])))
     #print("done compute dN")
 
-    Av = v * zero_variety_mask
-    Adenom = np.linalg.norm(Av)
-    res = dN/Adenom - np.outer(N,Av)/(Adenom^3)
+    zero_variety_factors = tuple(v * mask for mask in zero_variety_masks)
+    denom = mul(map(np.linalg.norm, zero_variety_factors))
+    res = dN/denom - sum(np.outer(N,f)/(denom*np.linalg.norm(f)^2) for f in zero_variety_factors)
 
     #print("done computing result")
 
