@@ -1036,15 +1036,25 @@ class JacobianMatrix(LUMatrix):
     """
 
     @async_method
-    def _start_calculation(self, vec):
-        mdv = np.stack([self.collector.generate_multi_D_vector(vec, var) for var in coeff_vars], axis=1)
+    def _start_calculation(self, vec, shm_name):
+        if not shm_name:
+            mdv = np.stack([self.collector.generate_multi_D_vector(vec, var) for var in coeff_vars], axis=1)
+        else:
+            shm = shared_memory.SharedMemory(shm_name)
+            mdv_shape = (self.collector.ncols(), len(coeff_vars))
+            mdv = np.ndarray(mdv_shape, dtype=vec.dtype, buffer=shm.buf)
+
         M = self.collector.dot(mdv)
+
+        if shm_name:
+            shm.close()
+
         f = self.collector.eval_fns(vec).get()
         LUMatrix.__init__(self, M, f)
 
-    def __init__(self, collector, vec):
+    def __init__(self, collector, vec, shm_name):
         self.collector = collector
-        self._start_calculation(vec)
+        self._start_calculation(vec, shm_name)
 
 class JacobianDivAMatrix(LUMatrix):
     r"""
@@ -1147,6 +1157,10 @@ class CollectorClass(Autoself):
         return (self.dot_calls, self.dot_times, self.multi_vec_calls, self.multi_vec_times, self.multi_D_vec_calls, self.multi_D_vec_times)
     def nrows(self):
         return self.M.shape[0]
+    def ncols(self):
+        return self.M.shape[1]
+    def dtype(self):
+        return self.M.dtype
     def len_result(self):
         return len(self.result)
     def len_values(self):
@@ -1374,6 +1388,15 @@ class CollectorClass(Autoself):
         B = self.generate_multi_vector(coeff_vars)
         return sum(self.M[row].toarray() * B)
 
+    @async_method
+    def compute_partial_mdv(self, vec, shm_name, start, stop):
+        shm = shared_memory.SharedMemory(shm_name)
+        mdv_shape = (self.M.shape[1], len(coeff_vars))
+        mdv = np.ndarray(mdv_shape, dtype=vec.dtype, buffer=shm.buf)
+        for i in range(start, stop):
+            mdv[:,i] = self.generate_multi_D_vector(vec, coeff_vars[i])
+        shm.close()
+
     @async_result
     def eval_fns(self, vec):
         r"""
@@ -1390,21 +1413,22 @@ class CollectorClass(Autoself):
         multivec = self.generate_multi_vector(vec)
         return self.dot(multivec)
 
-    def jac_fns(self, vec):
+    def jac_fns(self, vec, shm_name=None):
         r"""
         Evaluate the Jacobian matrix (the matrix of first-order
         partial derivatives) of our polynomials
 
         INPUT:
 
-        - ``vec`` -- a vector of real values for all coeff_vars
+        - ``vec`` -- a vector of real values for all coeff_vars (ignored in shm_name is given)
+        - ``shm_name`` -- a shared memory block with the pre-computed multi-D-vectors
 
         OUTPUT:
 
         - the Jacobian matrix, evaluated at ``vec``, as a numpy
         matrix wrapped in a proxy object
         """
-        return self.autocreate('JacobianMatrix', self, vec)
+        return self.autocreate('JacobianMatrix', self, vec, shm_name)
 
     def jac_fns_divA(self, vec):
         r"""
@@ -1685,15 +1709,43 @@ def get_nparray(shms):
 
 def jac_fns_divSqrtA(v):
     global N,dN,Av,Adenom
-    shms = []
     N = np.hstack(list(map(lambda x: x.get(), [cc.eval_fns(v) for cc in ccs])))
-    dN = np.vstack(list(map(get_nparray(shms), [cc.jac_fns(v) for cc in ccs])))
+
+    #print("jac_fn_divSqrtA")
+    mdv_shm_size = len(coeff_vars) * ccs[0].ncols() * ccs[0].dtype().itemsize
+    mdv_shm = shared_memory.SharedMemory(create=True, size=mdv_shm_size)
+    coeff_distribution = [int(i*len(coeff_vars)/len(ccs)) for i in range(len(ccs) + 1)]
+    #print("distribute compute_partial_mdv")
+    for i in range(len(ccs)):
+        ccs[i].compute_partial_mdv(v, mdv_shm.name, coeff_distribution[i], coeff_distribution[i+1])
+    #print("await compute_partial_mdv")
+    for cc in ccs:
+        cc.join_threads()
+    #print("done compute_partial_mdv")
+
+    shms = []
+    dN = np.vstack(list(map(get_nparray(shms), [cc.jac_fns(v, mdv_shm.name) for cc in ccs])))
+    #print("done compute dN")
+
     Av = v * zero_variety_mask
     Adenom = np.linalg.norm(Av)
     res = dN/Adenom - np.outer(N,Av)/(Adenom^3)
+
+    #print("done computing result")
+
+    mdv_shm.close()
+    mdv_shm.unlink()
+    del mdv_shm
+
+    #print("unlinked mdv_shm")
+
     for shm in shms:
         shm.close()
         shm.unlink()
+    del shms
+
+    #print("unlinked result shms")
+
     return res
 
 def sum_of_squares(v):
