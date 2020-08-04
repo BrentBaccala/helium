@@ -1037,7 +1037,8 @@ class JacobianMatrix(LUMatrix):
 
     @async_method
     def _start_calculation(self, vec):
-        M = np.stack([self.collector.dot(self.collector.generate_multi_D_vector(vec, var)) for var in coeff_vars], axis=1)
+        mdv = np.stack([self.collector.generate_multi_D_vector(vec, var) for var in coeff_vars], axis=1)
+        M = self.collector.dot(mdv)
         f = self.collector.eval_fns(vec).get()
         LUMatrix.__init__(self, M, f)
 
