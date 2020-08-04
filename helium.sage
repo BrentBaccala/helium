@@ -500,6 +500,25 @@ def remove_duplicates():
 import multiprocessing
 multiprocessing.current_process().authkey = b"genius"
 
+from multiprocessing import shared_memory
+
+# SharedMemoryManager is a subclass of BaseManager
+#
+# maybe it should be used here instead of BaseManager (don't know)
+#
+# Its __init__ method includes the following comment,
+# which justifies the next block of code:
+#
+# bpo-36867: Ensure the resource_tracker is running before
+# launching the manager process, so that concurrent
+# shared_memory manipulation both in the manager and in the
+# current process does not create two resource_tracker
+# processes.
+
+from multiprocessing import resource_tracker
+resource_tracker.ensure_running()
+
+
 import logging
 logger = multiprocessing.get_logger()
 logger.setLevel(logging.INFO)
@@ -786,7 +805,7 @@ class ExpanderClass(Autoself):
     def start_expand(self, start, stop):
         # sleep for a fraction of a second here to let this method
         # return back to the manager before we begin work
-        time.sleep(0.1)
+        time.sleep(float(0.1))
         expr = expand(sum(islice(ops, start, stop)))
         # Each monomial is of the form 2*c0^2*x^3.  We will split on
         # '*' to get the factors.  The coefficient factors are the
@@ -907,6 +926,32 @@ class LUMatrix(JoinThreads):
     def get(self):
         self.join_threads()
         return self.M
+
+    def get_shm_name(self):
+        r"""
+        Create a shared memory block containing this matrix and return
+        its name.  Calling this function multiple times returns the
+        same name.  We detach from the block before returning and
+        after copying our matrix into the block.  It's the caller's
+        responsibility to unlink the block.
+
+        Could be improved.  The matrix could be created so that it's
+        already in a shared memory block ready to go.  Not sure about
+        the idea of letting the caller unlink the block even though
+        this routine might keep returning the name of an unlinked
+        block.
+        """
+        self.join_threads()
+        if not hasattr(self, 'shm_name'):
+            shm = shared_memory.SharedMemory(create=True, size=self.M.nbytes)
+            shm_M = np.ndarray(self.M.shape, dtype=self.M.dtype, buffer=shm.buf)
+            shm_M[:] = self.M[:]
+            self.shm_name = shm.name
+            shm.close()
+        return self.shm_name
+
+    def get_shm_info(self):
+        return platform.node(), self.get_shm_name(), self.M.shape, self.M.dtype
 
     def shape(self):
         self.join_threads()
@@ -1618,13 +1663,36 @@ def jac_fn(v):
     res = np.vstack(map(lambda x: x.get(), [cc.jac_fns(v) for cc in ccs]))
     return res
 
+def get_nparray(shms):
+    r"""
+    To be used in a map call.  Returns a function that retrieves a
+    numpy array either as the image of shared memory or by actually
+    copying the data.  If a shared memory region was used, append the
+    SharedMemory object to the `shms` list to be closed and unlinked
+    when the array is no longer needed.
+    """
+    def get(obj):
+        (node, shm_name, shape, dtype) = obj.get_shm_info()
+        if node == platform.node():
+            shm = shared_memory.SharedMemory(shm_name)
+            shms.append(shm)
+            a = np.ndarray(shape, dtype=dtype, buffer=shm.buf)
+            return a
+        else:
+            return obj.get()
+    return get
+
 def jac_fns_divSqrtA(v):
     global N,dN,Av,Adenom
+    shms = []
     N = np.hstack(list(map(lambda x: x.get(), [cc.eval_fns(v) for cc in ccs])))
-    dN = np.vstack(list(map(lambda x: x.get(), [cc.jac_fns(v) for cc in ccs])))
+    dN = np.vstack(list(map(get_nparray(shms), [cc.jac_fns(v) for cc in ccs])))
     Av = v * zero_variety_mask
     Adenom = np.linalg.norm(Av)
     res = dN/Adenom - np.outer(N,Av)/(Adenom^3)
+    for shm in shms:
+        shm.close()
+        shm.unlink()
     return res
 
 def sum_of_squares(v):
