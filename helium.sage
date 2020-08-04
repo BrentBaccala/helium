@@ -1671,7 +1671,7 @@ def fns_divSqrtA(v):
     if last_time == 0:
         print(sum_of_squares)
     else:
-        print("{:<30} {:20} sec".format(sum_of_squares, time.time()-last_time))
+        print("{:<30} {:10.2f} sec".format(sum_of_squares, time.time()-last_time))
     last_time = time.time()
     return res/denom
 
@@ -1722,40 +1722,40 @@ def jac_fns_divSqrtA(v):
     global N,dN,Av,Adenom
     N = np.hstack(list(map(lambda x: x.get(), [cc.eval_fns(v) for cc in ccs])))
 
-    #print("jac_fn_divSqrtA")
+    mdv_start_time = time.time()
+
     mdv_shm_size = len(coeff_vars) * ccs[0].ncols() * ccs[0].dtype().itemsize
     mdv_shm = shared_memory.SharedMemory(create=True, size=mdv_shm_size)
     coeff_distribution = [int(i*len(coeff_vars)/len(ccs)) for i in range(len(ccs) + 1)]
-    #print("distribute compute_partial_mdv")
+
     for i in range(len(ccs)):
         ccs[i].compute_partial_mdv(v, mdv_shm.name, coeff_distribution[i], coeff_distribution[i+1])
-    #print("await compute_partial_mdv")
+
     for cc in ccs:
         cc.join_threads()
-    #print("done compute_partial_mdv")
+
+    mdv_time = time.time()
+    print("   Compute multi-D-vectors {:7.2f} sec".format(mdv_time - mdv_start_time))
 
     shms = []
     dN = np.vstack(list(map(get_nparray(shms), [cc.jac_fns(v, mdv_shm.name) for cc in ccs])))
-    #print("done compute dN")
+
+    dN_time = time.time()
+    print("   Compute dN              {:7.2f} sec".format(dN_time - mdv_time))
 
     zero_variety_factors = tuple(v * mask for mask in zero_variety_masks)
     denom = mul(map(np.linalg.norm, zero_variety_factors))
     res = dN/denom - sum(np.outer(N,f)/(denom*np.linalg.norm(f)^2) for f in zero_variety_factors)
 
-    #print("done computing result")
+    jac_time = time.time()
+    print("   Compute Jacobian matrix {:7.2f} sec".format(jac_time - dN_time))
 
     mdv_shm.close()
     mdv_shm.unlink()
-    del mdv_shm
-
-    #print("unlinked mdv_shm")
 
     for shm in shms:
         shm.close()
         shm.unlink()
-    del shms
-
-    #print("unlinked result shms")
 
     return res
 
@@ -1787,7 +1787,7 @@ def minfunc(v):
     if last_time == 0:
         print(res)
     else:
-        print("{:<30} {:20} sec".format(res, time.time()-last_time))
+        print("{:<30} {:10.2f} sec".format(res, time.time()-last_time))
     last_time = time.time()
     return res
 
