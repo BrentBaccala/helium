@@ -155,7 +155,7 @@ def finish_prep(ansatz):
         zero_variety = sum(map(square, Avars))
     elif ansatz == 4:
         Psi = Chi
-        zero_variety = sum(map(square, flatten((Dvars, Fvars, Gvars)))) * sum(map(square, Bvars[1:]))
+        zero_variety = sum(map(square, flatten((Dvars, Fvars, Gvars)))) * sum(map(square, Bvars[1:]))^2
     else:
         raise 'Bad ansatz'
 
@@ -192,14 +192,22 @@ def finish_prep(ansatz):
     # In fact, that's the only kind of zero variety the code currently
     # supports (thus the assert).
 
-    if zero_variety.operator() is add_vararg:
-        zero_variety_vars = tuple(sorted(set(zero_variety.free_variables()).intersection(coeff_vars), key=lambda x:str(x)))
-        assert zero_variety == sum(map(square, zero_variety_vars))
-        zero_variety_masks = (np.array([c in zero_variety_vars for c in coeff_vars]), )
-    else:
-        zero_variety_vars = tuple(tuple(set(f.free_variables()).intersection(coeff_vars)) for f in zero_variety.operands())
-        assert zero_variety == mul((sum(map(square, vars)) for vars in zero_variety_vars))
-        zero_variety_masks = tuple((np.array([c in vars for c in coeff_vars]) for vars in zero_variety_vars))
+    def variety_to_masklist(v):
+
+        if v.operator() is add_vararg:
+            vars = tuple(set(v.free_variables()).intersection(coeff_vars))
+            return (np.array(tuple(c in vars for c in coeff_vars)), )
+        elif v.operator() is operator.pow:
+            return variety_to_masklist(v.operands()[0]) * v.operands()[1]
+        elif v.operator() is mul_vararg:
+            return tuple(flatten(map(variety_to_masklist, v.operands())))
+        else:
+            raise "Unknown operator"
+
+    zero_variety_masks = variety_to_masklist(zero_variety)
+
+    coeff_vec = np.array(coeff_vars)
+    assert zero_variety == mul(sum(map(square, tuple(coeff_vec * mask))) for mask in zero_variety_masks)
 
 def prep_hydrogen(ansatz=1):
     global H, coordinates, radii
