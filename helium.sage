@@ -16,11 +16,11 @@
 # terms.  This gives us a set of polynomial equations in the
 # coefficients that define an algebraic variety in the space generated
 # by the coefficient variables.  We pick a point at random and use a
-# gradient descent algorithm in the hopes of finding an approximate
-# point on that variety.  If successful, we look for algebraic
-# relationships between the point's coordinates, hoping to find the
-# algebraic equations that define the irreducible component that the
-# point lies on.
+# numerical root-finding algorithm in the hopes of finding an
+# approximate point on that variety.  If successful, we look for
+# algebraic relationships between the point's coordinates, hoping to
+# find the algebraic equations that define the irreducible component
+# that the point lies on.
 #
 # A big computational bottleneck is the space complexity of expanding
 # out the differential equation.  To solve this problem, we use
@@ -29,7 +29,7 @@
 # by Brent Baccala
 #
 # first version - August 2019
-# latest version - July 2020
+# latest version - Auguest 2020
 #
 # no rights reserved; you may freely copy, modify, or distribute this
 # program
@@ -39,10 +39,8 @@
 # - compile a better regular expression to parse terms
 # - more easily turn multiprocessing on and off
 # - allow worker processes on different hosts
-# - remove unused code like Rosenfeld-Groebner
-# - allow second-order ODEs in trial form
+# - remove unused code like LU decomposition and the regular expression parser
 # - check collected coefficient polynomials to see if they factor
-# - compute bound on degree of coefficient monomials
 # - automate finding polynomial relations
 # - save checkpoints of optimization iterations
 # - optimize scipy sparse matrix by vector multiplication
