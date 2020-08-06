@@ -1631,6 +1631,15 @@ real_type = np.float64
 
 last_time = 0
 
+def get_eqn(row):
+    for cc in ccs:
+        if row > cc.nrows():
+            row = row - cc.nrows()
+        else:
+            return cc.get_eqn(row)
+    raise IndexError("row out of range")
+
+
 def fn(v):
     r"""
     Evaluate our polynomials at a given coordinate.
