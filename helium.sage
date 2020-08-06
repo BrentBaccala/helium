@@ -2033,6 +2033,9 @@ def make_iv(seed):
     return np.array([random.random() for i in range(nvars)])
 
 
+def printv(v):
+    for pair in zip(coeff_vars, v): print( pair)
+
 def random_numerical(seed=0, limit=None):
 
     iv = make_iv(seed)
@@ -2075,7 +2078,7 @@ def random_numerical(seed=0, limit=None):
         print()
 
         if SciMin.success:
-            for pair in zip(coeff_vars, SciMin.x): print( pair)
+            printv(SciMin.x)
         else:
             print( SciMin.message)
 
@@ -2173,6 +2176,23 @@ if platform.node() == 'samsung' and not 'no_init' in globals():
     multi_init()
     multi_expand()
 
-if platform.node().startswith('c200') and not 'no_init' in globals():
+if platform.node().startswith('c200') and not 'no_init' in globals() and not 'mc' in globals():
     timefunc(prep_helium)
     timefunc(create_polynomial_ring)
+
+if platform.node() == 'c200-1' and not 'mc' in globals():
+    start_manager_process()
+    for i in range(12):
+        start_collector()
+    ccs = mc.get_collectors()
+    for i in range(12):
+        ccs[i].load_matrix('matrix-' + str(i) + '.pickle')
+    for i in range(12):
+        ccs[i].join_threads()
+
+def load_v(fn):
+    f = open(fn, 'rb')
+    up = pickle.Unpickler(f)
+    v = up.load()
+    f.close()
+    return v
