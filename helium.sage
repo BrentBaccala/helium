@@ -1649,7 +1649,7 @@ def fn(v):
     in parallel, then concatenate all of the results together.
     """
 
-    res = np.hstack(map(lambda x: x.get(), [cc.eval_fns(v) for cc in ccs]))
+    res = np.hstack(tuple(map(lambda x: x.get(), [cc.eval_fns(v) for cc in ccs])))
     return res
 
 def fns_divSqrtA(v):
