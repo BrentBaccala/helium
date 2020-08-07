@@ -314,6 +314,75 @@ def extract_ops():
     global ops
     ops = reduced_polynomial_eq.operands()
 
+def expand_poly(p, v):
+    r"""
+    Use the custom _split_poly method of Singular polynomials to expand
+    a polynomial based on variable number `v` (0-based numbering),
+    substituting for even powers of the variable using the global
+    variable of the same name, which is expected to be a square root
+    in the Symbolic Ring, and can therefore be converted into the
+    polynomial ring R if it is raised to an even power.
+
+    DESTROYS INPUT POLYNOMIAL since _split_poly does
+    """
+    splits = p._split_poly(v+1)
+    r = R.gens()[v]
+    result = 0
+    for power,terms in enumerate(splits):
+        podd = power % 2
+        peven = power - podd
+        multiple = R(globals()[str(r)]^peven) * r^podd
+        result += multiple * terms
+        print("Finished expanding power", power, "in", r)
+    return result
+
+def split_poly(p, v):
+    r"""
+    Use the custom _split_poly method of Singular polynomials to split
+    a polynomial based on variable number `v` (0-based numbering),
+    returning a tuple of terms, each containing monomials of
+    a single power in `v`, that when summed together produce
+    the original polynomial.
+
+    CURRENT IMPLEMENTION SPIKES MEMORY FOOTPRINT (not quite double, though)
+
+    DESTROYS INPUT POLYNOMIAL since _split_poly does
+    """
+    splits = p._split_poly(v+1)
+    r = R.gens()[v]
+    return tuple(terms*r^power if terms else 0 for power,terms in enumerate(splits))
+
+def dump_poly(p, fn):
+    r"""
+    Dump a polynomial to a file using 'fast' pickling option
+    to avoid excess memory consumption.
+    """
+    f = open(fn, 'wb')
+    pickler = pickle.Pickler(f)
+    pickler.fast = True
+    pickler.dump(p)
+    f.close()
+
+def split_and_dump(lst, v, base_name, target_size):
+    r"""
+    Dump a list of terms (`lst`) to a set of pickle files starting
+    with `base_name`, based on an estimate of expanding `v` to a
+    maximum of `target_size` terms in each file,
+
+    If any of the terms required splitting, it is done destructively
+    (to prevent memory exhaustion) and the original polynomial is
+    replaced by a list of its split-up components.
+    """
+    for power, poly in enumerate(lst):
+        num_terms = sum(1 for _ in poly)
+        num_partitions = ceil(sum(1 for _ in R(v^(2*floor(power/2)))) * num_terms / target_size)
+        if num_partitions > 1:
+            partitions = poly._split_poly_evenly(num_partitions)
+            for partnum, part in enumerate(partitions):
+                dump_poly(part, '{}-{}-{}.pickle'.format(base_name, power, partnum))
+            lst[power] = partitions
+        else:
+            dump_poly(poly, '{}-{}.pickle'.format(base_name, power))
 
 import time
 
