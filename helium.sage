@@ -2189,7 +2189,7 @@ if platform.node().startswith('c200') and not 'no_init' in globals() and not 'mc
     timefunc(prep_helium)
     timefunc(create_polynomial_ring)
 
-if platform.node() == 'c200-1' and not 'mc' in globals():
+if platform.node() == 'c200-1' and not 'no_init' in globals() and not 'mc' in globals():
     start_manager_process()
     for i in range(12):
         start_collector()
