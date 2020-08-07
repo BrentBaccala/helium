@@ -79,6 +79,9 @@ use_tcpip_multiprocessing = False
 
 import platform
 import glob
+import psutil
+
+current_process = psutil.Process(os.getpid())
 
 from itertools import *
 import scipy.optimize
@@ -378,6 +381,47 @@ def split_and_dump(p, v, base_name, target_size):
                 dump_fast((r^power, part), '{}-{}-{}.pickle'.format(base_name, power, partnum))
         else:
             dump_fast((r^power, terms), '{}-{}.pickle'.format(base_name, power))
+
+def expand_file_to_file(infn, outfn):
+    f = open(infn, 'rb')
+    # If the input pickle wasn't dumped with the 'fast' option, then
+    # it'd make sense to allocate a dedicated Unpickler here, so that
+    # we could delete it when we're done and drop the memory
+    # references to the memoized sub-objects.  Since the code is built
+    # to have dumped using 'fast', I don't do that here.
+    (monomial, poly) = pickle.load(f)
+    f.close()
+
+    exps = tuple(monomial.dict().keys())
+    assert len(exps) == 1
+    nzps = exps[0].nonzero_positions()
+    assert len(nzps) <= 1
+
+    if len(nzps) == 0:
+        dump_fast(poly, outfn)
+        print('Current RSS: {:6.1f} GB'.format(float(current_process.memory_info().rss/(2^30))))
+    else:
+        v = nzps[0]
+        power = exps[0][v]
+        r = R.gens()[v]
+        assert r^power == monomial
+
+        podd = power % 2
+        peven = power - podd
+        multiple = R(globals()[str(r)]^peven) * r^podd
+        result = multiple * poly
+
+        dump_fast(result, outfn)
+
+        print('Current RSS: {:6.1f} GB'.format(float(current_process.memory_info().rss/(2^30))))
+
+def expand_fileset(in_prefix, out_prefix):
+    for infn in sorted(glob.glob(in_prefix + '*.pickle')):
+        (begin, end) = infn.split(in_prefix, 1)
+        assert begin == ""
+        outfn = out_prefix + end
+        print("Expanding", infn, "to", outfn)
+        expand_file_to_file(infn, outfn)
 
 import time
 
