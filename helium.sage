@@ -1482,6 +1482,7 @@ class CollectorClass(Autoself):
         for fn in sorted(glob.glob(globstr)):
             print("Loading", fn)
             timefunc(self.load_from_pickle, fn, section, total_sections)
+        print('Current RSS: {:6.1f} GB'.format(float(current_process.memory_info().rss/(2^30))))
         print("Converting to CSR")
         self.M = sp_unique(self.dok, axis=0, new_format='csr')
         self.dok = None
