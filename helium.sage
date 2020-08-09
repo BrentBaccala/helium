@@ -195,7 +195,9 @@ def finish_prep(ansatz):
 
     def variety_to_masklist(v):
 
-        if v.operator() is add_vararg:
+        if v == 1:
+            return ()
+        elif v.operator() is add_vararg:
             vars = tuple(set(v.free_variables()).intersection(coeff_vars))
             return (np.array(tuple(c in vars for c in coeff_vars)), )
         elif v.operator() is operator.pow:
