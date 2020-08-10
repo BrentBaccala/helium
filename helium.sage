@@ -58,7 +58,11 @@ use_scipy_minimize = False
 
 use_scipy_root = True
 
-# If neither of the last two options are True, we use my (first)
+# divide by an exponential instead of a norm
+
+use_divExp = True
+
+# If neither of the use_scipy options are True, we use my (first)
 # custom root finding algorithm, based on the Numerical Recipes text.
 # We can either do an exact line search by fitting to a rational
 # function, use the scipy built-in line search, or default to the NR
@@ -1801,6 +1805,36 @@ def fns_divSqrtA(v):
     last_time = time.time()
     return res/denom
 
+def fns_divExpA(v):
+    r"""
+    The vector function we're trying to minimize: the polynomials that
+    define the solution variety, divided by (1-exp(-A)), where A is
+    the `zero_variety` we're trying to avoid.
+    """
+
+    # Save a copy of vector to aid in stopping and restarting the
+    # calculation.  An explicit call to the copy method is required if
+    # we're using the Fortran minpack code (i.e, scipy's optimize
+    # package) because in that case, 'v' is only a pointer to a
+    # Fortran array that gets deallocated once the Fortran code exits.
+    # (I think - the copy's definitely needed, though)
+    global last_v
+    last_v = v.copy()
+
+    res = np.hstack(list(map(lambda x: x.get(), [cc.eval_fns(v) for cc in ccs])))
+
+    sqrtA = mul(map(np.linalg.norm, (v * mask for mask in zero_variety_masks)))
+    denom = 1 - math.exp(- sqrtA*sqrtA)
+
+    global last_time
+    sum_of_squares = sum(square(res/denom))
+    if last_time == 0:
+        print(sum_of_squares)
+    else:
+        print("{:<30} {:10.2f} sec".format(sum_of_squares, time.time()-last_time))
+    last_time = time.time()
+    return res/denom
+
 def jac_fn(v):
     r"""
     Evaluate the Jacobian matrix (the matrix of first-order
@@ -1872,6 +1906,49 @@ def jac_fns_divSqrtA(v):
     zero_variety_factors = tuple(v * mask for mask in zero_variety_masks)
     denom = mul(map(np.linalg.norm, zero_variety_factors))
     res = dN/denom - sum(np.outer(N,f)/(denom*np.linalg.norm(f)^2) for f in zero_variety_factors)
+
+    jac_time = time.time()
+    print("   Compute Jacobian matrix {:7.2f} sec".format(jac_time - dN_time))
+
+    mdv_shm.close()
+    mdv_shm.unlink()
+
+    for shm in shms:
+        shm.close()
+        shm.unlink()
+
+    return res
+
+def jac_fns_divExpA(v):
+    global N,dN,Av,Adenom
+    N = np.hstack(list(map(lambda x: x.get(), [cc.eval_fns(v) for cc in ccs])))
+
+    mdv_start_time = time.time()
+
+    mdv_shm_size = len(coeff_vars) * ccs[0].ncols() * ccs[0].dtype().itemsize
+    mdv_shm = shared_memory.SharedMemory(create=True, size=mdv_shm_size)
+    coeff_distribution = [int(i*len(coeff_vars)/len(ccs)) for i in range(len(ccs) + 1)]
+
+    for i in range(len(ccs)):
+        ccs[i].compute_partial_mdv(v, mdv_shm.name, coeff_distribution[i], coeff_distribution[i+1])
+
+    for cc in ccs:
+        cc.join_threads()
+
+    mdv_time = time.time()
+    print("   Compute multi-D-vectors {:7.2f} sec".format(mdv_time - mdv_start_time))
+
+    shms = []
+    dN = np.vstack(list(map(get_nparray(shms), [cc.jac_fns(v, mdv_shm.name) for cc in ccs])))
+
+    dN_time = time.time()
+    print("   Compute dN              {:7.2f} sec".format(dN_time - mdv_time))
+
+    # this block is the only thing that's different between jac_fns_divSqrtA and jac_fns_divExpA
+    zero_variety_factors = tuple(v * mask for mask in zero_variety_masks)
+    sqrtA = mul(map(np.linalg.norm, zero_variety_factors))
+    denom = 1 - math.exp(- sqrtA*sqrtA)
+    res = dN/denom - 2*math.exp(-sqrtA)/denom^2*sum(np.outer(N,f)*sqrtA^2/np.linalg.norm(f)^2 for f in zero_variety_factors)
 
     jac_time = time.time()
     print("   Compute Jacobian matrix {:7.2f} sec".format(jac_time - dN_time))
@@ -2192,7 +2269,10 @@ def random_numerical(seed=0, limit=None):
         # 'lm' uses a QR factorization of the Jacobian, then the Levenberg–Marquardt line search algorithm
         # the others uses various approximations to the Jacobian
 
-        SciMin = scipy.optimize.root(fns_divSqrtA, iv, jac=jac_fns_divSqrtA, method='lm')
+        if use_divExp:
+            SciMin = scipy.optimize.root(fns_divExpA, iv, jac=jac_fns_divExpA, method='lm')
+        else:
+            SciMin = scipy.optimize.root(fns_divSqrtA, iv, jac=jac_fns_divSqrtA, method='lm')
 
         print()
         print()
