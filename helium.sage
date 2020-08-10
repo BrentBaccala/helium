@@ -160,7 +160,7 @@ def finish_prep(ansatz):
         zero_variety = sum(map(square, Avars))
     elif ansatz == 4:
         Psi = Chi
-        zero_variety = sum(map(square, flatten((Dvars, Fvars, Gvars)))) * sum(map(square, Bvars[1:]))^2
+        zero_variety = sum(map(square, flatten((Cvars, Dvars, Fvars, Gvars)))) * sum(map(square, flatten((Bvars[1:], Cvars))))
     else:
         raise 'Bad ansatz'
 
