@@ -50,3 +50,54 @@ ChiG = Chi(Gv)
 bwb = diff(ChiB,v,2).subs({DD[0,0](Chi)(Bv) : Dv/Cv*SR.var('DChi') + Fv/Cv*SR.var('Chi') + Gv/Cv}).subs({DD[0](Chi)(Bv) : SR.var('DChi')})
 
 print(bwb)
+
+# compute diff(Chi(B(v)), v, 2) and substitute for...
+
+# Cv * DD[0,0](Chi)(Bv) == Dv * DD[0](Chi)(Bv) + Fv * Chi(Bv) + Gv
+
+# DD[0](Phi)(B) == Phi
+# DD[0](Xi)(C) == 1/C
+# DD[0,0](Zeta)(B) == F * DD[0](Zeta)(B) + G * Zeta
+#
+# B = trial_polynomial('b', coordinates, radii, 1)
+# C = trial_polynomial('c', coordinates, radii, 1)
+# F = trial_polynomial('f', B, [], 1)
+
+# is DD[0](Phi)(B) the first derivative of Phi, with B as an argument?
+# no, we really want the first derivative of Phi w.r.t B: DD[B](Phi) ?
+
+# DD[B](Phi) == Phi
+# DD[B](Xi) == 1/C
+# DD[B,B](Zeta) == F * DD[B](Zeta) + G * Zeta
+
+# diff(Phi(*coordinates),x1) == DD[0](Phi)(*coordinates)       (currently implemented; True)
+
+# DD[B](Phi) == DD[x1](Phi) * diff(x1, B)
+
+# DD[x1](Phi) == DD[B](Phi) * diff(B, x1)
+
+# DD[x1](Phi(B(*coordinates))) == DD[B](Phi(B(*coordinates))) * diff(B, x1)
+
+# Currently works:
+#
+# sage: diff(Phi(B(*coordinates)),x1)
+# diff(B(x1, y1, z1), x1)*D[0](Phi)(B(x1, y1, z1))
+
+# Doesn't work:
+# sage: diff(Phi(B(*coordinates)),x1).subs({diff(Phi(B(*coordinates)), B(*coordinates)) : Phi(B(*coordinates))})
+# TypeError: argument symb must be a symbol
+
+# Works:
+#
+# sage: diff(Phi(B(*coordinates)),x1).subs({DD[0](Phi)(B(*coordinates)) : Phi(B(*coordinates))})
+# Phi(B(x1, y1, z1))*diff(B(x1, y1, z1), x1)
+
+# Works:
+#
+# sage: trial_B = trial_polynomial('b', coordinates, [], 1)[1]
+# sage: trial_B
+# b1*x1 + b2*y1 + b3*z1 + b0
+# sage: diff(Phi(trial_B), x1)
+# b1*D[0](Phi)(b1*x1 + b2*y1 + b3*z1 + b0)
+# sage: diff(Phi(trial_B), x1).subs({DD[0](Phi)(trial_B) : Phi(trial_B)})
+# b1*Phi(b1*x1 + b2*y1 + b3*z1 + b0)
