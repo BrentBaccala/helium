@@ -111,7 +111,7 @@ r1 = sqrt(x1^2+y1^2+z1^2)
 r2 = sqrt(x2^2+y2^2+z2^2)
 r12 = sqrt((x2-x1)^2 + (y2-y1)^2 + (z2-z1)^2)
 
-SRr_s = (SR.var('r1'), SR.var('r2'), SR.var('r12'))
+SR_radii = (SR.var('r1'), SR.var('r2'), SR.var('r12'))
 
 def trial_polynomial(base, coordinates, radii, degree):
     # cterms are coefficient terms
@@ -315,11 +315,8 @@ def create_eq_a():
 # form (i.e, fully expanded).
 
 def create_polynomial_ring():
-    radii = SR.var('r1,r2,r12')
-    ODE_vars = ('Chi', 'DChi')
-
     global R,F
-    R = PolynomialRing(ZZ, names=tuple(flatten((radii, coeff_vars, coordinates, ODE_vars))))
+    R = PolynomialRing(ZZ, names=tuple(flatten((coeff_vars, coordinates, SR_radii, ODE_vars))))
     F = Frac(R)
 
 def recursive_convert(eq, F):
