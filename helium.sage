@@ -92,6 +92,8 @@ import scipy.optimize
 
 from sage.symbolic.operators import add_vararg, mul_vararg
 
+from sage.rings.polynomial.polydict import ETuple
+
 # from python docs
 def flatten(listOfLists):
     "Flatten one level of nesting"
@@ -1445,6 +1447,53 @@ class CollectorClass(Autoself):
         self.M = sp_unique(self.dok, axis=0, new_format='csr')
         logger.info('convert_to_matrix done')
 
+    def load_from_polynomial(self, poly, section=int(0), total_sections=int(1)):
+        r"""
+        Loads a polynomial and stores it in a sparse matrix.
+
+        The optional "section" arguments allow only a section of the
+        row space to be loaded, to reduce the memory footprint.  The
+        resulting matrices will either have to be stacked together
+        to form a single matrix, or used with code designed to
+        distribute the matrix operations over several machines.
+        """
+
+        assert type(section) == int
+        assert type(total_sections) == int
+
+        polyR = poly.parent()
+        polyR_coeff_vars = tuple(map(polyR, coeff_vars))
+
+        coeff_indices = tuple(i for i in range(len(coeff_vars)) if polyR.gens()[i] in polyR_coeff_vars)
+
+        # To speed the code, require the coefficient variables to be the first set of generators
+        len_coeff_indices = len(coeff_indices)
+        assert coeff_indices == tuple(range(0, len_coeff_indices))
+
+        for mon_tuple, coeff in poly._iter_ETuples():
+
+            # Much slower - use split method if available
+            #coeff_tuple = ETuple([(mon_tuple[i] if i in coeff_indices else 0) for i in all_indices])
+            #row_tuple = ETuple([(mon_tuple[i] if i not in coeff_indices else 0) for i in all_indices])
+
+            (coeff_tuple, row_tuple) = mon_tuple.split(len_coeff_indices - 1)
+
+            if hash(row_tuple) % total_sections == section:
+
+                if row_tuple not in self.rows:
+                    self.rows[row_tuple] = len(self.rows)
+                    self.dok.resize((len(self.rows), len(self.indices)))
+                row = self.rows[row_tuple]
+
+                while coeff_tuple not in self.indices:
+                    self.max_degree += 1
+                    self.indices = {next(pair[1]._iter_ETuples())[0] : pair[0] for pair in enumerate(self.generate_multi_vector(polyR_coeff_vars))}
+                    # self.indices = {list(pair[1].dict().keys())[0] : pair[0] for pair in enumerate(self.generate_multi_vector(coeff_vars))}
+                    self.dok.resize((len(self.rows), len(self.indices)))
+                index = self.indices[coeff_tuple]
+
+                self.dok[row, index] += coeff
+
     def load_from_pickle(self, fn, section=0, total_sections=1):
         r"""
         Loads a polynomial from a pickle file that was dumped using
@@ -1476,8 +1525,6 @@ class CollectorClass(Autoself):
         #all_indices = tuple(range(0,291))
 
         R_coeff_vars = tuple(map(R, coeff_vars))
-
-        from sage.rings.polynomial.polydict import ETuple
 
         class custom_unpickler:
             def __init__(sself, R):
