@@ -131,8 +131,32 @@ var('E')
 def Del(Psi,vars):
     return sum([diff(Psi,v,2) for v in vars])
 
+# Create an operator (DD) that takes derivatives of symbolic functions
+# w.r.t. their arguments, i.e, `DD[0](Phi)(A)` is the derivative of
+# Phi w.r.t. its 0-th argument, `A`.
+#
+# from https://groups.google.com/g/sage-devel/c/xBHw11qUARg/m/0eqj3eUFsFkJ
+# referenced from https://trac.sagemath.org/ticket/17445
+
+from sage.symbolic.operators import FDerivativeOperator
+class Doperator:
+  def __init__(self,vars=None):
+    self.vars= [] if vars is None else vars
+
+  def __call__(self,f):
+    return FDerivativeOperator(f,self.vars)
+
+  def __getitem__(self,i):
+    if isinstance(i,tuple):
+       newvars=self.vars+list(i)
+    else:
+       newvars=self.vars+[i]
+    return Doperator(newvars)
+
+DD=Doperator()
+
 def finish_prep(ansatz):
-    global eq, H, coeff_vars, coordinates, radii
+    global eq, H, coeff_vars, ODE_vars, coordinates, radii
     global zero_variety, zero_variety_masks
 
     (Avars, A) = trial_polynomial('a', coordinates, radii, 1)
@@ -144,45 +168,59 @@ def finish_prep(ansatz):
 
     coeff_vars = (E,) + Avars + Bvars + Cvars + Dvars + Fvars + Gvars
 
-    Phi = function('Phi')(*coordinates)
-    Xi = function('Xi')(*coordinates)
-    Chi = function('Chi')(*coordinates)
-    DChi = function('DChi')(*coordinates)
+    #Phi = function('Phi')(*coordinates)
+    #Xi = function('Xi')(*coordinates)
+    #Chi = function('Chi')(*coordinates)
+    #DChi = function('DChi')(*coordinates)
+
+    SR_function = sage.symbolic.function_factory.function
 
     if ansatz == 1:
-        Psi = A*Phi
+        # Phi is an exponential; Phi = e^B, so diff(Phi,B) = Phi and diff(Phi,v) = diff(B,v)*Phi
+        Phi = SR_function('Phi')
+        Psi = A * Phi(B)
+        pre_subs = {DD[0](Phi)(B) : Phi(B), DD[0,0](Phi)(B) : Phi(B)}
+        post_subs = {Phi(B) : SR.var('Phi')}
+        coeff_vars = (E,) + Avars + Bvars
         zero_variety = sum(map(square, Avars))
     elif ansatz == 2:
+        # Xi is a logarithm; Xi = ln C, so diff(Xi,C) = 1/C and diff(Xi,v) = diff(C,v)/C
+        Xi = SR_function('Xi')
+        Psi = A * Xi(C)
+        pre_subs = {DD[0](Xi)(C) : 1/C, DD[0,0](Xi)(C) : -1/C^2}
+        post_subs = {Xi(C) : SR.var('Xi')}
         Psi = A*Xi
         zero_variety = sum(map(square, Avars))
     elif ansatz == 3:
+        # Chi is a weird second-order mess: C d^2 Chi/dB^2 - D dChi/dB - F Chi - G = 0
+        ODE_vars = ('Chi', 'DChi')
         Psi = A*Chi
         zero_variety = sum(map(square, Avars))
     elif ansatz == 4:
         Psi = Chi
         zero_variety = sum(map(square, flatten((Cvars, Dvars, Fvars, Gvars)))) * sum(map(square, flatten((Bvars[1:], Cvars))))
+    elif ansatz == 5:
+        # A second-order homogeneous ODE: D(B) d^2 Zeta/dB^2 - M(B) dZeta/dB - N(B) Zeta = 0
+        # where D(B), M(B), and N(B) are linear polynomials in B.
+        Zeta = SR_function('Zeta')
+        Psi = Zeta(B)
+        (Dvars, D) = trial_polynomial('d', [B], [], 1)
+        (Mvars, M) = trial_polynomial('m', [B], [], 1)
+        (Nvars, N) = trial_polynomial('n', [B], [], 1)
+
+        coeff_vars = (E,) + Bvars + Dvars + Mvars + Nvars
+
+        pre_subs = {DD[0,0](Zeta)(B) : (M * DD[0](Zeta)(B) + N * Zeta(B)) / D}
+        post_subs = {Zeta(B) : SR.var('Zeta'), DD[0](Zeta)(B) : SR.var('DZeta')}
+        ODE_vars = ('Zeta', 'DZeta')
+
+        zero_variety = 1
     else:
         raise 'Bad ansatz'
 
     eq = H(Psi) - E*Psi
 
-    # This is where we set the differential relationships that define
-    # how Phi, Xi, and Chi differentiate.
-
-    # Phi is an exponential; Phi = e^B, so diff(Phi,B) = Phi and diff(Phi,v) = diff(B,v)*Phi
-    # Xi is a logarithm; Xi = ln C, so diff(Xi,C) = 1/C and diff(Xi,v) = diff(C,v)/C
-    # Chi is a second-order ODE: C d^2 Chi/dB^2 - D dChi/dB - F Chi - G = 0
-
-    dict1 = {diff(Phi,v): diff(B,v)*Phi for v in coordinates}
-    dict1.update({diff(Xi,v): diff(C,v)/C for v in coordinates})
-    dict1.update({diff(Chi,v): diff(B,v)*DChi for v in coordinates})
-
-    dict2 = {diff(Phi,v,2): diff(dict1[diff(Phi,v)],v) for v in coordinates}
-    dict2.update({diff(Xi,v,2): diff(dict1[diff(Xi,v)],v) for v in coordinates})
-    dict2.update({diff(Chi,v,2): diff(B,v,2)*DChi + diff(B,v)^2*(D/C*DChi+F/C*Chi+G/C) for v in coordinates})
-
-    # replace Phi(x1,y1,z1) with Phi to reduce ginac's memory utilization
-    eq = eq.subs(dict2).subs(dict1).subs({Phi: SR.var('Phi'), Xi: SR.var('Xi'), Chi: SR.var('Chi'), DChi: SR.var('DChi')})
+    eq = eq.subs(pre_subs).subs(post_subs)
 
     # reduce coeff_vars to those which actually appear in the equation
     coeff_vars = tuple(sorted(set(eq.free_variables()).intersection(coeff_vars), key=lambda x:str(x)))
