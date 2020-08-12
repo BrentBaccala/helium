@@ -267,7 +267,7 @@ def prep_hydrogen(ansatz=1):
 
     finish_prep(ansatz=ansatz)
 
-def prep_helium(ansatz=5):
+def prep_helium(ansatz=6):
     global H, coordinates, radii
 
     coordinates = (x1,y1,z1, x2,y2,z2)
