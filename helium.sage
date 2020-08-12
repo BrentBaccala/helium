@@ -170,40 +170,65 @@ def finish_prep(ansatz):
 
     coeff_vars = (E,) + Avars + Bvars + Cvars + Dvars + Fvars + Gvars
 
-    #Phi = function('Phi')(*coordinates)
-    #Xi = function('Xi')(*coordinates)
-    #Chi = function('Chi')(*coordinates)
-    #DChi = function('DChi')(*coordinates)
-
     SR_function = sage.symbolic.function_factory.function
 
     if ansatz == 1:
         # Phi is an exponential; Phi = e^B, so diff(Phi,B) = Phi and diff(Phi,v) = diff(B,v)*Phi
+        #
+        # An earlier verion of this ansatz was used extensively for testing Hydrogen
         Phi = SR_function('Phi')
         Psi = A * Phi(B)
         pre_subs = {DD[0](Phi)(B) : Phi(B), DD[0,0](Phi)(B) : Phi(B)}
         post_subs = {Phi(B) : SR.var('Phi')}
         coeff_vars = (E,) + Avars + Bvars
+        ODE_vars = ('Phi')
         zero_variety = sum(map(square, Avars))
     elif ansatz == 2:
         # Xi is a logarithm; Xi = ln C, so diff(Xi,C) = 1/C and diff(Xi,v) = diff(C,v)/C
+        #
+        # I've used this ansatz very little.
         Xi = SR_function('Xi')
         Psi = A * Xi(C)
         pre_subs = {DD[0](Xi)(C) : 1/C, DD[0,0](Xi)(C) : -1/C^2}
         post_subs = {Xi(C) : SR.var('Xi')}
         Psi = A*Xi
+        ODE_vars = ('Xi')
         zero_variety = sum(map(square, Avars))
     elif ansatz == 3:
         # Chi is a weird second-order mess: C d^2 Chi/dB^2 - D dChi/dB - F Chi - G = 0
+        #
+        # I declared Chi to be a function of B, but in retrospect, it's also a
+        # function of C, D, F, and G, none of which are (necessarily) functions of B
+        #
+        # I've used this ansatz very little; ansatz 4 is closely related
+        Chi = SR_function('Chi')
+        Psi = A*Chi(B)
+
+        coeff_vars = (E,) + Avars + Bvars + Cvars + Dvars + Fvars + Gvars
+
+        pre_subs = {DD[0,0](Chi)(B) : (D/C * DD[0](Chi)(B) + F/C * Chi(B)) + G/C}
+        post_subs = {Chi(B) : SR.var('Chi'), DD[0](Chi)(B) : SR.var('DChi')}
         ODE_vars = ('Chi', 'DChi')
-        Psi = A*Chi
+
         zero_variety = sum(map(square, Avars))
     elif ansatz == 4:
-        Psi = Chi
+        # Like ansatz 3, but without the polynomial A as a factor, and thus simplier
+        #
+        # This ansatz is fairly well explored, but in an earlier version of the code
+        # (pre-edbaa8 and pre-e74ded) whose ring and class structures aren't compatible.
+        Chi = SR_function('Chi')
+        Psi = Chi(B)
+
+        coeff_vars = (E,) + Bvars + Cvars + Dvars + Fvars + Gvars
+
+        pre_subs = {DD[0,0](Chi)(B) : (D/C * DD[0](Chi)(B) + F/C * Chi(B)) + G/C}
+        post_subs = {Chi(B) : SR.var('Chi'), DD[0](Chi)(B) : SR.var('DChi')}
+        ODE_vars = ('Chi', 'DChi')
+
         zero_variety = sum(map(square, flatten((Cvars, Dvars, Fvars, Gvars)))) * sum(map(square, flatten((Bvars[1:], Cvars))))
     elif ansatz == 5:
         # A second-order homogeneous ODE: D(B) d^2 Zeta/dB^2 - M(B) dZeta/dB - N(B) Zeta = 0
-        # where D(B), M(B), and N(B) are linear polynomials in B.
+        # where D(B), M(B), and N(B) are linear polynomials in B, which is itself a linear polynomial
         Zeta = SR_function('Zeta')
         Psi = Zeta(B)
         (Dvars, D) = trial_polynomial('d', [B], [], 1)
@@ -214,6 +239,22 @@ def finish_prep(ansatz):
 
         pre_subs = {DD[0,0](Zeta)(B) : (M * DD[0](Zeta)(B) + N * Zeta(B)) / D}
         post_subs = {Zeta(B) : SR.var('Zeta'), DD[0](Zeta)(B) : SR.var('DZeta')}
+        ODE_vars = ('Zeta', 'DZeta')
+
+        zero_variety = sum(map(square, flatten((Dvars, Mvars, Nvars)))) * sum(map(square, flatten((Bvars[1:], Dvars))))
+    elif ansatz == 6:
+        # A second-order homogeneous ODE: D(B/C) d^2 Zeta/dB^2 - M(B/C) dZeta/dB - N(B/C) Zeta = 0
+        # where D(B/C), M(B/C), and N(B/C) are linear polynomials in B/C, a first-degree rational function
+        Zeta = SR_function('Zeta')
+        Psi = Zeta(B/C)
+        (Dvars, D) = trial_polynomial('d', [B/C], [], 1)
+        (Mvars, M) = trial_polynomial('m', [B/C], [], 1)
+        (Nvars, N) = trial_polynomial('n', [B/C], [], 1)
+
+        coeff_vars = (E,) + Bvars + Cvars + Dvars + Mvars + Nvars
+
+        pre_subs = {DD[0,0](Zeta)(B/C) : (M * DD[0](Zeta)(B/C) + N * Zeta(B/C)) / D}
+        post_subs = {Zeta(B/C) : SR.var('Zeta'), DD[0](Zeta)(B/C) : SR.var('DZeta')}
         ODE_vars = ('Zeta', 'DZeta')
 
         zero_variety = 1
