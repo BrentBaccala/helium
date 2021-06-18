@@ -181,7 +181,7 @@ def finish_prep(ansatz):
         pre_subs = {DD[0](Phi)(B) : Phi(B), DD[0,0](Phi)(B) : Phi(B)}
         post_subs = {Phi(B) : SR.var('Phi')}
         coeff_vars = (E,) + Avars + Bvars
-        ODE_vars = ('Phi')
+        ODE_vars = ('Phi', )
         zero_variety = sum(map(square, Avars))
     elif ansatz == 2:
         # Xi is a logarithm; Xi = ln C, so diff(Xi,C) = 1/C and diff(Xi,v) = diff(C,v)/C
@@ -192,7 +192,7 @@ def finish_prep(ansatz):
         pre_subs = {DD[0](Xi)(C) : 1/C, DD[0,0](Xi)(C) : -1/C^2}
         post_subs = {Xi(C) : SR.var('Xi')}
         Psi = A*Xi
-        ODE_vars = ('Xi')
+        ODE_vars = ('Xi', )
         zero_variety = sum(map(square, Avars))
     elif ansatz == 3:
         # Chi is a weird second-order mess: C d^2 Chi/dB^2 - D dChi/dB - F Chi - G = 0
@@ -359,7 +359,7 @@ def create_eq_a():
 
 def create_polynomial_ring():
     global R,F
-    R = PolynomialRing(ZZ, names=tuple(flatten((coeff_vars, coordinates, SR_radii, ODE_vars))))
+    R = PolynomialRing(ZZ, names=tuple(flatten((coeff_vars, coordinates, SR_radii, ODE_vars))), implementation="FLINT")
     F = Frac(R)
 
 def recursive_convert(eq, F):
