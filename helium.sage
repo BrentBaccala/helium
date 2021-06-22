@@ -352,6 +352,17 @@ def create_eq_a():
     # next, convert all of the roots in the equation to use the r-variables
     eq_a = roots_to_rs(eq)
 
+# Print "equation A" in the form parsed by GNU EMACS's outline mode.
+# This function is only used for debugging.
+
+def analyze_eq_a(eq, depth=1, print_depth=2, file=sys.stdout):
+    if eq.operator():
+       print('*' * depth, eq.operator(), len(eq.operands()), file=file)
+       if depth >= print_depth: print(eq, file=file)
+       for o in eq.operands():
+           analyze_eq_a(o, depth+1, print_depth=print_depth, file=file)
+
+
 # Create a polynomial ring to hold our expressions.
 #
 # Sage does this using Singular, which stores polynomials internally in standard
