@@ -367,10 +367,20 @@ def analyze_eq_a(eq, depth=1, print_depth=2, file=sys.stdout):
 #
 # Sage does this using Singular, which stores polynomials internally in standard
 # form (i.e, fully expanded).
+#
+# The variables are listed from most significant to least significant.  We use lexicographic
+# ordering to group terms together conveniently.
+#
+# I want the SR_radii to be first in the ordering, because they're going to be substituted for,
+# so making them the most significant variables groups like SR_radii terms together.
+#
+# I want the coeff_vars to be last in the ordering, because the system we're going to solve
+# will be grouped by coordinates and ODE_vars.
 
 def create_polynomial_ring():
     global R,F
-    R = PolynomialRing(ZZ, names=tuple(flatten((coeff_vars, coordinates, SR_radii, ODE_vars))), implementation="FLINT")
+    R = PolynomialRing(ZZ, names=tuple(flatten((SR_radii, ODE_vars, coordinates, coeff_vars))),
+                      implementation="FLINT", order='lex')
     F = Frac(R)
 
 def recursive_convert(eq, F):
