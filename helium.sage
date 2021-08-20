@@ -258,6 +258,24 @@ def finish_prep(ansatz):
         ODE_vars = ('Zeta', 'DZeta')
 
         zero_variety = 1
+    elif ansatz == 7:
+        # A second-order homogeneous ODE: D(B/C) d^2 Zeta/dB^2 - M(B/C) dZeta/dB - N(B/C) Zeta = 0
+        # where D(B/C), M(B/C), and N(B/C) are second-degree polynomials in B/C, a second-degree rational function
+        Zeta = SR_function('Zeta')
+        (Bvars, B) = trial_polynomial('b', coordinates, radii, 2)
+        (Cvars, C) = trial_polynomial('c', coordinates, radii, 2)
+        Psi = Zeta(B/C)
+        (Dvars, D) = trial_polynomial('d', [B/C], [], 2)
+        (Mvars, M) = trial_polynomial('m', [B/C], [], 2)
+        (Nvars, N) = trial_polynomial('n', [B/C], [], 2)
+
+        coeff_vars = (E,) + Bvars + Cvars + Dvars + Mvars + Nvars
+
+        pre_subs = {DD[0,0](Zeta)(B/C) : (M * DD[0](Zeta)(B/C) + N * Zeta(B/C)) / D}
+        post_subs = {Zeta(B/C) : SR.var('Zeta'), DD[0](Zeta)(B/C) : SR.var('DZeta')}
+        ODE_vars = ('Zeta', 'DZeta')
+
+        zero_variety = 1
     else:
         raise 'Bad ansatz'
 
