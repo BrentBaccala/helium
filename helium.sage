@@ -3,6 +3,17 @@
 # Python code to search for solutions of Hydrogen and Helium
 # non-relativistic time-invariant Schrodinger equation
 #
+# INTERACTIVE USAGE:
+#
+# no_init=True
+# load('helium.sage')
+# prep_hydrogen()
+# multi_init()
+# multi_expand()
+# random_numerical()
+#
+# This will produce a solution to the hydrogen atom.
+#
 # ALGORITHM:
 #
 # We start with a trial solution with free coefficients (coeff_vars)
