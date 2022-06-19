@@ -384,7 +384,9 @@ def analyze_eq_a(eq, depth=1, print_depth=2, file=sys.stdout):
 # Create a polynomial ring to hold our expressions.
 #
 # Sage does this using Singular, which stores polynomials internally in standard
-# form (i.e, fully expanded).
+# form (i.e, fully expanded).  Singular is the default, while FLINT is available
+# as an option, which I tend to use because I've worked on the FLINT code and
+# found it more accessible than Singular.
 #
 # The variables are listed from most significant to least significant.  We use lexicographic
 # ordering to group terms together conveniently.
@@ -394,11 +396,21 @@ def analyze_eq_a(eq, depth=1, print_depth=2, file=sys.stdout):
 #
 # I want the coeff_vars to be last in the ordering, because the system we're going to solve
 # will be grouped by coordinates and ODE_vars.
+#
+# 'encoding' is an option that I've added to the Sage/FLINT implementation to describe
+# how the polynomial terms will be written out to disk.  dexlex64(N) encodes N variables
+# using 64-bit deglex encoding (see M. Gastineau, Storage of Multivariate Polynomials,
+# Advanced School on Specific Algebraic Manipulators, 2007); sint64 encodes the coefficient
+# as a signed 64-bit integer, so this encoding encodes each polynomial term using
+# three 64-bit words.  If things don't fit, it throws an exception.
 
 def create_polynomial_ring():
     global R,F
+    num_rvars = len(SR_radii) + len(ODE_vars) + len(coordinates)
+    num_cvars = len(coeff_vars)
+    encoding = 'deglex64({}),deglex64({}),sint64'.format(num_rvars, num_cvars)
     R = PolynomialRing(ZZ, names=tuple(flatten((SR_radii, ODE_vars, coordinates, coeff_vars))),
-                      implementation="FLINT", order='lex')
+                      implementation="FLINT", order='lex', encoding=encoding)
     F = Frac(R)
 
 def recursive_convert(eq, F):
@@ -1430,6 +1442,8 @@ class CollectorClass(Autoself):
     # Given a vector, generate a multi-vector of the vector itself,
     # then all the biproducts of the vector elements, then all the
     # triproducts of the vector elements, etc.
+    #
+    # Graded lexicographic order
     #
     # generate_multi_vector([a,b,c])
     #   -> [a,b,c,a^2,a*b,a*c,b^2,b*c,c^2,a^3,a^2*b,a^2*c,a*b^2,a*b*c,a*c^2,a*b^2,b^2*c,b*c^2,c^3]
@@ -2591,3 +2605,50 @@ def decode_deglex(ind, len_exps):
         d -= this_exp
     exps.append(d)
     return exps
+
+# Function to compress files being written out uncompressed by the substitution code
+
+import os
+import time
+import threading
+import subprocess
+
+compressor_limit = 2
+compressors_available = threading.Semaphore(compressor_limit)
+compressors_running = ['radii-526340.out']
+compressors_keep_running = True
+
+def compress_file(fn):
+    subprocess.run(['gzip', fn])
+    compressors_available.release()
+
+def run_compressors():
+    while compressors_keep_running:
+        candidates = [(os.stat(fn).st_ctime, fn) for fn in os.listdir() if fn.startswith('radii-') and fn.endswith('.out') and fn not in compressors_running]
+        if len(candidates) > 12:
+            candidates.sort()
+            next_candidate = candidates[0][1]
+            compressors_available.acquire()
+            print("Compressing", next_candidate, "file size", os.stat(next_candidate).st_size, file=sys.stderr)
+            compressors_running.append(next_candidate)
+            th = threading.Thread(target = compress_file, args = (next_candidate,))
+            th.start()
+        else:
+            print('Sleeping 60 seconds', file=sys.stderr)
+            time.sleep(60)
+
+def run_compressors_bg():
+    global main_compressor_th
+    main_compressor_th = threading.Thread(target = run_compressors)
+    main_compressor_th.start()
+
+# Function to run functions in background.
+#
+# They need to release the GIL for this to be useful.
+
+bg_threads = []
+
+def bg(*args, **kwargs):
+    th = threading.Thread(target=args[0], args=args[1:], kwargs=kwargs)
+    bg_threads.append(th)
+    th.start()
