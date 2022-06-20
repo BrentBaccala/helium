@@ -3,6 +3,17 @@
 # Python code to search for solutions of Hydrogen and Helium
 # non-relativistic time-invariant Schrodinger equation
 #
+# INTERACTIVE USAGE:
+#
+# no_init=True
+# load('helium.sage')
+# prep_hydrogen()
+# multi_init()
+# multi_expand()
+# random_numerical()
+#
+# This will produce a solution to the hydrogen atom.
+#
 # ALGORITHM:
 #
 # We start with a trial solution with free coefficients (coeff_vars)
@@ -321,10 +332,25 @@ def prep_hydrogen(ansatz=1):
     coordinates = (x1,y1,z1)
     roots = (r1,)
 
-    def H(Psi):
-        return - 1/2 * Del(Psi,[x1,y1,z1]) - (1/r1)*Psi
+    # According to Nakatsuji, we can write the helium Hamiltonian
+    # for S states (no angular momemtum) in a r1/r2/r12 coordinate system.
 
-    finish_prep(ansatz=ansatz)
+    if ansatz < 0:
+        # this locally changes variables and still globally uses x1,y1,z1
+        (R1, R2, R12) = (x1,y1,z1)
+        def H(Psi):
+            return - 1/2 *sum(diff(Psi, Ri, 2) + 2/Ri*diff(Psi,Ri) for Ri in [R1,R2])  \
+                   - (diff(Psi, R12, 2) + 2/R12*diff(Psi,R12))                          \
+                   - (R1^2 + R12^2 - R2^2)/(2*R1*R12) * diff(diff(Psi,R12),R1)         \
+                   - (R2^2 + R12^2 - R1^2)/(2*R2*R12) * diff(diff(Psi,R12),R2)         \
+                   - sum(2/Ri for Ri in [R1,R2])*Psi + 1/R12*Psi
+
+    else:
+
+        def H(Psi):
+            return - 1/2 * Del(Psi,[x1,y1,z1]) - (1/r1)*Psi
+
+    finish_prep(ansatz=abs(ansatz))
 
 def prep_helium(ansatz=6):
     global H, coordinates, roots
