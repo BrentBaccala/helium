@@ -107,22 +107,18 @@ def powerset(iterable):
 
 
 
-var('x1,y1,z1,x2,y2,z2')
-
-r1 = sqrt(x1^2+y1^2+z1^2)
-r2 = sqrt(x2^2+y2^2+z2^2)
-r12 = sqrt((x2-x1)^2 + (y2-y1)^2 + (z2-z1)^2)
-
 SR_radii = (SR.var('r1'), SR.var('r2'), SR.var('r12'))
 
-def trial_polynomial(base, coordinates, radii, degree):
+def trial_polynomial(base, coordinates, roots, degree):
     # cterms are coefficient terms
     # rterms are radius terms
     cterms = flatten([combinations_with_replacement(coordinates, d) for d in range(degree+1)])
     # use this 'terms' for real
-    terms = list(map(mul, (product(map(mul, cterms), map(mul, powerset(radii))))))
+    # the 'roots' are assumed to be square roots, so all we need is their powerset;
+    #    any higher powers will be replaced with expansions
+    terms = list(map(mul, (product(map(mul, cterms), map(mul, powerset(roots))))))
     # use this 'terms' for testing
-    # terms = list(map(mul,cterms)) + list(radii)
+    # terms = list(map(mul,cterms)) + list(roots)
     coefficients = tuple(var(base+str(c)) for c in range(len(terms)))
     poly = sum([var(base+str(c))*v for c,v in enumerate(terms)])
     return (coefficients, poly)
@@ -158,15 +154,15 @@ class Doperator:
 DD=Doperator()
 
 def finish_prep(ansatz):
-    global eq, H, coeff_vars, ODE_vars, coordinates, radii
+    global eq, H, coeff_vars, ODE_vars, coordinates, roots
     global zero_variety, zero_variety_masks
 
-    (Avars, A) = trial_polynomial('a', coordinates, radii, 1)
-    (Bvars, B) = trial_polynomial('b', coordinates, radii, 1)
-    (Cvars, C) = trial_polynomial('c', coordinates, radii, 1)
-    (Dvars, D) = trial_polynomial('d', coordinates, radii, 1)
-    (Fvars, F) = trial_polynomial('f', coordinates, radii, 1)
-    (Gvars, G) = trial_polynomial('g', coordinates, radii, 1)
+    (Avars, A) = trial_polynomial('a', coordinates, roots, 1)
+    (Bvars, B) = trial_polynomial('b', coordinates, roots, 1)
+    (Cvars, C) = trial_polynomial('c', coordinates, roots, 1)
+    (Dvars, D) = trial_polynomial('d', coordinates, roots, 1)
+    (Fvars, F) = trial_polynomial('f', coordinates, roots, 1)
+    (Gvars, G) = trial_polynomial('g', coordinates, roots, 1)
 
     coeff_vars = (E,) + Avars + Bvars + Cvars + Dvars + Fvars + Gvars
 
@@ -262,8 +258,8 @@ def finish_prep(ansatz):
         # A second-order homogeneous ODE: D(B/C) d^2 Zeta/dB^2 - M(B/C) dZeta/dB - N(B/C) Zeta = 0
         # where D(B/C), M(B/C), and N(B/C) are second-degree polynomials in B/C, a second-degree rational function
         Zeta = SR_function('Zeta')
-        (Bvars, B) = trial_polynomial('b', coordinates, radii, 2)
-        (Cvars, C) = trial_polynomial('c', coordinates, radii, 2)
+        (Bvars, B) = trial_polynomial('b', coordinates, roots, 2)
+        (Cvars, C) = trial_polynomial('c', coordinates, roots, 2)
         Psi = Zeta(B/C)
         (Dvars, D) = trial_polynomial('d', [B/C], [], 2)
         (Mvars, M) = trial_polynomial('m', [B/C], [], 2)
@@ -316,10 +312,14 @@ def finish_prep(ansatz):
     assert zero_variety == mul(sum(map(square, tuple(coeff_vec * mask))) for mask in zero_variety_masks)
 
 def prep_hydrogen(ansatz=1):
-    global H, coordinates, radii
+    global r1, H, coordinates, roots
+
+    var('x1,y1,z1')
+
+    r1 = sqrt(x1^2+y1^2+z1^2)
 
     coordinates = (x1,y1,z1)
-    radii = (r1,)
+    roots = (r1,)
 
     def H(Psi):
         return - 1/2 * Del(Psi,[x1,y1,z1]) - (1/r1)*Psi
@@ -327,13 +327,38 @@ def prep_hydrogen(ansatz=1):
     finish_prep(ansatz=ansatz)
 
 def prep_helium(ansatz=6):
-    global H, coordinates, radii
+    global H, coordinates, roots
 
-    coordinates = (x1,y1,z1, x2,y2,z2)
-    radii = (r1,r2,r12)
+    if ansatz <= 7:
 
-    def H(Psi):
-        return - 1/2 * Del(Psi,[x1,y1,z1]) - 1/2 * Del(Psi,[x2,y2,z2]) - (2/r1)*Psi - (2/r2)*Psi + (1/r12)*Psi
+        var('x1,y1,z1,x2,y2,z2')
+
+        global r1, r2, r12
+        r1 = sqrt(x1^2+y1^2+z1^2)
+        r2 = sqrt(x2^2+y2^2+z2^2)
+        r12 = sqrt((x2-x1)^2 + (y2-y1)^2 + (z2-z1)^2)
+
+        coordinates = (x1,y1,z1, x2,y2,z2)
+        roots = (r1,r2,r12)
+
+        def H(Psi):
+            return - 1/2 * Del(Psi,[x1,y1,z1]) - 1/2 * Del(Psi,[x2,y2,z2]) - (2/r1)*Psi - (2/r2)*Psi + (1/r12)*Psi
+
+    else:
+
+        var('r1,r2,r12')
+
+        coordinates = (r1,r2,r12)
+        roots = ()
+
+        Z = 2
+
+        def H(Psi):
+            return - 1/2 * (diff(Psi,r1,2) + 2/r1*diff(Psi,r1)) - 1/2 * (diff(Psi,r2,2) + 2/r2*diff(Psi,r2))     \
+                   - (diff(Psi,r12,2) + 2/r12*diff(Psi,r12))                                                     \
+                   - (r1^2 + r12^2 - r2^2)/(2*r1*r12)*diff(diff(Psi,r1), r12)                                    \
+                   - (r2^2 + r12^2 - r1^2)/(2*r2*r12)*diff(diff(Psi,r2), r12)                                    \
+                   - Z/r1 - Z/r2 + 1/r12
 
     finish_prep(ansatz=ansatz)
 
@@ -348,8 +373,8 @@ def varName(var):
             return name
     return None
 
-def mk_maps(radii):
-    return {v.operands()[0] : SR.var(varName(v)) for v in radii}
+def mk_maps(roots):
+    return {v.operands()[0] : SR.var(varName(v)) for v in roots}
 
 # convert all (x^2+y^2+z^2)^(n/2) expressions to r^n
 # What if we have multiple x^2+y^2+z^2 expressions in a single power?
@@ -366,7 +391,7 @@ def create_eq_a():
     # first, build the dictionary that maps expressions like (x1^2+y1^2+z1^2) to variables like r1
     # make 'maps' global to simplify the map function inside roots_to_rs()
     global maps, eq_a
-    maps = mk_maps(radii)
+    maps = mk_maps(roots)
     # next, convert all of the roots in the equation to use the r-variables
     eq_a = roots_to_rs(eq)
 
@@ -445,7 +470,8 @@ def create_polynomial_eq():
 def reduce_polynomial_eq():
     # Next, convert powers of r's to x,y,z's
     global reduced_polynomial_eq
-    sdict = {SR.var(v)^d : (globals()[v]^d, SR.var(v)*globals()[v]^(d-1))[d%2] for d in range(2,8) for v in ('r1','r2','r12')}
+    # Python trick to implement what I'd write in C as d%2==0 ? v^d : SR.var(varName(v))*v^(d-1)
+    sdict = {SR.var(varName(v))^d : (v^d, SR.var(varName(v))*v^(d-1))[d%2] for d in range(2,8) for v in roots}
     reduced_polynomial_eq = polynomial_eq.subs(sdict)
 
 def extract_ops():
