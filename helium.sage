@@ -466,12 +466,26 @@ def create_polynomial_ring():
     num_rvars = len(roots_names) + len(ODE_vars) + len(coordinates)
     num_cvars = len(coeff_vars)
     encoding = 'deglex64({}),deglex64({}),sint64'.format(num_rvars, num_cvars)
-    R = PolynomialRing(ZZ, names=tuple(flatten((roots_names, ODE_vars, coordinates, coeff_vars))),
-                      implementation="FLINT", order='lex', encoding=encoding)
+    if len(roots) > 0:
+        # FLINT multivariates can't handle reduction modulo an ideal, so use Singular multivariates instead
+        R = PolynomialRing(ZZ, names=tuple(flatten((roots_names, ODE_vars, coordinates, coeff_vars))), order='lex')
+    else:
+        R = PolynomialRing(ZZ, names=tuple(flatten((roots_names, ODE_vars, coordinates, coeff_vars))),
+                           implementation="FLINT", order='lex', encoding=encoding)
     F = Frac(R)
 
+def mk_ideal(roots):
+    ideal_generators = []
+    for v in roots:
+        assert v.operator() is operator.pow
+        Rname = R(varName(v))
+        Rexpr = R(v.operands()[0])
+        power = int(1/v.operands()[1])
+        ideal_generators.append(Rname^power - Rexpr)
+    return ideal(ideal_generators)
+
 def convert_eq_a():
-    global F_eq_a
+    global F_eq_a, F_eq_a_n
     create_polynomial_ring()
     # If we write this as 'F_eq_a = F(eq_a)', Sage will attempt to construct F_eq_a by calling
     # eq_a.numerator() and eq_a.denominator(), which will perform lots of rational function
@@ -479,7 +493,11 @@ def convert_eq_a():
     # like 'eq_a.polynomial(ring=F)' recurses through the expression tree and builds the
     # expression from the bottom up using polynomial ring operations, which are much more efficient.
     F_eq_a = eq_a.polynomial(ring=F)
-    # XXX missing step here - clear higher powers of roots
+    # clear higher powers of roots
+    if len(roots) > 0:
+        F_eq_a_n = F_eq_a.numerator().mod(mk_ideal(roots))
+    else:
+        F_eq_a_n = F_eq_a.numerator()
 
 import time
 
@@ -599,7 +617,7 @@ def reap_worker():
 def multi_expand():
 
     start_manager_process()
-    mc.set_range(len(F_eq_a.numerator()), blocksize)
+    mc.set_range(F_eq_a_n.number_of_terms(), blocksize)
 
     for i in range(num_collectors):
         start_collector()
@@ -986,9 +1004,8 @@ class ExpanderClass(Autoself):
         # sleep for a fraction of a second here to let this method
         # return back to the manager before we begin work
         time.sleep(float(0.1))
-        print('start_expand')
         # Each term is presented as a tuple of ETuple and cofficient
-        for etuple, coeff in islice(F_eq_a.numerator().iterator_exp_coeff(), start, stop):
+        for etuple, coeff in islice(F_eq_a_n.iterator_exp_coeff(), start, stop):
             # the first rvars form the key
             key = etuple[:num_rvars]
             # the remaining variables form the value
@@ -998,10 +1015,8 @@ class ExpanderClass(Autoself):
             # save in a list to be sent to the collectors
             self.dicts[dictnum].append((key, coeff, value))
         # expansion finished; send the expanded monomials to the collector processes
-        print('expansion finished')
         for i in range(len(self.collectors)):
             self.collectors[i].combine_data(self.dicts[i])
-        print('expansion done')
         self.mc.notify_expand_done(self.autoself())
 
 import json
@@ -1417,7 +1432,6 @@ class CollectorClass(Autoself):
                     veclen = len(self.indices)
                     self.dok.resize((len(self.result), veclen))
                     print('Resize done')
-                    #print(self.indices)
                 # the if statement is just here to avoid an exception; constant terms shouldn't appear at all, right?
                 if value.unweighted_degree() > 0:
                     index = self.indices[value]
