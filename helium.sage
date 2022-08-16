@@ -118,8 +118,6 @@ def powerset(iterable):
 
 
 
-SR_radii = (SR.var('r1'), SR.var('r2'), SR.var('r12'))
-
 def trial_polynomial(base, coordinates, roots, degree):
     # cterms are coefficient terms
     # rterms are radius terms
@@ -179,7 +177,7 @@ def finish_prep(ansatz):
 
     SR_function = sage.symbolic.function_factory.function
 
-    if ansatz == 1:
+    if ansatz == 1 or ansatz == 9:
         # Phi is an exponential; Phi = e^B, so diff(Phi,B) = Phi and diff(Phi,v) = diff(B,v)*Phi
         #
         # An earlier verion of this ansatz was used extensively for testing Hydrogen
@@ -265,7 +263,7 @@ def finish_prep(ansatz):
         ODE_vars = ('Zeta', 'DZeta')
 
         zero_variety = 1
-    elif ansatz == 7:
+    elif ansatz == 7 or ansatz == 8:
         # A second-order homogeneous ODE: D(B/C) d^2 Zeta/dB^2 - M(B/C) dZeta/dB - N(B/C) Zeta = 0
         # where D(B/C), M(B/C), and N(B/C) are second-degree polynomials in B/C, a second-degree rational function
         Zeta = SR_function('Zeta')
@@ -333,7 +331,7 @@ def prep_hydrogen(ansatz=1):
     roots = (r1,)
 
     # According to Nakatsuji, we can write the helium Hamiltonian
-    # for S states (no angular momemtum) in a r1/r2/r12 coordinate system.
+    # for S states (no angular momentum) in a r1/r2/r12 coordinate system.
 
     if ansatz < 0:
         # this locally changes variables and still globally uses x1,y1,z1
@@ -379,12 +377,19 @@ def prep_helium(ansatz=6):
 
         Z = 2
 
+#        def H(Psi):
+#            return - 1/2 * (diff(Psi,r1,2) + 2/r1*diff(Psi,r1)) - 1/2 * (diff(Psi,r2,2) + 2/r2*diff(Psi,r2))     \
+#                   - (diff(Psi,r12,2) + 2/r12*diff(Psi,r12))                                                     \
+#                   - (r1^2 + r12^2 - r2^2)/(2*r1*r12)*diff(diff(Psi,r1), r12)                                    \
+#                   - (r2^2 + r12^2 - r1^2)/(2*r2*r12)*diff(diff(Psi,r2), r12)                                    \
+#                   - Z/r1 - Z/r2 + 1/r12
+        # let's try multiplying through by two to avoid an annoying bug in my custom Sage code (see Aug 7 2022 diary)
         def H(Psi):
-            return - 1/2 * (diff(Psi,r1,2) + 2/r1*diff(Psi,r1)) - 1/2 * (diff(Psi,r2,2) + 2/r2*diff(Psi,r2))     \
-                   - (diff(Psi,r12,2) + 2/r12*diff(Psi,r12))                                                     \
-                   - (r1^2 + r12^2 - r2^2)/(2*r1*r12)*diff(diff(Psi,r1), r12)                                    \
-                   - (r2^2 + r12^2 - r1^2)/(2*r2*r12)*diff(diff(Psi,r2), r12)                                    \
-                   - Z/r1 - Z/r2 + 1/r12
+            return - (diff(Psi,r1,2) + 2/r1*diff(Psi,r1)) - (diff(Psi,r2,2) + 2/r2*diff(Psi,r2))                 \
+                   - 2*(diff(Psi,r12,2) + 2/r12*diff(Psi,r12))                                                   \
+                   - (r1^2 + r12^2 - r2^2)/(r1*r12)*diff(diff(Psi,r1), r12)                                      \
+                   - (r2^2 + r12^2 - r1^2)/(r2*r12)*diff(diff(Psi,r2), r12)                                      \
+                   - 2*Z/r1 - 2*Z/r2 + 2/r12
 
     finish_prep(ansatz=ansatz)
 
@@ -442,8 +447,8 @@ def analyze_eq_a(eq, depth=1, print_depth=2, file=sys.stdout):
 # The variables are listed from most significant to least significant.  We use lexicographic
 # ordering to group terms together conveniently.
 #
-# I want the SR_radii to be first in the ordering, because they're going to be substituted for,
-# so making them the most significant variables groups like SR_radii terms together.
+# I want 'roots' to be first in the ordering, because they're going to be substituted for,
+# so making them the most significant variables groups like 'roots' terms together.
 #
 # I want the coeff_vars to be last in the ordering, because the system we're going to solve
 # will be grouped by coordinates and ODE_vars.
@@ -456,159 +461,25 @@ def analyze_eq_a(eq, depth=1, print_depth=2, file=sys.stdout):
 # three 64-bit words.  If things don't fit, it throws an exception.
 
 def create_polynomial_ring():
-    global R,F
-    num_rvars = len(SR_radii) + len(ODE_vars) + len(coordinates)
+    global R,F,num_rvars,num_cvars
+    roots_names = list(map(varName, roots))
+    num_rvars = len(roots_names) + len(ODE_vars) + len(coordinates)
     num_cvars = len(coeff_vars)
     encoding = 'deglex64({}),deglex64({}),sint64'.format(num_rvars, num_cvars)
-    R = PolynomialRing(ZZ, names=tuple(flatten((SR_radii, ODE_vars, coordinates, coeff_vars))),
+    R = PolynomialRing(ZZ, names=tuple(flatten((roots_names, ODE_vars, coordinates, coeff_vars))),
                       implementation="FLINT", order='lex', encoding=encoding)
     F = Frac(R)
 
-def recursive_convert(eq, F):
-    # Converting a Sage expression from the Symbolic Ring to a polynomial
-    # ring or field is more efficient when we do it using this function.
-    def recursion(eq):
-        if eq.operator() == add_vararg:
-            return sum(map(recursion, eq.operands()))
-        elif eq.operator() == mul_vararg:
-            return mul(map(recursion, eq.operands()))
-        else:
-            return F(eq)
-    return recursion(eq)
-
-def create_lcm_denominator():
-    # Find the least common denominator of all of the terms, then
-    # clear the denominators and expand out all of the powers.
-    # This is faster than expand(eq_a.numerator()).  One test
-    # on helium ran in 61 sec, vs 337 sec for expand/numerator.
-    global lcm_denominator
-    lcm_denominator = lcm(map(denominator, eq_a.operands()))
-
-def create_polynomial_eq():
-    # Next, we want to multiple by lcm_denominator and expand out the resulting polynomial,
-    # but the expansion step runs into memory exhaustion issues.  Therefore, we want
-    # to distribute the multiplication across eq_a's top-level sum and expand out
-    # each term individually.
-    global polynomial_eq
-    polynomial_eq = expand(eq_a * lcm_denominator)
-    # polynomial_eq is now a polynomial, but it's got higher powers of r's in it
-
-def reduce_polynomial_eq():
-    # Next, convert powers of r's to x,y,z's
-    global reduced_polynomial_eq
-    # Python trick to implement what I'd write in C as d%2==0 ? v^d : SR.var(varName(v))*v^(d-1)
-    sdict = {SR.var(varName(v))^d : (v^d, SR.var(varName(v))*v^(d-1))[d%2] for d in range(2,8) for v in roots}
-    reduced_polynomial_eq = polynomial_eq.subs(sdict)
-
-def extract_ops():
-    global ops
-    ops = reduced_polynomial_eq.operands()
-
-def expand_poly(p, v):
-    r"""
-    Use the custom _split_poly method of Singular polynomials to expand
-    a polynomial based on variable number `v` (0-based numbering),
-    substituting for even powers of the variable using the global
-    variable of the same name, which is expected to be a square root
-    in the Symbolic Ring, and can therefore be converted into the
-    polynomial ring R if it is raised to an even power.
-
-    DESTROYS INPUT POLYNOMIAL since _split_poly does
-    """
-    splits = p._split_poly(v+1)
-    r = R.gens()[v]
-    result = 0
-    for power,terms in enumerate(splits):
-        podd = power % 2
-        peven = power - podd
-        multiple = R(globals()[str(r)]^peven) * r^podd
-        result += multiple * terms
-        print("Finished expanding power", power, "in", r)
-    return result
-
-def dump_fast(obj, fn):
-    r"""
-    Dump an object to a file using 'fast' pickling option to avoid
-    excess memory consumption for large polynomials.  Results in a
-    larger file since the Integer objects that are the polynomial
-    coefficients are not stored as references to earlier Integers if
-    they are duplicated.
-    """
-    f = open(fn, 'wb')
-    pickler = pickle.Pickler(f)
-    pickler.fast = True
-    pickler.dump(obj)
-    f.close()
-
-def split_and_dump(p, v, base_name, target_size):
-    r"""
-    Use the custom _split_poly and _split_poly_evenly methods of
-    Singular polynomials to split a polynomial based on variable
-    number `v` (0-based numbering), dumping to a set of pickle files
-    starting with `base_name`, based on an estimate of expanding `v`
-    to a maximum of `target_size` terms in each file,
-
-    Used instead of expand_poly() when expand_poly() would exhaust
-    available memory.  Output format is a tuple, the first element of
-    which is the monomial we've factored out of the polynomial, which
-    is the second term.
-
-    DESTROYS INPUT POLYNOMIAL (to prevent input exhaustion)
-    """
-
-    r = R.gens()[v]
-    expr = globals()[str(r)]
-
-    for power, terms in enumerate(p._split_poly(v+1)):
-        num_terms = sum(1 for _ in terms)
-        num_partitions = ceil(sum(1 for _ in R(expr^(2*floor(power/2)))) * num_terms / target_size)
-        if num_partitions > 1:
-            partitions = terms._split_poly_evenly(num_partitions)
-            for partnum, part in enumerate(partitions):
-                dump_fast((r^power, part), '{}-{}-{}.pickle'.format(base_name, power, partnum))
-        else:
-            dump_fast((r^power, terms), '{}-{}.pickle'.format(base_name, power))
-
-def expand_file_to_file(infn, outfn):
-    f = open(infn, 'rb')
-    # If the input pickle wasn't dumped with the 'fast' option, then
-    # it'd make sense to allocate a dedicated Unpickler here, so that
-    # we could delete it when we're done and drop the memory
-    # references to the memoized sub-objects.  Since the code is built
-    # to have dumped using 'fast', I don't do that here.
-    (monomial, poly) = pickle.load(f)
-    f.close()
-
-    exps = tuple(monomial.dict().keys())
-    assert len(exps) == 1
-    nzps = exps[0].nonzero_positions()
-    assert len(nzps) <= 1
-
-    if len(nzps) == 0:
-        dump_fast(poly, outfn)
-        print('Current RSS: {:6.1f} GB'.format(float(current_process.memory_info().rss/(2^30))))
-    else:
-        v = nzps[0]
-        power = exps[0][v]
-        r = R.gens()[v]
-        assert r^power == monomial
-
-        podd = power % 2
-        peven = power - podd
-        multiple = R(globals()[str(r)]^peven) * r^podd
-        result = multiple * poly
-
-        dump_fast(result, outfn)
-
-        print('Current RSS: {:6.1f} GB'.format(float(current_process.memory_info().rss/(2^30))))
-
-def expand_fileset(in_prefix, out_prefix):
-    for infn in sorted(glob.glob(in_prefix + '*.pickle')):
-        (begin, end) = infn.split(in_prefix, 1)
-        assert begin == ""
-        outfn = out_prefix + end
-        print("Expanding", infn, "to", outfn)
-        expand_file_to_file(infn, outfn)
+def convert_eq_a():
+    global F_eq_a
+    create_polynomial_ring()
+    # If we write this as 'F_eq_a = F(eq_a)', Sage will attempt to construct F_eq_a by calling
+    # eq_a.numerator() and eq_a.denominator(), which will perform lots of rational function
+    # math in the Symbolic Ring, which is very slow and memory intensive.  Calling it
+    # like 'eq_a.polynomial(ring=F)' recurses through the expression tree and builds the
+    # expression from the bottom up using polynomial ring operations, which are much more efficient.
+    F_eq_a = eq_a.polynomial(ring=F)
+    # XXX missing step here - clear higher powers of roots
 
 import time
 
@@ -620,10 +491,7 @@ def timefunc(func, *args):
 
 def multi_init():
     timefunc(create_eq_a)
-    timefunc(create_lcm_denominator)
-    timefunc(create_polynomial_eq)
-    timefunc(reduce_polynomial_eq)
-    timefunc(extract_ops)
+    timefunc(convert_eq_a)
 
 # Now expand out powers, and collect like x,y,z's terms together to
 # get a system of polynomials
@@ -640,8 +508,8 @@ def multi_init():
 #
 # The desire to avoid serialization also leads to an optimization that
 # seems a bit wierd at first.  We don't spawn any of the subprocesses
-# until we've calculated `ops`, the terms of the polynomial that we
-# want to expand.  This avoids having to serialize `ops`, since each
+# until we've calculated the polynomial that we want to expand.
+# This avoids having to serialize that polynomial, since each
 # worker already has a copy.  This also has the negative side-effect
 # of preventing workers from running on other machines, since each
 # worker has to be forked from the main process.
@@ -666,7 +534,7 @@ def multi_init():
 # multi_expand()
 
 # number of operands to process in each expander worker
-blocksize = 1000
+blocksize = 100000
 
 # number of collector processes
 num_collectors = 1
@@ -731,7 +599,7 @@ def reap_worker():
 def multi_expand():
 
     start_manager_process()
-    mc.set_range(len(ops), blocksize)
+    mc.set_range(len(F_eq_a.numerator()), blocksize)
 
     for i in range(num_collectors):
         start_collector()
@@ -1108,7 +976,7 @@ class ExpanderClass(Autoself):
         self.mc = mc
     def register_collectors(self, collectors):
         self.collectors = collectors
-        self.dicts = list(map(dict, [[]] * len(collectors)))
+        self.dicts = [[]] * len(collectors)
     @async_method
     def shutdown(self):
         for i in range(len(self.collectors)):
@@ -1118,41 +986,22 @@ class ExpanderClass(Autoself):
         # sleep for a fraction of a second here to let this method
         # return back to the manager before we begin work
         time.sleep(float(0.1))
-        expr = expand(sum(islice(ops, start, stop)))
-        # Each monomial is of the form 2*c0^2*x^3.  We will split on
-        # '*' to get the factors.  The coefficient factors are the
-        # ones that start with either a number or a coefficient
-        # variable.  The rest are key variables.
-        coeff_strs = tuple(map(str, coeff_vars)) + tuple("0123456789")
-        for monomial in expr.operands():
-            s = str(monomial)
-            if s[0] == '-':
-                sign='-'
-                s=s[1:]
-            else:
-                sign='+'
-            # sort to make sure that we can't get separate keys for
-            # something like x*y vs y*x.  Probably unnecessary; I
-            # suspect that the factors are already consistently
-            # sorted.  The collector code currently assumes that any
-            # number will be the leading factor, but sorted puts
-            # numbers before letters, so we're OK.
-            vs = sorted(s.split('*'))
-            # the coefficient variables go in the values
-            value = '*'.join(filter(lambda x: any([x.startswith(c) for c in coeff_strs]), vs))
-            # all the other variables (x,y,z,r,Phi,Xi) form the key
-            key = '*'.join(filterfalse(lambda x: any([x.startswith(c) for c in coeff_strs]), vs))
+        print('start_expand')
+        # Each term is presented as a tuple of ETuple and cofficient
+        for etuple, coeff in islice(F_eq_a.numerator().iterator_exp_coeff(), start, stop):
+            # the first rvars form the key
+            key = etuple[:num_rvars]
+            # the remaining variables form the value
+            value = etuple[num_rvars:]
             # hash the key to figure which collector its assigned to
             dictnum = hash(key) % len(self.collectors)
-            # XXX the collector code will later pick this stuff apart
-            # again using more regex/string operations.  Maybe it
-            # would be efficient to combine the sign, number, and
-            # variables into a tuple and store these dictionary values
-            # as a list of tuples here.
-            self.dicts[dictnum][key] = self.dicts[dictnum].get(key, '') + sign + value
+            # save in a list to be sent to the collectors
+            self.dicts[dictnum].append((key, coeff, value))
         # expansion finished; send the expanded monomials to the collector processes
+        print('expansion finished')
         for i in range(len(self.collectors)):
             self.collectors[i].combine_data(self.dicts[i])
+        print('expansion done')
         self.mc.notify_expand_done(self.autoself())
 
 import json
@@ -1421,8 +1270,11 @@ class CollectorClass(Autoself):
 
     @async_method
     def combine_data(self, SRd):
-        for key,value in SRd.items():
-            self.result[key] = self.result.get(key, '') + value
+        for key,coeff,value in SRd:
+            # key is an ETuple of rvars; coeff is an integer (not sure what type); value is an ETuple of the cvars
+            if key not in self.result:
+                self.result[key] = []
+            self.result[key].append((coeff, value))
 
     def dump(self):
         fn = '/tmp/' + str(os.getpid()) + '.json'
@@ -1480,7 +1332,7 @@ class CollectorClass(Autoself):
     def len_keys(self):
         return sum([len(v) for v in a.result.keys()])
     def nterms(self):
-        return sum([v.count('+')+v.count('-') for v in self.result.values()])
+        return sum([len(v) for v in self.result.values()])
 
     # Now we want to evaluate possibly millions of polynomials, as
     # well as their first derivatives.  Using Sage symbolic
@@ -1547,45 +1399,29 @@ class CollectorClass(Autoself):
     def convert_to_matrix(self):
         self.i = 0
         # I haven't calculated in advance the maximum degree of the monomials,
-        # so start at 1 and reshape the matrix every time we hit a monomial
+        # so start at 0 and reshape the matrix every time we hit a monomial
         # that's too big.
-        self.max_degree = 1
-        self.indices = {str(pair[1]) : pair[0] for pair in enumerate(self.generate_multi_vector(coeff_vars))}
-        veclen = len(self.indices)
-        self.dok = scipy.sparse.dok_matrix((len(self.result), veclen), np.int64)
-        terms_re = re.compile(r'([+-][^+-]+)')
-        number_re = re.compile(r'^[0-9]*$')
-        for value in self.result.values():
-            terms = re.split(terms_re, value)
-            for term in filter(bool, terms):
-                if term[0] == '-':
-                    sign = -1
-                    term = term[1:]
-                else:
-                    sign = 1
-                    if term[0] == '+':
-                        term = term[1:]
-                try:
-                    (coeff, monomial) = term.split('*', 1)
-                except ValueError:
-                    coeff = '1'
-                    monomial = term
-                if not re.match(number_re, coeff):
-                    monomial = coeff + '*' + monomial
-                    coeff = '1'
-                coeff = sign * int(coeff)
+        self.max_degree = 0
+        self.dok = scipy.sparse.dok_matrix((len(self.result), 0), np.int64)
 
-                while True:
-                    try:
-                        index = self.indices[monomial]
-                        break
-                    except KeyError:
-                        self.max_degree += 1
-                        self.indices = {str(pair[1]) : pair[0] for pair in enumerate(self.generate_multi_vector(coeff_vars))}
-                        veclen = len(self.indices)
-                        self.dok.resize((len(self.result), veclen))
-
-                self.dok[self.i, index] += coeff
+        # we don't care about the keys because they were just used to accumulate the values
+        # the values include both the column (the c vars) and the coefficient
+        for l in self.result.values():
+            #print(l)
+            for coeff, value in l:
+                if value.unweighted_degree() > self.max_degree:
+                    # increase max_degree and rebuild indices
+                    self.max_degree = value.unweighted_degree()
+                    print('Resizing', self.max_degree, value, coeff_vars)
+                    self.indices = {next(pair[1].iterator_exp_coeff())[0][num_rvars:] : pair[0] for pair in enumerate(self.generate_multi_vector(tuple(map(R, coeff_vars))))}
+                    veclen = len(self.indices)
+                    self.dok.resize((len(self.result), veclen))
+                    print('Resize done')
+                    #print(self.indices)
+                # the if statement is just here to avoid an exception; constant terms shouldn't appear at all, right?
+                if value.unweighted_degree() > 0:
+                    index = self.indices[value]
+                    self.dok[self.i, index] += coeff
             self.i += 1
 
         #self.M = np.unique(self.M, axis=0)
