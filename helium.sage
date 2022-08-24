@@ -286,7 +286,7 @@ def finish_prep(ansatz):
         post_subs = {Zeta(B/C) : SR.var('Zeta'), DD[0](Zeta)(B/C) : SR.var('DZeta')}
         ODE_vars = ('Zeta', 'DZeta')
 
-        zero_variety = 1
+        zero_variety = sum(map(square, Bvars)) * sum(map(square, Cvars))
     else:
         raise 'Bad ansatz'
 
@@ -1447,7 +1447,7 @@ class CollectorClass(Autoself):
                     self.dok[self.i, index] += coeff
             self.i += 1
             #if (self.i % 1000 == 0):
-            #print(self.i, "of", len(self.result), "done")
+            print(self.i, "of", len(self.result), "done")
 
         #self.M = np.unique(self.M, axis=0)
         #self.M = self.dok.tocsr()
