@@ -14,6 +14,12 @@
 #
 # This will produce a solution to the hydrogen atom.
 #
+# CONCEPT:
+#
+# We have a differential equation that we're trying to solve and a
+# trial solution with lots of free parameters that we try to adjust
+# to get a solution.
+#
 # ALGORITHM:
 #
 # We start with a trial solution with free coefficients (coeff_vars)
@@ -40,7 +46,7 @@
 # by Brent Baccala
 #
 # first version - August 2019
-# latest version - Auguest 2020
+# latest version - Auguest 2022
 #
 # no rights reserved; you may freely copy, modify, or distribute this
 # program
@@ -1362,6 +1368,9 @@ class CollectorClass(Autoself):
     # then all the biproducts of the vector elements, then all the
     # triproducts of the vector elements, etc.
     #
+    # [a,b,c]
+    # [a,b,c] * a, [b,c] * b, [c] * c = [a^2, a*b, a*c, b^2, b*c, c^2]
+    #
     # Graded lexicographic order
     #
     # generate_multi_vector([a,b,c])
@@ -1422,21 +1431,23 @@ class CollectorClass(Autoself):
         # we don't care about the keys because they were just used to accumulate the values
         # the values include both the column (the c vars) and the coefficient
         for l in self.result.values():
-            #print(l)
+            #print(len(l))
             for coeff, value in l:
                 if value.unweighted_degree() > self.max_degree:
                     # increase max_degree and rebuild indices
                     self.max_degree = value.unweighted_degree()
-                    print('Resizing', self.max_degree, value, coeff_vars)
-                    self.indices = {next(pair[1].iterator_exp_coeff())[0][num_rvars:] : pair[0] for pair in enumerate(self.generate_multi_vector(tuple(map(R, coeff_vars))))}
-                    veclen = len(self.indices)
+                    # index of the smallest tuple of the next higher degree, minus one because we drop constant terms
+                    veclen=encode_deglex([self.max_degree + 1] + [0]*(len(value) - 1)) - 1
                     self.dok.resize((len(self.result), veclen))
-                    print('Resize done')
                 # the if statement is just here to avoid an exception; constant terms shouldn't appear at all, right?
                 if value.unweighted_degree() > 0:
-                    index = self.indices[value]
+                    index = encode_deglex(value) - 1
+                    #if decode_deglex(index + 1, len(value)) != list(value):
+                    #    print(decode_deglex(index + 1, len(value)), list(value))
                     self.dok[self.i, index] += coeff
             self.i += 1
+            #if (self.i % 1000 == 0):
+            #print(self.i, "of", len(self.result), "done")
 
         #self.M = np.unique(self.M, axis=0)
         #self.M = self.dok.tocsr()
@@ -2483,11 +2494,13 @@ def choose_with_replacement(setsize,num):
     return binomial(setsize + num - 1, num)
 
 def encode_deglex(exps):
+    # modified Gastineau algorithm to produce graded lexicographic order
+    #    order within each graded block is reversed from Gastineau's paper
     delta = sum(exps)
-    retval = sum(choose_with_replacement(len(exps), j) for j in range(0,delta))
+    retval = sum(choose_with_replacement(len(exps), j) for j in range(0,delta+1)) - 1
     d = delta
     for i in range(0,len(exps)-1):
-        retval = retval + sum(choose_with_replacement(len(exps)-i-1, d-j) for j in range(0,exps[i]))
+        retval -= sum(choose_with_replacement(len(exps)-i-1, d-j) for j in range(0,exps[i]))
         d = d - exps[i]
     return retval
 
@@ -2498,10 +2511,11 @@ def decode_deglex(ind, len_exps):
         ind -= choose_with_replacement(len_exps, total_degree)
         total_degree += 1
     d = total_degree
+    ind -= choose_with_replacement(len_exps, total_degree)
     for i in range(0, len_exps-1):
         this_exp = 0
-        while ind >= choose_with_replacement(len_exps-i-1, d-this_exp):
-            ind -= choose_with_replacement(len_exps-i-1, d-this_exp)
+        while ind < -choose_with_replacement(len_exps-i-1, d-this_exp):
+            ind += choose_with_replacement(len_exps-i-1, d-this_exp)
             this_exp += 1
         exps.append(this_exp)
         d -= this_exp
