@@ -202,7 +202,7 @@ def finish_prep(ansatz):
         Psi = A * Xi(C)
         pre_subs = {DD[0](Xi)(C) : 1/C, DD[0,0](Xi)(C) : -1/C^2}
         post_subs = {Xi(C) : SR.var('Xi')}
-        Psi = A*Xi
+        coeff_vars = (E,) + Avars + Cvars
         ODE_vars = ('Xi', )
         zero_variety = sum(map(square, Avars))
     elif ansatz == 3:
