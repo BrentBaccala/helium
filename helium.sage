@@ -330,11 +330,7 @@ def prep_hydrogen(ansatz=1):
     global r1, H, coordinates, roots
 
     var('x1,y1,z1')
-
-    r1 = sqrt(x1^2+y1^2+z1^2)
-
     coordinates = (x1,y1,z1)
-    roots = (r1,)
 
     # According to Nakatsuji, we can write the helium Hamiltonian
     # for S states (no angular momentum) in a r1/r2/r12 coordinate system.
@@ -342,6 +338,7 @@ def prep_hydrogen(ansatz=1):
     if ansatz < 0:
         # this locally changes variables and still globally uses x1,y1,z1
         (R1, R2, R12) = (x1,y1,z1)
+        roots = tuple()
         def H(Psi):
             return - 1/2 *sum(diff(Psi, Ri, 2) + 2/Ri*diff(Psi,Ri) for Ri in [R1,R2])  \
                    - (diff(Psi, R12, 2) + 2/R12*diff(Psi,R12))                          \
@@ -351,6 +348,8 @@ def prep_hydrogen(ansatz=1):
 
     else:
 
+        r1 = sqrt(x1^2+y1^2+z1^2)
+        roots = (r1,)
         def H(Psi):
             return - 1/2 * Del(Psi,[x1,y1,z1]) - (1/r1)*Psi
 
@@ -474,8 +473,10 @@ def create_polynomial_ring():
     encoding = 'deglex64({}),deglex64({}),sint64'.format(num_rvars, num_cvars)
     if len(roots) > 0:
         # FLINT multivariates can't handle reduction modulo an ideal, so use Singular multivariates instead
+        print('Using Singular implementation')
         R = PolynomialRing(ZZ, names=tuple(flatten((roots_names, ODE_vars, coordinates, coeff_vars))), order='lex')
     else:
+        print('Using FLINT implementation')
         R = PolynomialRing(ZZ, names=tuple(flatten((roots_names, ODE_vars, coordinates, coeff_vars))),
                            implementation="FLINT", order='lex', encoding=encoding)
     F = Frac(R)
