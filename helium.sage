@@ -270,7 +270,7 @@ def finish_prep(ansatz):
 
         zero_variety = 1
     elif ansatz == 7 or ansatz == 8:
-        # A second-order homogeneous ODE: D(B/C) d^2 Zeta/dB^2 - M(B/C) dZeta/dB - N(B/C) Zeta = 0
+        # A second-order homogeneous ODE: D(B/C) d^2 Zeta/d(B/C)^2 - M(B/C) dZeta/d(B/C) - N(B/C) Zeta = 0
         # where D(B/C), M(B/C), and N(B/C) are second-degree polynomials in B/C, a second-degree rational function
         Zeta = SR_function('Zeta')
         (Bvars, B) = trial_polynomial('b', coordinates, roots, 2)
@@ -820,7 +820,7 @@ def async_result(method):
 # Probably needs to be reported as a bug in the multiprocessing library.
 #
 # TODO list for Python multiprocessing library:
-#   - handle CNTL-C without killing subprocesses
+#   - handle CNTL-C in interactive session without killing subprocesses
 #   - add rconsole to manager/server and use Sage interact for rconsole
 #   - hashing proxies and tokens
 #   - autoself() and more general auto-objects
