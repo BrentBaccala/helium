@@ -15,8 +15,8 @@
 # default ansatz (number 1).  You can also prep_helium(), and
 # supply an ansatz number as argument, as in prep_helium(-7).
 #
-# Negative helium ansatzen use a spherically symmetric Hamiltonian
-# that reduces the dimension of the problem and lets us use the faster
+# Negative ansatzen use a spherically symmetric Hamiltonian that
+# reduces the dimension of the problem and lets us use the faster
 # FLINT implementation because there are no roots in the Hamiltonian
 # and FLINT doesn't have a Groebner basis implementation, which is
 # required to handle roots.
@@ -337,18 +337,28 @@ def finish_prep(ansatz):
     assert zero_variety == mul(sum(map(square, tuple(coeff_vec * mask))) for mask in zero_variety_masks)
 
 def prep_hydrogen(ansatz=1):
-    global r1, H, coordinates, roots
+    global H, coordinates, roots
 
-    var('x1,y1,z1')
-    coordinates = (x1,y1,z1)
+    if ansatz < 0:
 
-    r1 = sqrt(x1^2+y1^2+z1^2)
-    roots = (r1,)
+        var('r')
+        coordinates = (r,)
+        roots = tuple()
 
-    def H(Psi):
-        return - 1/2 * Del(Psi,[x1,y1,z1]) - (1/r1)*Psi
+        def H(Psi):
+            return - 1/2 * (1/r^2 * diff(r^2 * diff(Psi,r), r)) - (1/r)*Psi
 
-    finish_prep(ansatz=ansatz)
+    else:
+        var('x1,y1,z1')
+        coordinates = (x1,y1,z1)
+
+        r1 = sqrt(x1^2+y1^2+z1^2)
+        roots = (r1,)
+
+        def H(Psi):
+            return - 1/2 * Del(Psi,[x1,y1,z1]) - (1/r1)*Psi
+
+    finish_prep(ansatz=abs(ansatz))
 
 def prep_helium(ansatz=6):
     global H, coordinates, roots
