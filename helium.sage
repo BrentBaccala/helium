@@ -481,7 +481,8 @@ def create_polynomial_ring():
                            implementation="FLINT", order='lex', encoding=encoding)
     F = Frac(R)
 
-def mk_ideal(roots):
+def mk_ideal(R, roots):
+    "Given a list or tuple of roots, return a ideal of ring R that reduces the global variable names of those roots"
     ideal_generators = []
     for v in roots:
         assert v.operator() is operator.pow
@@ -492,7 +493,7 @@ def mk_ideal(roots):
     return ideal(ideal_generators)
 
 def convert_eq_a():
-    global F_eq_a, F_eq_a_n
+    global F_eq_a, F_eq_a_n, F_eq_a_d
     create_polynomial_ring()
     # If we write this as 'F_eq_a = F(eq_a)', Sage will attempt to construct F_eq_a by calling
     # eq_a.numerator() and eq_a.denominator(), which will perform lots of rational function
@@ -502,9 +503,12 @@ def convert_eq_a():
     F_eq_a = eq_a.polynomial(ring=F)
     # clear higher powers of roots
     if len(roots) > 0:
-        F_eq_a_n = F_eq_a.numerator().mod(mk_ideal(roots))
+        F_eq_a_n = F_eq_a.numerator().mod(mk_ideal(R, roots))
+        F_eq_a_d = F_eq_a.denominator().mod(mk_ideal(R, roots))
     else:
         F_eq_a_n = F_eq_a.numerator()
+        F_eq_a_d = F_eq_a.denominator()
+    print('F_eq_a: numerator', len(F_eq_a_n), 'terms; denominator', len(F_eq_a_d), 'terms')
 
 import time
 
