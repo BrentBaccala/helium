@@ -5,14 +5,24 @@
 #
 # INTERACTIVE USAGE:
 #
-# no_init=True
 # load('helium.sage')
 # prep_hydrogen()
 # multi_init()
 # multi_expand()
 # random_numerical()
 #
-# This will produce a solution to the hydrogen atom.
+# This will produce a solution to the hydrogen atom using its
+# default ansatz (number 1).  You can also prep_helium(), and
+# supply an ansatz number as argument, as in prep_helium(-7).
+#
+# Negative helium ansatzen use a spherically symmetric Hamiltonian
+# that reduces the dimension of the problem and lets us use the faster
+# FLINT implementation because there are no roots in the Hamiltonian
+# and FLINT doesn't have a Groebner basis implementation, which is
+# required to handle roots.
+#
+# random_numerical() also takes an optional argument, the initial
+# random seed.
 #
 # CONCEPT:
 #
@@ -46,7 +56,7 @@
 # by Brent Baccala
 #
 # first version - August 2019
-# latest version - Auguest 2022
+# latest version - January 2023
 #
 # no rights reserved; you may freely copy, modify, or distribute this
 # program
@@ -332,13 +342,27 @@ def prep_hydrogen(ansatz=1):
     var('x1,y1,z1')
     coordinates = (x1,y1,z1)
 
-    # According to Nakatsuji, we can write the helium Hamiltonian
-    # for S states (no angular momentum) in a r1/r2/r12 coordinate system.
+    r1 = sqrt(x1^2+y1^2+z1^2)
+    roots = (r1,)
+
+    def H(Psi):
+        return - 1/2 * Del(Psi,[x1,y1,z1]) - (1/r1)*Psi
+
+    finish_prep(ansatz=ansatz)
+
+def prep_helium(ansatz=6):
+    global H, coordinates, roots
 
     if ansatz < 0:
-        # this locally changes variables and still globally uses x1,y1,z1
-        (R1, R2, R12) = (x1,y1,z1)
+        # According to Nakatsuji, we can write the helium Hamiltonian
+        # for S states (no angular momentum) in a r1/r2/r12 coordinate system.
+        #
+        # That's what we do for a negative ansatz
+
+        var('R1,R2,R12')
+        coordinates = (R1,R2,R12)
         roots = tuple()
+
         def H(Psi):
             return - 1/2 *sum(diff(Psi, Ri, 2) + 2/Ri*diff(Psi,Ri) for Ri in [R1,R2])  \
                    - (diff(Psi, R12, 2) + 2/R12*diff(Psi,R12))                          \
@@ -347,18 +371,6 @@ def prep_hydrogen(ansatz=1):
                    - sum(2/Ri for Ri in [R1,R2])*Psi + 1/R12*Psi
 
     else:
-
-        r1 = sqrt(x1^2+y1^2+z1^2)
-        roots = (r1,)
-        def H(Psi):
-            return - 1/2 * Del(Psi,[x1,y1,z1]) - (1/r1)*Psi
-
-    finish_prep(ansatz=abs(ansatz))
-
-def prep_helium(ansatz=6):
-    global H, coordinates, roots
-
-    if ansatz <= 7:
 
         var('x1,y1,z1,x2,y2,z2')
 
@@ -373,30 +385,7 @@ def prep_helium(ansatz=6):
         def H(Psi):
             return - 1/2 * Del(Psi,[x1,y1,z1]) - 1/2 * Del(Psi,[x2,y2,z2]) - (2/r1)*Psi - (2/r2)*Psi + (1/r12)*Psi
 
-    else:
-
-        var('r1,r2,r12')
-
-        coordinates = (r1,r2,r12)
-        roots = ()
-
-        Z = 2
-
-#        def H(Psi):
-#            return - 1/2 * (diff(Psi,r1,2) + 2/r1*diff(Psi,r1)) - 1/2 * (diff(Psi,r2,2) + 2/r2*diff(Psi,r2))     \
-#                   - (diff(Psi,r12,2) + 2/r12*diff(Psi,r12))                                                     \
-#                   - (r1^2 + r12^2 - r2^2)/(2*r1*r12)*diff(diff(Psi,r1), r12)                                    \
-#                   - (r2^2 + r12^2 - r1^2)/(2*r2*r12)*diff(diff(Psi,r2), r12)                                    \
-#                   - Z/r1 - Z/r2 + 1/r12
-        # let's try multiplying through by two to avoid an annoying bug in my custom Sage code (see Aug 7 2022 diary)
-        def H(Psi):
-            return - (diff(Psi,r1,2) + 2/r1*diff(Psi,r1)) - (diff(Psi,r2,2) + 2/r2*diff(Psi,r2))                 \
-                   - 2*(diff(Psi,r12,2) + 2/r12*diff(Psi,r12))                                                   \
-                   - (r1^2 + r12^2 - r2^2)/(r1*r12)*diff(diff(Psi,r1), r12)                                      \
-                   - (r2^2 + r12^2 - r1^2)/(r2*r12)*diff(diff(Psi,r2), r12)                                      \
-                   - 2*Z/r1 - 2*Z/r2 + 2/r12
-
-    finish_prep(ansatz=ansatz)
+    finish_prep(ansatz=abs(ansatz))
 
 
 # Now we want to replace all of the sqrt(...) factors with 'r',
