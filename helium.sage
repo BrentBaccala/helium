@@ -1385,7 +1385,7 @@ class CollectorClass(Autoself):
     def generate_multi_vector(self, v):
         start_time = time.time()
         npv = np.array(v)
-        stack = [npv]
+        stack = [[1], npv]
         for d in range(1, self.max_degree):
             stack.append([np.hstack(stack[-1][i:]) * npv[i] for i in range(len(v))])
         res = np.hstack(tuple(flatten(stack)))
@@ -1403,8 +1403,8 @@ class CollectorClass(Autoself):
 
         firsts = np.zeros(npv.size)
         firsts[ind] = int(1)
-        D_stack = [firsts]
-        stack = [npv]
+        D_stack = [[0], firsts]
+        stack = [[1], npv]
 
         for d in range(1, self.max_degree):
             D_stack.append([np.hstack(stack[-1][i:]) * firsts[i] + np.hstack(D_stack[-1][i:]) * npv[i]
@@ -1427,28 +1427,26 @@ class CollectorClass(Autoself):
     def convert_to_matrix(self):
         self.i = 0
         # I haven't calculated in advance the maximum degree of the monomials,
-        # so start at 0 and reshape the matrix every time we hit a monomial
+        # so start at -1 and reshape the matrix every time we hit a monomial
         # that's too big.
-        self.max_degree = 0
+        self.max_degree = -1
         self.dok = scipy.sparse.dok_matrix((len(self.result), 0), np.int64)
 
-        # we don't care about the keys because they were just used to accumulate the values
-        # the values include both the column (the c vars) and the coefficient
+        # we don't care about the keys (roots, ODE vars, coordinates) because they were just used to accumulate the values
+        # the values include both the constant coefficient and the value (the coefficient variable names)
         for l in self.result.values():
             #print(len(l))
             for coeff, value in l:
                 if value.unweighted_degree() > self.max_degree:
                     # increase max_degree and rebuild indices
                     self.max_degree = value.unweighted_degree()
-                    # index of the smallest tuple of the next higher degree, minus one because we drop constant terms
-                    veclen=encode_deglex([self.max_degree + 1] + [0]*(len(value) - 1)) - 1
+                    # index of the smallest tuple of the next higher degree
+                    veclen=encode_deglex([self.max_degree + 1] + [0]*(len(value) - 1))
                     self.dok.resize((len(self.result), veclen))
-                # the if statement is just here to avoid an exception; constant terms shouldn't appear at all, right?
-                if value.unweighted_degree() > 0:
-                    index = encode_deglex(value) - 1
-                    #if decode_deglex(index + 1, len(value)) != list(value):
-                    #    print(decode_deglex(index + 1, len(value)), list(value))
-                    self.dok[self.i, index] += coeff
+                index = encode_deglex(value)
+                #if decode_deglex(index + 1, len(value)) != list(value):
+                #    print(decode_deglex(index + 1, len(value)), list(value))
+                self.dok[self.i, index] += coeff
             self.i += 1
             #if (self.i % 1000 == 0):
             print(self.i, "of", len(self.result), "done")
