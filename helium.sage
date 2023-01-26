@@ -134,7 +134,8 @@ def powerset(iterable):
 
 
 
-def trial_polynomial(base, coordinates, roots, degree):
+def trial_polynomial(base, coordinates, roots, degree, homogenize=None, constant=True):
+    # base is a string to which we append numbers to get our coefficient names; i.e, 'a' -> (a0,a1,a2,...)
     # cterms are coefficient terms
     # rterms are radius terms
     cterms = flatten([combinations_with_replacement(coordinates, d) for d in range(degree+1)])
@@ -142,11 +143,24 @@ def trial_polynomial(base, coordinates, roots, degree):
     # the 'roots' are assumed to be square roots, so all we need is their powerset;
     #    any higher powers will be replaced with expansions
     terms = list(map(mul, (product(map(mul, cterms), map(mul, powerset(roots))))))
+    # The first term is the constant 1, so if we don't want a constant term, drop it
+    if not constant:
+        terms = terms[1:]
     # use this 'terms' for testing
     # terms = list(map(mul,cterms)) + list(roots)
-    coefficients = tuple(var(base+str(c)) for c in range(len(terms)))
-    poly = sum([var(base+str(c))*v for c,v in enumerate(terms)])
-    return (coefficients, poly)
+    coefficients = [var(base+str(c)) for c in range(len(terms))]
+    poly_coefficients = list(coefficients)
+    if homogenize != None:
+        # homogenize: use one less coefficient than otherwise needed, and use 1 as the coefficient of the homogenize'th term
+        if type(homogenize) is list:
+            for h in sorted(homogenize, reverse=True):
+                poly_coefficients[h] = 1
+                del coefficients[h]
+        else:
+            poly_coefficients[homogenize] = 1
+            del coefficients[homogenize]
+    poly = sum([poly_coefficients[c]*v for c,v in enumerate(terms)])
+    return (tuple(coefficients), poly)
 
 # Energy constant in Schroedinger's equations
 var('E')
@@ -181,6 +195,7 @@ DD=Doperator()
 def finish_prep(ansatz):
     global eq, H, coeff_vars, ODE_vars, coordinates, roots
     global zero_variety, zero_variety_masks
+    global A,B,C,D,F,G
 
     (Avars, A) = trial_polynomial('a', coordinates, roots, 1)
     (Bvars, B) = trial_polynomial('b', coordinates, roots, 1)
@@ -193,17 +208,20 @@ def finish_prep(ansatz):
 
     SR_function = sage.symbolic.function_factory.function
 
-    if ansatz == 1 or ansatz == 9:
+    if ansatz == 1:
         # Phi is an exponential; Phi = e^B, so diff(Phi,B) = Phi and diff(Phi,v) = diff(B,v)*Phi
         #
         # An earlier verion of this ansatz was used extensively for testing Hydrogen
         Phi = SR_function('Phi')
+        (Avars, A) = trial_polynomial('a', coordinates, roots, 1, homogenize=0)
+        (Bvars, B) = trial_polynomial('b', coordinates, roots, 1)
         Psi = A * Phi(B)
         pre_subs = {DD[0](Phi)(B) : Phi(B), DD[0,0](Phi)(B) : Phi(B)}
         post_subs = {Phi(B) : SR.var('Phi')}
         coeff_vars = (E,) + Avars + Bvars
         ODE_vars = ('Phi', )
-        zero_variety = sum(map(square, Avars))
+        #zero_variety = sum(map(square, Avars))
+        zero_variety = 1
     elif ansatz == 2:
         # Xi is a logarithm; Xi = ln C, so diff(Xi,C) = 1/C and diff(Xi,v) = diff(C,v)/C
         #
@@ -250,9 +268,11 @@ def finish_prep(ansatz):
     elif ansatz == 5:
         # A second-order homogeneous ODE: D(B) d^2 Zeta/dB^2 - M(B) dZeta/dB - N(B) Zeta = 0
         # where D(B), M(B), and N(B) are linear polynomials in B, which is itself a linear polynomial
+        global M,N
         Zeta = SR_function('Zeta')
+        (Bvars, B) = trial_polynomial('b', coordinates, roots, 1, constant=None, homogenize=0)
         Psi = Zeta(B)
-        (Dvars, D) = trial_polynomial('d', [B], [], 1)
+        (Dvars, D) = trial_polynomial('d', [B], [], 1, homogenize=1)
         (Mvars, M) = trial_polynomial('m', [B], [], 1)
         (Nvars, N) = trial_polynomial('n', [B], [], 1)
 
@@ -262,7 +282,8 @@ def finish_prep(ansatz):
         post_subs = {Zeta(B) : SR.var('Zeta'), DD[0](Zeta)(B) : SR.var('DZeta')}
         ODE_vars = ('Zeta', 'DZeta')
 
-        zero_variety = sum(map(square, flatten((Dvars, Mvars, Nvars)))) * sum(map(square, flatten((Bvars[1:], Dvars))))
+        #zero_variety = sum(map(square, flatten((Dvars, Mvars, Nvars)))) * sum(map(square, flatten((Bvars[1:], Dvars))))
+        zero_variety = 1
     elif ansatz == 6:
         # A second-order homogeneous ODE: D(B/C) d^2 Zeta/dB^2 - M(B/C) dZeta/dB - N(B/C) Zeta = 0
         # where D(B/C), M(B/C), and N(B/C) are linear polynomials in B/C, a first-degree rational function
@@ -279,14 +300,14 @@ def finish_prep(ansatz):
         ODE_vars = ('Zeta', 'DZeta')
 
         zero_variety = 1
-    elif ansatz == 7 or ansatz == 8:
+    elif ansatz == 7:
         # A second-order homogeneous ODE: D(B/C) d^2 Zeta/d(B/C)^2 - M(B/C) dZeta/d(B/C) - N(B/C) Zeta = 0
         # where D(B/C), M(B/C), and N(B/C) are second-degree polynomials in B/C, a second-degree rational function
         Zeta = SR_function('Zeta')
-        (Bvars, B) = trial_polynomial('b', coordinates, roots, 2)
-        (Cvars, C) = trial_polynomial('c', coordinates, roots, 2)
+        (Bvars, B) = trial_polynomial('b', coordinates, roots, 2, homogenize=0)
+        (Cvars, C) = trial_polynomial('c', coordinates, roots, 2, homogenize=1)
         Psi = Zeta(B/C)
-        (Dvars, D) = trial_polynomial('d', [B/C], [], 2)
+        (Dvars, D) = trial_polynomial('d', [B/C], [], 2, homogenize=0)
         (Mvars, M) = trial_polynomial('m', [B/C], [], 2)
         (Nvars, N) = trial_polynomial('n', [B/C], [], 2)
 
@@ -296,7 +317,63 @@ def finish_prep(ansatz):
         post_subs = {Zeta(B/C) : SR.var('Zeta'), DD[0](Zeta)(B/C) : SR.var('DZeta')}
         ODE_vars = ('Zeta', 'DZeta')
 
-        zero_variety = sum(map(square, Bvars)) * sum(map(square, Cvars))
+        #zero_variety = sum(map(square, Bvars)) * sum(map(square, Cvars))
+        zero_variety = 1
+    elif ansatz == 8:
+        # A first-order homogeneous ODE: M(B) dZeta/dB - N(B) Zeta = 0
+        # where M(B) and N(B) are linear polynomials in B, which is itself a linear polynomial
+        #
+        # Logically it's a step backwards from ansatz 5, but I want to see it work.
+
+        Zeta = SR_function('Zeta')
+        (Bvars, B) = trial_polynomial('b', coordinates, roots, 1, constant=None, homogenize=0)
+        Psi = Zeta(B)
+        (Mvars, M) = trial_polynomial('m', [B], [], 1, homogenize=1)
+        (Nvars, N) = trial_polynomial('n', [B], [], 1)
+
+        coeff_vars = (E,) + Bvars + Mvars + Nvars
+
+        # A limitation of the program is that I have to manually calculate DD[0,0](Zeta)(B) here
+        #  DD[0,0](Zeta)(B)  = d^2 Zeta / dB^2 = d/dB (N(B) * Zeta(B) / M(B))
+        #     = (dN/dB * Zeta(B) * M(B) + N(B) * DD[0](Zeta)(B) * M(B) - N(B) * Zeta(B) * dM/dB ) / M^2(B)
+        #     = (n1 * Zeta(B) * M(B) + N(B) * DD[0](Zeta)(B) * M(B) - N(B) * Zeta(B) * m1 ) / M^2(B)
+        #
+        # Can't write diff(M,B) because B is a polynomial and diff only accepts a symbol as its second argument.
+        # Yet we know that M = m1*B + m0, so diff(M,B)=m1
+        m1 = 1
+        n1 = Nvars[1]
+        pre_subs = {DD[0](Zeta)(B) : (N * Zeta(B)) / M,
+                    DD[0,0](Zeta)(B) : (n1 * Zeta(B) * M + N * N * Zeta(B) - N * Zeta(B) * m1 ) / (M*M) }
+        post_subs = {Zeta(B) : SR.var('Zeta')}
+        ODE_vars = ('Zeta', )
+
+        #zero_variety = sum(map(square, flatten((Dvars, Mvars, Nvars)))) * sum(map(square, flatten((Bvars[1:], Dvars))))
+        zero_variety = 1
+    elif ansatz == 9:
+        # A first-order homogeneous ODE: dZeta/dB - n0 Zeta = 0
+        # where n0 is a constant and B is a linear polynomial
+        #
+        # Logically it's a further step backwards from ansatz 8, but ansatz 8 has too many free variables
+        # for scipy.optimize.root to work on 1-dim hydrogen if homogenize=0 or homogenize=None.
+        Zeta = SR_function('Zeta')
+        (Bvars, B) = trial_polynomial('b', coordinates, roots, 1, homogenize=1)
+        Psi = Zeta(B)
+        (Nvars, N) = trial_polynomial('n', [B], [], 0)
+
+        coeff_vars = (E,) + Bvars + Nvars
+
+        # A limitation of the program is that I have to manually calculate DD[0,0](Zeta)(B) here
+        #  DD[0](Zeta)(B)  = n0 Zeta(B)
+        #  DD[0,0](Zeta)(B)  = n0^2 Zeta(B)
+
+        n0 = Nvars[0]
+        pre_subs = {DD[0](Zeta)(B) : n0 * Zeta(B),
+                    DD[0,0](Zeta)(B) : n0^2 * Zeta(B)}
+        post_subs = {Zeta(B) : SR.var('Zeta')}
+        ODE_vars = ('Zeta', )
+
+        #zero_variety = sum(map(square, flatten((Dvars, Mvars, Nvars)))) * sum(map(square, flatten((Bvars[1:], Dvars))))
+        zero_variety = 1
     else:
         raise 'Bad ansatz'
 
@@ -352,6 +429,7 @@ def prep_hydrogen(ansatz=1):
         var('x1,y1,z1')
         coordinates = (x1,y1,z1)
 
+        global r1
         r1 = sqrt(x1^2+y1^2+z1^2)
         roots = (r1,)
 
@@ -507,7 +585,7 @@ def convert_eq_a():
     else:
         F_eq_a_n = F_eq_a.numerator()
         F_eq_a_d = F_eq_a.denominator()
-    print('F_eq_a: numerator', len(F_eq_a_n), 'terms; denominator', len(F_eq_a_d), 'terms')
+    print('F_eq_a: numerator', F_eq_a_n.number_of_terms(), 'terms; denominator', F_eq_a_d.number_of_terms(), 'terms')
 
 import time
 
@@ -1004,7 +1082,7 @@ class ExpanderClass(Autoself):
         self.mc = mc
     def register_collectors(self, collectors):
         self.collectors = collectors
-        self.dicts = [[]] * len(collectors)
+        self.lists = [[]] * len(collectors)
     @async_method
     def shutdown(self):
         for i in range(len(self.collectors)):
@@ -1020,13 +1098,13 @@ class ExpanderClass(Autoself):
             key = etuple[:num_rvars]
             # the remaining variables form the value
             value = etuple[num_rvars:]
-            # hash the key to figure which collector its assigned to
-            dictnum = hash(key) % len(self.collectors)
+            # hash the key to figure which collector it's assigned to
+            listnum = hash(key) % len(self.collectors)
             # save in a list to be sent to the collectors
-            self.dicts[dictnum].append((key, coeff, value))
+            self.lists[listnum].append((key, coeff, value))
         # expansion finished; send the expanded monomials to the collector processes
         for i in range(len(self.collectors)):
-            self.collectors[i].combine_data(self.dicts[i])
+            self.collectors[i].combine_data(self.lists[i])
         self.mc.notify_expand_done(self.autoself())
 
 import json
@@ -1294,8 +1372,8 @@ class CollectorClass(Autoself):
         self.mc = mc
 
     @async_method
-    def combine_data(self, SRd):
-        for key,coeff,value in SRd:
+    def combine_data(self, lst):
+        for key,coeff,value in lst:
             # key is an ETuple of rvars; coeff is an integer (not sure what type); value is an ETuple of the cvars
             if key not in self.result:
                 self.result[key] = []
