@@ -151,14 +151,15 @@ def trial_polynomial(base, coordinates, roots, degree, homogenize=None, constant
     coefficients = [var(base+str(c)) for c in range(len(terms))]
     poly_coefficients = list(coefficients)
     if homogenize != None:
-        # homogenize: use one less coefficient than otherwise needed, and use 1 as the coefficient of the homogenize'th term
-        if type(homogenize) is list:
-            for h in sorted(homogenize, reverse=True):
-                poly_coefficients[h] = 1
-                del coefficients[h]
-        else:
-            poly_coefficients[homogenize] = 1
-            del coefficients[homogenize]
+        # homogenize: use 1 as the coefficient of the homogenize'th term
+        #   and set all previous terms to 0.
+        # The idea is to prevent a polynomial from being zero by running successive
+        #   calculations running through all the terms of the polynomial, forcing them to be 1.
+        homogenize_coefficient = homogenize % len(coefficients)
+        if homogenize_coefficient > 0:
+            poly_coefficients[0:homogenize_coefficient] = [0] * (homogenize_coefficient)
+        poly_coefficients[homogenize_coefficient]= 1
+        del coefficients[0:homogenize_coefficient+1]
     poly = sum([poly_coefficients[c]*v for c,v in enumerate(terms)])
     return (tuple(coefficients), poly)
 
@@ -2539,15 +2540,15 @@ def prep_work():
 
 import platform
 
-if platform.node() == 'samsung' and not 'no_init' in globals():
+#if platform.node() == 'samsung' and not 'no_init' in globals():
+#
+#    prep_hydrogen()
+#    multi_init()
+#    multi_expand()
 
-    prep_hydrogen()
-    multi_init()
-    multi_expand()
-
-if platform.node().startswith('c200') and not 'no_init' in globals() and not 'mc' in globals():
-    timefunc(prep_helium)
-    timefunc(create_polynomial_ring)
+#if not 'no_init' in globals() and not 'mc' in globals():
+#    timefunc(prep_helium)
+#    timefunc(create_polynomial_ring)
 
 if platform.node() == 'c200-1' and not 'no_init' in globals() and not 'mc' in globals() and len(glob.glob('matrix-*.pickle')) > 0:
     start_manager_process()
