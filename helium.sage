@@ -271,11 +271,16 @@ def finish_prep(ansatz):
         # where D(B), M(B), and N(B) are linear polynomials in B, which is itself a linear polynomial
         global M,N
         Zeta = SR_function('Zeta')
-        (Bvars, B) = trial_polynomial('b', coordinates, roots, 1, constant=None, homogenize=0)
+        (Bvars, B) = trial_polynomial('b', coordinates, roots, 1, constant=None)
         Psi = Zeta(B)
-        (Dvars, D) = trial_polynomial('d', [B], [], 1, homogenize=1)
+        (Dvars, D) = trial_polynomial('d', [B], [], 1)
         (Mvars, M) = trial_polynomial('m', [B], [], 1)
         (Nvars, N) = trial_polynomial('n', [B], [], 1)
+
+        global homogenize_groups, homogenize_zeros, homogenize_ones
+        homogenize_groups = (Bvars, Dvars + Mvars + Nvars)
+        homogenize_zeros = (Dvars[0], )
+        homogenize_ones = (Dvars[1], Bvars[0])
 
         coeff_vars = (E,) + Bvars + Dvars + Mvars + Nvars
 
@@ -1991,7 +1996,8 @@ def fns_divExpA(v):
     global last_v
     last_v = v.copy()
 
-    res = np.hstack(list(map(lambda x: x.get(), [cc.eval_fns(v) for cc in ccs])))
+    homogenize_terms = [v[coeff_vars.index(var)] for var in homogenize_zeros] + [v[coeff_vars.index(var)] - 1 for var in homogenize_ones]
+    res = np.hstack(list(map(lambda x: x.get(), [cc.eval_fns(v) for cc in ccs])) + homogenize_terms)
 
     sqrtA = mul(map(np.linalg.norm, (v * mask for mask in zero_variety_masks)))
     denom = 1 - math.exp(- sqrtA*sqrtA)
@@ -2109,7 +2115,19 @@ def jac_fns_divExpA(v):
     print("   Compute multi-D-vectors {:7.2f} sec".format(mdv_time - mdv_start_time))
 
     shms = []
-    dN = np.vstack(list(map(get_nparray(shms), [cc.jac_fns(v, mdv_shm.name) for cc in ccs])))
+    # these are the derivatives w.r.t. the homogenization variables
+    #zero_terms = [np.transpose(np.array([1 if i==coeff_vars.index(var) else 0 for i in range(len(N))], ndmin=2)) for var in homogenize_zeros]
+    #one_terms = [np.transpose(np.array([1 if i==coeff_vars.index(var) else 0 for i in range(len(N))], ndmin=2)) for var in homogenize_ones]
+    zero_terms = [np.array([1 if i==coeff_vars.index(var) else 0 for i in range(len(coeff_vars))], ndmin=2) for var in homogenize_zeros]
+    one_terms = [np.array([1 if i==coeff_vars.index(var) else 0 for i in range(len(coeff_vars))], ndmin=2) for var in homogenize_ones]
+    #print('zero_terms', list(map(np.shape, zero_terms)))
+    #print('one_terms', list(map(np.shape, one_terms)))
+    #cc = list(map(get_nparray(shms), [cc.jac_fns(v, mdv_shm.name) for cc in ccs]))
+    #print('cc', list(map(np.shape, cc)))
+    #zero_terms = [[1 if i==coeff_vars.index(var) else 0 for var in homogenize_zeros] for i in range(len(N))]
+    #one_terms = [[1 if i==coeff_vars.index(var) else 0 for var in homogenize_ones] for i in range(len(N))]
+
+    dN = np.vstack(list(map(get_nparray(shms), [cc.jac_fns(v, mdv_shm.name) for cc in ccs])) + zero_terms + one_terms)
 
     dN_time = time.time()
     print("   Compute dN              {:7.2f} sec".format(dN_time - mdv_time))
