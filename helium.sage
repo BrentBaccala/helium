@@ -22,7 +22,21 @@
 # required to handle roots.
 #
 # random_numerical() also takes an optional argument, the initial
-# random seed.
+# random seed, along with an optional 'homogenize' argument.
+#
+# "Homogenization" (not a very good term) is used to force selected
+# polynomials to be non-zero by forcing their coefficients to be 1,
+# one at a time.  Different values of the 'homogenize' argument
+# (starting at 0) force different coefficients to be 1, and an
+# exception is thrown once all of the homogenization possibilities
+# have been exhausted.
+#
+# Homogenization can also be done when the trial solution is
+# constructed (this is the 'homogenize' argument to the
+# trial_polynomial function), which produces systems with fewer free
+# coefficients, but a new system has to be constructed for every
+# homogenization possibility, so I don't do it this way, and only plan
+# to develop this option if computational complexity becomes an issue.
 #
 # CONCEPT:
 #
@@ -269,6 +283,8 @@ def finish_prep(ansatz):
     elif ansatz == 5:
         # A second-order homogeneous ODE: D(B) d^2 Zeta/dB^2 - M(B) dZeta/dB - N(B) Zeta = 0
         # where D(B), M(B), and N(B) are linear polynomials in B, which is itself a linear polynomial
+        #
+        # Homogenization forces B and D to be non-zero; B is also forced to be non-constant
         global M,N
         Zeta = SR_function('Zeta')
         (Bvars, B) = trial_polynomial('b', coordinates, roots, 1, constant=None)
@@ -277,10 +293,8 @@ def finish_prep(ansatz):
         (Mvars, M) = trial_polynomial('m', [B], [], 1)
         (Nvars, N) = trial_polynomial('n', [B], [], 1)
 
-        global homogenize_groups, homogenize_zeros, homogenize_ones
-        homogenize_groups = (Bvars, Dvars + Mvars + Nvars)
-        homogenize_zeros = (Dvars[0], )
-        homogenize_ones = (Dvars[1], Bvars[0])
+        global homogenize_groups
+        homogenize_groups = (Dvars, Bvars)
 
         coeff_vars = (E,) + Bvars + Dvars + Mvars + Nvars
 
@@ -1996,7 +2010,7 @@ def fns_divExpA(v):
     global last_v
     last_v = v.copy()
 
-    homogenize_terms = [v[coeff_vars.index(var)] for var in homogenize_zeros] + [v[coeff_vars.index(var)] - 1 for var in homogenize_ones]
+    homogenize_terms = [v[i] for i in homogenize_zero_indices] + [v[i] - 1 for i in homogenize_one_indices]
     res = np.hstack(list(map(lambda x: x.get(), [cc.eval_fns(v) for cc in ccs])) + homogenize_terms)
 
     sqrtA = mul(map(np.linalg.norm, (v * mask for mask in zero_variety_masks)))
@@ -2115,19 +2129,7 @@ def jac_fns_divExpA(v):
     print("   Compute multi-D-vectors {:7.2f} sec".format(mdv_time - mdv_start_time))
 
     shms = []
-    # these are the derivatives w.r.t. the homogenization variables
-    #zero_terms = [np.transpose(np.array([1 if i==coeff_vars.index(var) else 0 for i in range(len(N))], ndmin=2)) for var in homogenize_zeros]
-    #one_terms = [np.transpose(np.array([1 if i==coeff_vars.index(var) else 0 for i in range(len(N))], ndmin=2)) for var in homogenize_ones]
-    zero_terms = [np.array([1 if i==coeff_vars.index(var) else 0 for i in range(len(coeff_vars))], ndmin=2) for var in homogenize_zeros]
-    one_terms = [np.array([1 if i==coeff_vars.index(var) else 0 for i in range(len(coeff_vars))], ndmin=2) for var in homogenize_ones]
-    #print('zero_terms', list(map(np.shape, zero_terms)))
-    #print('one_terms', list(map(np.shape, one_terms)))
-    #cc = list(map(get_nparray(shms), [cc.jac_fns(v, mdv_shm.name) for cc in ccs]))
-    #print('cc', list(map(np.shape, cc)))
-    #zero_terms = [[1 if i==coeff_vars.index(var) else 0 for var in homogenize_zeros] for i in range(len(N))]
-    #one_terms = [[1 if i==coeff_vars.index(var) else 0 for var in homogenize_ones] for i in range(len(N))]
-
-    dN = np.vstack(list(map(get_nparray(shms), [cc.jac_fns(v, mdv_shm.name) for cc in ccs])) + zero_terms + one_terms)
+    dN = np.vstack(list(map(get_nparray(shms), [cc.jac_fns(v, mdv_shm.name) for cc in ccs])) + [homogenize_derivatives])
 
     dN_time = time.time()
     print("   Compute dN              {:7.2f} sec".format(dN_time - mdv_time))
@@ -2421,11 +2423,52 @@ def make_iv(seed):
 def printv(v):
     for pair in zip(coeff_vars, v): print( pair)
 
-def random_numerical(seed=0, limit=None):
+def random_numerical(seed=0, homogenize=None, limit=None):
 
     iv = make_iv(seed)
 
     global SciMin
+
+    global homogenize_zeros, homogenize_ones
+    global homogenize_zero_indices, homogenize_one_indices
+    global homogenize_derivatives
+
+    if homogenize != None:
+
+        # We perform "homogenization" (more like de-homogenization) by adding some simple
+        # equations to our set of equations to be solved.  This is done in the fn_divExpA()
+        # function; here we only need to identify which variables are to be set to zero
+        # and which variables are to be set to one.
+
+        homogenize_zeros = []
+        homogenize_ones = []
+
+        for grp in homogenize_groups:
+            homogenize_coefficient = homogenize % len(grp)
+            homogenize = int(homogenize / len(grp))
+            for i in range(homogenize_coefficient):
+                homogenize_zeros.append(grp[i])
+            homogenize_ones.append(grp[homogenize_coefficient])
+
+        if homogenize > 0:
+            raise ValueError('homogenize greater than maximum number of homogenization options')
+
+        print('Homogenize zeros:', homogenize_zeros, 'ones:', homogenize_ones)
+
+        homogenize_zero_indices = tuple(coeff_vars.index(var) for var in homogenize_zeros)
+        homogenize_one_indices = tuple(coeff_vars.index(var) for var in homogenize_ones)
+
+        # These are the Jacobian matrices of the first derivatives of the extra functions.
+        # The equations are simple (either v=0 or v=1), so the derivatives have a very simple (and constant) form.
+        # They get precomputed here and will be appended to the Jacobian matrix in jac_fns_divExpA()
+
+        zero_terms = [np.array([1 if i==j else 0 for i in range(len(coeff_vars))], ndmin=2) for j in homogenize_zero_indices]
+        one_terms = [np.array([1 if i==j else 0 for i in range(len(coeff_vars))], ndmin=2) for j in homogenize_one_indices]
+        homogenize_derivatives = np.vstack(zero_terms + one_terms)
+    else:
+        homogenize_zero_indices = tuple()
+        homogenize_one_indices = tuple()
+        homogenize_derivatives = np.empty(shape=(0, len(coeff_vars)))
 
     # optimize.minimize searchs for minimums of a scalar-valued
     # function, in our case the sum of squares of the variety's
