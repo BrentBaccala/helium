@@ -210,7 +210,7 @@ DD=Doperator()
 def finish_prep(ansatz):
     global eq, H, coeff_vars, ODE_vars, coordinates, roots
     global zero_variety, zero_variety_masks
-    global A,B,C,D,F,G
+    global A,B,C,D,F,G,M,N
     global homogenize_groups
 
     (Avars, A) = trial_polynomial('a', coordinates, roots, 1)
@@ -304,7 +304,6 @@ def finish_prep(ansatz):
         # where D(B), M(B), and N(B) are linear polynomials in B, which is itself a linear polynomial
         #
         # Homogenization forces B and D to be non-zero; B is also forced to be non-constant
-        global M,N
         Zeta = SR_function('Zeta')
         (Bvars, B) = trial_polynomial('b', coordinates, roots, 1, constant=None)
         Psi = Zeta(B)
@@ -412,6 +411,28 @@ def finish_prep(ansatz):
                     DD[0,0](Zeta)(B) : n0^2 * Zeta(B)}
         post_subs = {Zeta(B) : SR.var('Zeta')}
         ODE_vars = ('Zeta', )
+
+        #zero_variety = sum(map(square, flatten((Dvars, Mvars, Nvars)))) * sum(map(square, flatten((Bvars[1:], Dvars))))
+        zero_variety = 1
+    elif ansatz == 10:
+        # A second-order homogeneous ODE: D(B) d^2 Zeta/dB^2 - M(B) dZeta/dB - N(B) Zeta = 0
+        # where D(B), M(B), and N(B) are quadratic polynomials in B, which is itself a quadratic polynomial
+        #
+        # Homogenization forces B and D to be non-zero; B is also forced to be non-constant
+        Zeta = SR_function('Zeta')
+        (Bvars, B) = trial_polynomial('b', coordinates, roots, 2, constant=None)
+        Psi = Zeta(B)
+        (Dvars, D) = trial_polynomial('d', [B], [], 2)
+        (Mvars, M) = trial_polynomial('m', [B], [], 2)
+        (Nvars, N) = trial_polynomial('n', [B], [], 2)
+
+        homogenize_groups = (Dvars, Bvars)
+
+        coeff_vars = (E,) + Bvars + Dvars + Mvars + Nvars
+
+        pre_subs = {DD[0,0](Zeta)(B) : (M * DD[0](Zeta)(B) + N * Zeta(B)) / D}
+        post_subs = {Zeta(B) : SR.var('Zeta'), DD[0](Zeta)(B) : SR.var('DZeta')}
+        ODE_vars = ('Zeta', 'DZeta')
 
         #zero_variety = sum(map(square, flatten((Dvars, Mvars, Nvars)))) * sum(map(square, flatten((Bvars[1:], Dvars))))
         zero_variety = 1
