@@ -211,6 +211,7 @@ def finish_prep(ansatz):
     global eq, H, coeff_vars, ODE_vars, coordinates, roots
     global zero_variety, zero_variety_masks
     global A,B,C,D,F,G
+    global homogenize_groups
 
     (Avars, A) = trial_polynomial('a', coordinates, roots, 1)
     (Bvars, B) = trial_polynomial('b', coordinates, roots, 1)
@@ -225,61 +226,79 @@ def finish_prep(ansatz):
 
     if ansatz == 1:
         # Phi is an exponential; Phi = e^B, so diff(Phi,B) = Phi and diff(Phi,v) = diff(B,v)*Phi
+        # A is a linear polynomial; the solution is A times Phi.
+        # Homogenization forces A to be non-zero.
         #
         # An earlier verion of this ansatz was used extensively for testing Hydrogen
         Phi = SR_function('Phi')
-        (Avars, A) = trial_polynomial('a', coordinates, roots, 1, homogenize=0)
+        (Avars, A) = trial_polynomial('a', coordinates, roots, 1)
         (Bvars, B) = trial_polynomial('b', coordinates, roots, 1)
         Psi = A * Phi(B)
         pre_subs = {DD[0](Phi)(B) : Phi(B), DD[0,0](Phi)(B) : Phi(B)}
         post_subs = {Phi(B) : SR.var('Phi')}
+        homogenize_groups = (Avars,)
         coeff_vars = (E,) + Avars + Bvars
         ODE_vars = ('Phi', )
         #zero_variety = sum(map(square, Avars))
         zero_variety = 1
     elif ansatz == 2:
         # Xi is a logarithm; Xi = ln C, so diff(Xi,C) = 1/C and diff(Xi,v) = diff(C,v)/C
+        # A is a linear polynomial; the solution is A times Xi.
+        # Homogenization forces A and C to be non-zero
         #
         # I've used this ansatz very little.
         Xi = SR_function('Xi')
         Psi = A * Xi(C)
         pre_subs = {DD[0](Xi)(C) : 1/C, DD[0,0](Xi)(C) : -1/C^2}
         post_subs = {Xi(C) : SR.var('Xi')}
+        homogenize_groups = (Avars, Cvars)
         coeff_vars = (E,) + Avars + Cvars
         ODE_vars = ('Xi', )
-        zero_variety = sum(map(square, Avars))
+        #zero_variety = sum(map(square, Avars))
+        zero_variety = 1
     elif ansatz == 3:
         # Chi is a weird second-order mess: C d^2 Chi/dB^2 - D dChi/dB - F Chi - G = 0
+        # A is a linear polynomial; the solution is A times Chi.
         #
         # I declared Chi to be a function of B, but in retrospect, it's also a
         # function of C, D, F, and G, none of which are (necessarily) functions of B
         #
+        # Homogenization forces A, B and C to be non-zero, and B is non-constant.
+        #
         # I've used this ansatz very little; ansatz 4 is closely related
         Chi = SR_function('Chi')
+        (Bvars, B) = trial_polynomial('b', coordinates, roots, 1, constant=None)
         Psi = A*Chi(B)
 
+        homogenize_groups = (Avars, Bvars, Cvars)
         coeff_vars = (E,) + Avars + Bvars + Cvars + Dvars + Fvars + Gvars
 
         pre_subs = {DD[0,0](Chi)(B) : (D/C * DD[0](Chi)(B) + F/C * Chi(B)) + G/C}
         post_subs = {Chi(B) : SR.var('Chi'), DD[0](Chi)(B) : SR.var('DChi')}
         ODE_vars = ('Chi', 'DChi')
 
-        zero_variety = sum(map(square, Avars))
+        #zero_variety = sum(map(square, Avars))
+        zero_variety = 1
     elif ansatz == 4:
         # Like ansatz 3, but without the polynomial A as a factor, and thus simplier
+        #
+        # Homogenization forces B and C to be non-zero, and B is non-constant.
         #
         # This ansatz is fairly well explored, but in an earlier version of the code
         # (pre-edbaa8 and pre-e74ded) whose ring and class structures aren't compatible.
         Chi = SR_function('Chi')
+        (Bvars, B) = trial_polynomial('b', coordinates, roots, 1, constant=None)
         Psi = Chi(B)
 
+        homogenize_groups = (Bvars, Cvars)
         coeff_vars = (E,) + Bvars + Cvars + Dvars + Fvars + Gvars
 
         pre_subs = {DD[0,0](Chi)(B) : (D/C * DD[0](Chi)(B) + F/C * Chi(B)) + G/C}
         post_subs = {Chi(B) : SR.var('Chi'), DD[0](Chi)(B) : SR.var('DChi')}
         ODE_vars = ('Chi', 'DChi')
 
-        zero_variety = sum(map(square, flatten((Cvars, Dvars, Fvars, Gvars)))) * sum(map(square, flatten((Bvars[1:], Cvars))))
+        #zero_variety = sum(map(square, flatten((Cvars, Dvars, Fvars, Gvars)))) * sum(map(square, flatten((Bvars[1:], Cvars))))
+        zero_variety = 1
     elif ansatz == 5:
         # A second-order homogeneous ODE: D(B) d^2 Zeta/dB^2 - M(B) dZeta/dB - N(B) Zeta = 0
         # where D(B), M(B), and N(B) are linear polynomials in B, which is itself a linear polynomial
@@ -293,7 +312,6 @@ def finish_prep(ansatz):
         (Mvars, M) = trial_polynomial('m', [B], [], 1)
         (Nvars, N) = trial_polynomial('n', [B], [], 1)
 
-        global homogenize_groups
         homogenize_groups = (Dvars, Bvars)
 
         coeff_vars = (E,) + Bvars + Dvars + Mvars + Nvars
@@ -305,7 +323,7 @@ def finish_prep(ansatz):
         #zero_variety = sum(map(square, flatten((Dvars, Mvars, Nvars)))) * sum(map(square, flatten((Bvars[1:], Dvars))))
         zero_variety = 1
     elif ansatz == 6:
-        # A second-order homogeneous ODE: D(B/C) d^2 Zeta/dB^2 - M(B/C) dZeta/dB - N(B/C) Zeta = 0
+        # A second-order homogeneous ODE: D(B/C) d^2 Zeta/d(B/C)^2 - M(B/C) dZeta/d(B/C) - N(B/C) Zeta = 0
         # where D(B/C), M(B/C), and N(B/C) are linear polynomials in B/C, a first-degree rational function
         Zeta = SR_function('Zeta')
         Psi = Zeta(B/C)
@@ -342,15 +360,17 @@ def finish_prep(ansatz):
     elif ansatz == 8:
         # A first-order homogeneous ODE: M(B) dZeta/dB - N(B) Zeta = 0
         # where M(B) and N(B) are linear polynomials in B, which is itself a linear polynomial
+        # B can not be constant; neither B or M can be zero (homogenization)
         #
         # Logically it's a step backwards from ansatz 5, but I want to see it work.
 
         Zeta = SR_function('Zeta')
-        (Bvars, B) = trial_polynomial('b', coordinates, roots, 1, constant=None, homogenize=0)
+        (Bvars, B) = trial_polynomial('b', coordinates, roots, 1, constant=None)
         Psi = Zeta(B)
-        (Mvars, M) = trial_polynomial('m', [B], [], 1, homogenize=1)
+        (Mvars, M) = trial_polynomial('m', [B], [], 1)
         (Nvars, N) = trial_polynomial('n', [B], [], 1)
 
+        homogenize_groups = (Mvars, Bvars)
         coeff_vars = (E,) + Bvars + Mvars + Nvars
 
         # A limitation of the program is that I have to manually calculate DD[0,0](Zeta)(B) here
@@ -360,7 +380,7 @@ def finish_prep(ansatz):
         #
         # Can't write diff(M,B) because B is a polynomial and diff only accepts a symbol as its second argument.
         # Yet we know that M = m1*B + m0, so diff(M,B)=m1
-        m1 = 1
+        m1 = Mvars[1]
         n1 = Nvars[1]
         pre_subs = {DD[0](Zeta)(B) : (N * Zeta(B)) / M,
                     DD[0,0](Zeta)(B) : (n1 * Zeta(B) * M + N * N * Zeta(B) - N * Zeta(B) * m1 ) / (M*M) }
@@ -374,12 +394,13 @@ def finish_prep(ansatz):
         # where n0 is a constant and B is a linear polynomial
         #
         # Logically it's a further step backwards from ansatz 8, but ansatz 8 has too many free variables
-        # for scipy.optimize.root to work on 1-dim hydrogen if homogenize=0 or homogenize=None.
+        # for scipy.optimize.root to work on 1-dim hydrogen if we use homogenization
         Zeta = SR_function('Zeta')
-        (Bvars, B) = trial_polynomial('b', coordinates, roots, 1, homogenize=1)
+        (Bvars, B) = trial_polynomial('b', coordinates, roots, 1, constant=None)
         Psi = Zeta(B)
         (Nvars, N) = trial_polynomial('n', [B], [], 0)
 
+        homogenize_groups = (Bvars, )
         coeff_vars = (E,) + Bvars + Nvars
 
         # A limitation of the program is that I have to manually calculate DD[0,0](Zeta)(B) here
@@ -2455,8 +2476,8 @@ def random_numerical(seed=0, homogenize=None, limit=None):
 
         print('Homogenize zeros:', homogenize_zeros, 'ones:', homogenize_ones)
 
-        homogenize_zero_indices = tuple(coeff_vars.index(var) for var in homogenize_zeros)
-        homogenize_one_indices = tuple(coeff_vars.index(var) for var in homogenize_ones)
+        homogenize_zero_indices = tuple(coeff_vars.index(var) for var in homogenize_zeros if var in coeff_vars)
+        homogenize_one_indices = tuple(coeff_vars.index(var) for var in homogenize_ones if var in coeff_vars)
 
         # These are the Jacobian matrices of the first derivatives of the extra functions.
         # The equations are simple (either v=0 or v=1), so the derivatives have a very simple (and constant) form.
