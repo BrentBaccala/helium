@@ -29,7 +29,8 @@
 # one at a time.  Different values of the 'homogenize' argument
 # (starting at 0) force different coefficients to be 1, and an
 # exception is thrown once all of the homogenization possibilities
-# have been exhausted.
+# have been exhausted.  Specifying homogenize=-1 runs through
+# all possible homogenizations (usually what you want).
 #
 # Homogenization can also be done when the trial solution is
 # constructed (this is the 'homogenize' argument to the
@@ -2477,6 +2478,14 @@ def random_numerical(seed=0, homogenize=None, limit=None):
 
     if homogenize != None:
 
+        if homogenize == -1:
+            # This is "auto-homogenization", where we run through all the homogenization possibilities
+            # until we get the ValueError below
+            hom = 0
+            while True:
+                random_numerical(homogenize=hom, seed=seed)
+                hom = hom + 1
+
         # We perform "homogenization" (more like de-homogenization) by adding some simple
         # equations to our set of equations to be solved.  This is done in the fn_divExpA()
         # function; here we only need to identify which variables are to be set to zero
@@ -2531,6 +2540,8 @@ def random_numerical(seed=0, homogenize=None, limit=None):
         print()
 
         if SciMin.success:
+            sum_of_squares = sum(map(lambda x: x.get(), [cc.sum_of_squares(SciMin.x) for cc in ccs]))
+            print(sum_of_squares)
             for pair in zip(coeff_vars, SciMin.x): print( pair)
         else:
             print( SciMin.message)
@@ -2551,7 +2562,12 @@ def random_numerical(seed=0, homogenize=None, limit=None):
         print()
 
         if SciMin.success:
-            printv(SciMin.x)
+            sum_of_squares = sum(map(lambda x: x.get(), [cc.sum_of_squares(SciMin.x) for cc in ccs]))
+            print("Sum of squares", sum_of_squares)
+            if sum_of_squares < 1e-10:
+                print()
+                printv(SciMin.x)
+                raise ValueError('solution found')
         else:
             print( SciMin.message)
 
