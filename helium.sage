@@ -1902,7 +1902,7 @@ def fns(v):
     last_time = time.time()
     return res
 
-def jac_fn(v):
+def jac_fns(v):
     r"""
     Evaluate the Jacobian matrix (the matrix of first-order
     partial derivatives) of our polynomials
@@ -1923,8 +1923,8 @@ def jac_fn(v):
     (and transpose them).
     """
 
-    res = np.vstack(map(lambda x: x.get(), [cc.jac_fns(v) for cc in ccs]))
-    return res
+    dN = np.vstack(list(map(lambda x: x.get(), [cc.jac_fns(v) for cc in ccs])) + [homogenize_derivatives])
+    return dN
 
 def get_nparray(shms):
     r"""
@@ -1945,10 +1945,12 @@ def get_nparray(shms):
             return obj.get()
     return get
 
-def jac_fns_divExpA(v):
-    # they're just global for debugging purposes
-    global N,dN
-    N = np.hstack(list(map(lambda x: x.get(), [cc.eval_fns(v) for cc in ccs])))
+def jac_fns_shm(v):
+    r"""
+    Same as jac_fns method, but intended to be faster, uses shared
+    memory to distribute the computation over multiple CollectorClass's
+    running in different processes.
+    """
 
     mdv_start_time = time.time()
 
@@ -2069,8 +2071,8 @@ def random_numerical(seed=0, homogenize=None, limit=None):
                 hom = hom + 1
 
         # We perform "homogenization" (more like de-homogenization) by adding some simple
-        # equations to our set of equations to be solved.  This is done in the fn_divExpA()
-        # function; here we only need to identify which variables are to be set to zero
+        # equations to our set of equations to be solved.  This is done in fns();
+        # here we only need to identify which variables are to be set to zero
         # and which variables are to be set to one.
 
         homogenize_zeros = []
@@ -2093,7 +2095,7 @@ def random_numerical(seed=0, homogenize=None, limit=None):
 
         # These are the Jacobian matrices of the first derivatives of the extra functions.
         # The equations are simple (either v=0 or v=1), so the derivatives have a very simple (and constant) form.
-        # They get precomputed here and will be appended to the Jacobian matrix in jac_fns_divExpA()
+        # They get precomputed here and will be appended to the Jacobian matrix in jac_fns
 
         zero_terms = [np.array([1 if i==j else 0 for i in range(len(coeff_vars))], ndmin=2) for j in homogenize_zero_indices]
         one_terms = [np.array([1 if i==j else 0 for i in range(len(coeff_vars))], ndmin=2) for j in homogenize_one_indices]
@@ -2108,7 +2110,7 @@ def random_numerical(seed=0, homogenize=None, limit=None):
     # 'lm' uses a QR factorization of the Jacobian, then the Levenberg–Marquardt line search algorithm
     # the others uses various approximations to the Jacobian
 
-    SciMin = scipy.optimize.root(fns, iv, jac=jac_fns_divExpA, method='lm')
+    SciMin = scipy.optimize.root(fns, iv, jac=jac_fns, method='lm')
 
     print()
     print()
