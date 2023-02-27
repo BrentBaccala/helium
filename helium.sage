@@ -198,7 +198,9 @@ def finish_prep(ansatz):
     SR_function = sage.symbolic.function_factory.function
 
     if ansatz == 1:
-        # Phi is an exponential; Phi = e^B, so diff(Phi,B) = Phi and diff(Phi,v) = diff(B,v)*Phi
+        # A linear polynomial times the exponential of a linear polynomial
+        # Phi is an exponential of a linear polynomial
+        # Phi = e^B, so diff(Phi,B) = Phi and diff(Phi,v) = diff(B,v)*Phi
         # A is a linear polynomial; the solution is A times Phi.
         # Homogenization forces A to be non-zero.
         #
@@ -214,6 +216,7 @@ def finish_prep(ansatz):
         ODE_vars = ('Phi', )
 
     elif ansatz == 2:
+        # A linear polynomial times the logarithm of a linear polynomial
         # Xi is a logarithm; Xi = ln C, so diff(Xi,C) = 1/C and diff(Xi,v) = diff(C,v)/C
         # A is a linear polynomial; the solution is A times Xi.
         # Homogenization forces A and C to be non-zero
