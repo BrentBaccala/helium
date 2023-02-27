@@ -89,34 +89,6 @@
 # - optimize creation of multi-vectors
 # - allow workers to be added or removed on the fly
 
-# scipy.minimize tries to minimize a scalar function: the sum of the
-# squares of the coefficient polynomials, divided by the value of the
-# zero variety (sum of a's squared).  It works pretty well for
-# hydrogen, but doesn't seem to converge well for helium.
-
-use_scipy_minimize = False
-
-# scipy.root minimizes the least squares of a vector function
-
-use_scipy_root = True
-
-# divide by an exponential instead of a norm
-
-use_divExp = True
-
-# If neither of the use_scipy options are True, we use my (first)
-# custom root finding algorithm, based on the Numerical Recipes text.
-# We can either do an exact line search by fitting to a rational
-# function, use the scipy built-in line search, or default to the NR
-# text algorithm.  We also have the option of using my distributed LU
-# decomposition code to solve the least squares problem, or use
-# scipy's built-in routine.
-
-use_exact_linesearch = False
-use_scipy_line_search = True
-use_scipy_lstsq = False
-use_scipy_lu = True
-
 # If True, use TCP/IP connections to interconnect Python sub-processes,
 # otherwise use UNIX sockets.  TCP/IP has much slower connection setups,
 # but allows multiple hosts to be used.
@@ -126,6 +98,7 @@ use_tcpip_multiprocessing = False
 import platform
 import glob
 import psutil
+import random
 
 current_process = psutil.Process(os.getpid())
 
@@ -210,7 +183,6 @@ DD=Doperator()
 
 def finish_prep(ansatz):
     global eq, H, coeff_vars, ODE_vars, coordinates, roots
-    global zero_variety, zero_variety_masks
     global A,B,C,D,F,G,M,N
     global homogenize_groups
 
@@ -240,8 +212,7 @@ def finish_prep(ansatz):
         homogenize_groups = (Avars,)
         coeff_vars = (E,) + Avars + Bvars
         ODE_vars = ('Phi', )
-        #zero_variety = sum(map(square, Avars))
-        zero_variety = 1
+
     elif ansatz == 2:
         # Xi is a logarithm; Xi = ln C, so diff(Xi,C) = 1/C and diff(Xi,v) = diff(C,v)/C
         # A is a linear polynomial; the solution is A times Xi.
@@ -255,8 +226,7 @@ def finish_prep(ansatz):
         homogenize_groups = (Avars, Cvars)
         coeff_vars = (E,) + Avars + Cvars
         ODE_vars = ('Xi', )
-        #zero_variety = sum(map(square, Avars))
-        zero_variety = 1
+
     elif ansatz == 3:
         # Chi is a weird second-order mess: C d^2 Chi/dB^2 - D dChi/dB - F Chi - G = 0
         # A is a linear polynomial; the solution is A times Chi.
@@ -278,8 +248,6 @@ def finish_prep(ansatz):
         post_subs = {Chi(B) : SR.var('Chi'), DD[0](Chi)(B) : SR.var('DChi')}
         ODE_vars = ('Chi', 'DChi')
 
-        #zero_variety = sum(map(square, Avars))
-        zero_variety = 1
     elif ansatz == 4:
         # Like ansatz 3, but without the polynomial A as a factor, and thus simplier
         #
@@ -298,8 +266,6 @@ def finish_prep(ansatz):
         post_subs = {Chi(B) : SR.var('Chi'), DD[0](Chi)(B) : SR.var('DChi')}
         ODE_vars = ('Chi', 'DChi')
 
-        #zero_variety = sum(map(square, flatten((Cvars, Dvars, Fvars, Gvars)))) * sum(map(square, flatten((Bvars[1:], Cvars))))
-        zero_variety = 1
     elif ansatz == 5:
         # A second-order homogeneous ODE: D(B) d^2 Zeta/dB^2 - M(B) dZeta/dB - N(B) Zeta = 0
         # where D(B), M(B), and N(B) are linear polynomials in B, which is itself a linear polynomial
@@ -320,8 +286,6 @@ def finish_prep(ansatz):
         post_subs = {Zeta(B) : SR.var('Zeta'), DD[0](Zeta)(B) : SR.var('DZeta')}
         ODE_vars = ('Zeta', 'DZeta')
 
-        #zero_variety = sum(map(square, flatten((Dvars, Mvars, Nvars)))) * sum(map(square, flatten((Bvars[1:], Dvars))))
-        zero_variety = 1
     elif ansatz == 6:
         # A second-order homogeneous ODE: D(B/C) d^2 Zeta/d(B/C)^2 - M(B/C) dZeta/d(B/C) - N(B/C) Zeta = 0
         # where D(B/C), M(B/C), and N(B/C) are linear polynomials in B/C, a first-degree rational function
@@ -337,7 +301,6 @@ def finish_prep(ansatz):
         post_subs = {Zeta(B/C) : SR.var('Zeta'), DD[0](Zeta)(B/C) : SR.var('DZeta')}
         ODE_vars = ('Zeta', 'DZeta')
 
-        zero_variety = 1
     elif ansatz == 7:
         # A second-order homogeneous ODE: D(B/C) d^2 Zeta/d(B/C)^2 - M(B/C) dZeta/d(B/C) - N(B/C) Zeta = 0
         # where D(B/C), M(B/C), and N(B/C) are second-degree polynomials in B/C, a second-degree rational function
@@ -355,8 +318,6 @@ def finish_prep(ansatz):
         post_subs = {Zeta(B/C) : SR.var('Zeta'), DD[0](Zeta)(B/C) : SR.var('DZeta')}
         ODE_vars = ('Zeta', 'DZeta')
 
-        #zero_variety = sum(map(square, Bvars)) * sum(map(square, Cvars))
-        zero_variety = 1
     elif ansatz == 8:
         # A first-order homogeneous ODE: M(B) dZeta/dB - N(B) Zeta = 0
         # where M(B) and N(B) are linear polynomials in B, which is itself a linear polynomial
@@ -387,8 +348,6 @@ def finish_prep(ansatz):
         post_subs = {Zeta(B) : SR.var('Zeta')}
         ODE_vars = ('Zeta', )
 
-        #zero_variety = sum(map(square, flatten((Dvars, Mvars, Nvars)))) * sum(map(square, flatten((Bvars[1:], Dvars))))
-        zero_variety = 1
     elif ansatz == 9:
         # A first-order homogeneous ODE: dZeta/dB - n0 Zeta = 0
         # where n0 is a constant and B is a linear polynomial
@@ -413,8 +372,6 @@ def finish_prep(ansatz):
         post_subs = {Zeta(B) : SR.var('Zeta')}
         ODE_vars = ('Zeta', )
 
-        #zero_variety = sum(map(square, flatten((Dvars, Mvars, Nvars)))) * sum(map(square, flatten((Bvars[1:], Dvars))))
-        zero_variety = 1
     elif ansatz == 10:
         # A second-order homogeneous ODE: D(B) d^2 Zeta/dB^2 - M(B) dZeta/dB - N(B) Zeta = 0
         # where D(B), M(B), and N(B) are quadratic polynomials in B, which is itself a quadratic polynomial
@@ -435,8 +392,6 @@ def finish_prep(ansatz):
         post_subs = {Zeta(B) : SR.var('Zeta'), DD[0](Zeta)(B) : SR.var('DZeta')}
         ODE_vars = ('Zeta', 'DZeta')
 
-        #zero_variety = sum(map(square, flatten((Dvars, Mvars, Nvars)))) * sum(map(square, flatten((Bvars[1:], Dvars))))
-        zero_variety = 1
     else:
         raise 'Bad ansatz'
 
@@ -446,35 +401,7 @@ def finish_prep(ansatz):
 
     # reduce coeff_vars to those which actually appear in the equation
     coeff_vars = tuple(sorted(set(eq.free_variables()).intersection(coeff_vars), key=lambda x:str(x)))
-
-    # We seek to avoid the zero variety; it's the trivial solution to the DE.
-    #
-    # However, in the simple case where the zero variety is just a
-    # product of factors, each the sum of squares of some coefficient
-    # variables, then we can compute the zero variety's function by
-    # masking off those variables and computing their norm.
-    #
-    # In fact, that's the only kind of zero variety the code currently
-    # supports (thus the assert).
-
-    def variety_to_masklist(v):
-
-        if v == 1:
-            return ()
-        elif v.operator() is add_vararg:
-            vars = tuple(set(v.free_variables()).intersection(coeff_vars))
-            return (np.array(tuple(c in vars for c in coeff_vars)), )
-        elif v.operator() is operator.pow:
-            return variety_to_masklist(v.operands()[0]) * v.operands()[1]
-        elif v.operator() is mul_vararg:
-            return tuple(flatten(map(variety_to_masklist, v.operands())))
-        else:
-            raise "Unknown operator"
-
-    zero_variety_masks = variety_to_masklist(zero_variety)
-
     coeff_vec = np.array(coeff_vars)
-    assert zero_variety == mul(sum(map(square, tuple(coeff_vec * mask))) for mask in zero_variety_masks)
 
 def prep_hydrogen(ansatz=1):
     global H, coordinates, roots
@@ -1383,40 +1310,6 @@ class JacobianMatrix(LUMatrix):
         self.collector = collector
         self._start_calculation(vec, shm_name)
 
-class JacobianDivAMatrix(LUMatrix):
-    r"""
-    Proxy class that wraps a Jacobian matrix.
-
-    This Jacobian is for the squares of the functions divided by the sum of the squares of the A vectors.
-
-    The idea is to drive the solution away from the hyperplane where
-    the A coefficients are all zero.
-    """
-
-    @async_method
-    def _start_calculation(self, vec):
-        # n is number of functions; c is number of variables
-        # the values - vec.shape = (c)
-
-        # the functions - N.shape = (n)
-        N = self.collector.eval_fns(vec).get()
-        # their derivatives - dN.shape = (n,c)
-        dN = np.stack([self.collector.dot(self.collector.generate_multi_D_vector(vec, var)) for var in coeff_vars], axis=1)
-
-        # the A values - Av.shape = (c)
-        Av = vec * zero_variety_mask
-        # sum A^2 - a scalar
-        Adenom = sum(Av*Av)
-
-        # output - M.shape = (n,c)
-        M = 2*(N.reshape(-1,1))*dN/Adenom - 2*np.outer(N*N,Av)/(Adenom^2)
-
-        LUMatrix.__init__(self, M, N*N/Adenom)
-
-    def __init__(self, collector, vec):
-        self.collector = collector
-        self._start_calculation(vec)
-
 class CollectorClass(Autoself):
     result = {}
     rows = {}
@@ -1794,23 +1687,6 @@ class CollectorClass(Autoself):
         """
         return self.autocreate('JacobianMatrix', self, vec, shm_name)
 
-    def jac_fns_divA(self, vec):
-        r"""
-        Evaluate the Jacobian matrix (the matrix of first-order
-        partial derivatives) of our polynomials divided by
-        the sum of the squares of the A-vectors.
-
-        INPUT:
-
-        - ``vec`` -- a vector of real values for all coeff_vars
-
-        OUTPUT:
-
-        - the Jacobian matrix, evaluated at ``vec``, as a numpy
-        matrix wrapped in a proxy object
-        """
-        return self.autocreate('JacobianDivAMatrix', self, vec)
-
     @async_result
     def sum_of_squares(self, vec):
         r"""
@@ -1928,7 +1804,6 @@ BaseManager.register('ExpanderClass', ExpanderClass)
 BaseManager.register('CollectorClass', CollectorClass)
 BaseManager.register('AsyncResult', AsyncResult)
 BaseManager.register('JacobianMatrix', JacobianMatrix)
-BaseManager.register('JacobianDivAMatrix', JacobianDivAMatrix)
 
 BaseManager.register('mc', callable = lambda: mc)
 BaseManager.register('get_work', get_work)
@@ -2008,35 +1883,6 @@ def fn(v):
     res = np.hstack(tuple(map(lambda x: x.get(), [cc.eval_fns(v) for cc in ccs])))
     return res
 
-def fns_divSqrtA(v):
-    r"""
-    The vector function we're trying to minimize: the polys that
-    define the solution variety, divided by the square root of the
-    zero variety we're trying to avoid.
-    """
-
-    # Save a copy of vector to aid in stopping and restarting the
-    # calculation.  An explicit call to the copy method is required if
-    # we're using the Fortran minpack code (i.e, scipy's optimize
-    # package) because in that case, 'v' is only a pointer to a
-    # Fortran array that gets deallocated once the Fortran code exits.
-    # (I think - the copy's definitely needed, though)
-    global last_v
-    last_v = v.copy()
-
-    res = np.hstack(list(map(lambda x: x.get(), [cc.eval_fns(v) for cc in ccs])))
-
-    denom = mul(map(np.linalg.norm, (v * mask for mask in zero_variety_masks)))
-
-    global last_time
-    sum_of_squares = sum(square(res/denom))
-    if last_time == 0:
-        print(sum_of_squares)
-    else:
-        print("{:<30} {:10.2f} sec".format(sum_of_squares, time.time()-last_time))
-    last_time = time.time()
-    return res/denom
-
 def fns_divExpA(v):
     r"""
     The vector function we're trying to minimize: the polynomials that
@@ -2056,17 +1902,14 @@ def fns_divExpA(v):
     homogenize_terms = [v[i] for i in homogenize_zero_indices] + [v[i] - 1 for i in homogenize_one_indices]
     res = np.hstack(list(map(lambda x: x.get(), [cc.eval_fns(v) for cc in ccs])) + homogenize_terms)
 
-    sqrtA = mul(map(np.linalg.norm, (v * mask for mask in zero_variety_masks)))
-    denom = 1 - math.exp(- sqrtA*sqrtA)
-
     global last_time
-    sum_of_squares = sum(square(res/denom))
+    sum_of_squares = sum(square(res))
     if last_time == 0:
         print(sum_of_squares)
     else:
         print("{:<30} {:10.2f} sec".format(sum_of_squares, time.time()-last_time))
     last_time = time.time()
-    return res/denom
+    return res
 
 def jac_fn(v):
     r"""
@@ -2111,49 +1954,9 @@ def get_nparray(shms):
             return obj.get()
     return get
 
-def jac_fns_divSqrtA(v):
-    global N,dN,Av,Adenom
-    N = np.hstack(list(map(lambda x: x.get(), [cc.eval_fns(v) for cc in ccs])))
-
-    mdv_start_time = time.time()
-
-    mdv_shm_size = len(coeff_vars) * ccs[0].ncols() * ccs[0].dtype().itemsize
-    mdv_shm = shared_memory.SharedMemory(create=True, size=mdv_shm_size)
-    coeff_distribution = [int(i*len(coeff_vars)/len(ccs)) for i in range(len(ccs) + 1)]
-
-    for i in range(len(ccs)):
-        ccs[i].compute_partial_mdv(v, mdv_shm.name, coeff_distribution[i], coeff_distribution[i+1])
-
-    for cc in ccs:
-        cc.join_threads()
-
-    mdv_time = time.time()
-    print("   Compute multi-D-vectors {:7.2f} sec".format(mdv_time - mdv_start_time))
-
-    shms = []
-    dN = np.vstack(list(map(get_nparray(shms), [cc.jac_fns(v, mdv_shm.name) for cc in ccs])))
-
-    dN_time = time.time()
-    print("   Compute dN              {:7.2f} sec".format(dN_time - mdv_time))
-
-    zero_variety_factors = tuple(v * mask for mask in zero_variety_masks)
-    denom = mul(map(np.linalg.norm, zero_variety_factors))
-    res = dN/denom - sum(np.outer(N,f)/(denom*np.linalg.norm(f)^2) for f in zero_variety_factors)
-
-    jac_time = time.time()
-    print("   Compute Jacobian matrix {:7.2f} sec".format(jac_time - dN_time))
-
-    mdv_shm.close()
-    mdv_shm.unlink()
-
-    for shm in shms:
-        shm.close()
-        shm.unlink()
-
-    return res
-
 def jac_fns_divExpA(v):
-    global N,dN,Av,Adenom
+    # they're just global for debugging purposes
+    global N,dN
     N = np.hstack(list(map(lambda x: x.get(), [cc.eval_fns(v) for cc in ccs])))
 
     mdv_start_time = time.time()
@@ -2174,17 +1977,8 @@ def jac_fns_divExpA(v):
     shms = []
     dN = np.vstack(list(map(get_nparray(shms), [cc.jac_fns(v, mdv_shm.name) for cc in ccs])) + [homogenize_derivatives])
 
-    dN_time = time.time()
-    print("   Compute dN              {:7.2f} sec".format(dN_time - mdv_time))
-
-    # this block is the only thing that's different between jac_fns_divSqrtA and jac_fns_divExpA
-    zero_variety_factors = tuple(v * mask for mask in zero_variety_masks)
-    sqrtA = mul(map(np.linalg.norm, zero_variety_factors))
-    denom = 1 - math.exp(- sqrtA*sqrtA)
-    res = dN/denom - 2*math.exp(-sqrtA)/denom^2*sum(np.outer(N,f)*sqrtA^2/np.linalg.norm(f)^2 for f in zero_variety_factors)
-
     jac_time = time.time()
-    print("   Compute Jacobian matrix {:7.2f} sec".format(jac_time - dN_time))
+    print("   Compute Jacobian matrix {:7.2f} sec".format(jac_time - mdv_time))
 
     mdv_shm.close()
     mdv_shm.unlink()
@@ -2193,74 +1987,10 @@ def jac_fns_divExpA(v):
         shm.close()
         shm.unlink()
 
-    return res
+    return dN
 
 def sum_of_squares(v):
     return sum(map(lambda x: x.get(), [cc.sum_of_squares(v) for cc in ccs]))
-
-def minfunc(v):
-    r"""
-    The function we're trying to minimize: the sum of squares of the
-    polys that define the solution variety, divided by the zero
-    variety we're trying to avoid.
-    """
-
-    # Save a copy of vector to aid in stopping and restarting the calculation
-    global last_v
-    last_v = v.copy()
-
-    d = dict(zip(coeff_vars, v))
-    sum_of_squares = sum(map(lambda x: x.get(), [cc.sum_of_squares(v) for cc in ccs]))
-
-    # Compute zero_var on operands() to make the order of addition consistent
-    # for testing purposes (otherwise we see variance in LSBs)
-    #zero_var = v.dtype.type(zero_variety.subs(d))
-    zero_var = v.dtype.type(sum(map(lambda bwb: bwb.subs(d), zero_variety.operands())))
-
-    res = real_type(sum_of_squares / zero_var)
-
-    global last_time
-    if last_time == 0:
-        print(res)
-    else:
-        print("{:<30} {:10.2f} sec".format(res, time.time()-last_time))
-    last_time = time.time()
-    return res
-
-# jac_minfunc(v) - the Jacobian matrix of minfunc()
-#
-# For testing purposes, we can compute this either by letting the
-# collectors compute the jacobian of the sum of the squares and then
-# modifying that result to take the denominator into account, or
-# we can have the collectors compute the jacobian matrix for the
-# individual functions (taking the denominator into account - divA)
-# and summing it up.  The result should be the same in either case,
-# up to floating point inaccuracies.
-
-use_matrix_jacobian = True
-
-def jac_minfunc(v):
-    global last_v
-    last_v = v.copy()
-
-    if use_matrix_jacobian:
-        res = sum(map(lambda x: np.array(x.get().sum(axis=0)), [cc.jac_fns_divA(v) for cc in ccs]))
-    else:
-        d = dict(zip(coeff_vars, v))
-        sum_of_squares = sum(map(lambda x: x.get(), [cc.sum_of_squares(v) for cc in ccs]))
-        jac_sum_of_squares = sum(map(lambda x: np.array(x.get()), [cc.jac_sum_of_squares(v) for cc in ccs]))
-
-        # Compute zero_var on operands() to make the order of addition consistent
-        # for testing purposes (otherwise we see variance in LSBs)
-        #zero_var = v.dtype.type(zero_variety.subs(d))
-        zero_var = v.dtype.type(sum(map(lambda bwb: bwb.subs(d), zero_variety.operands())))
-
-        Av = v * zero_variety_mask
-        res = ((jac_sum_of_squares*zero_var - 2*np.array(Av)*sum_of_squares)/zero_var^2)
-
-    return res
-
-import random
 
 def LU_decomposition(matrices):
     (rows, cols) = matrices[0].shape()
@@ -2310,145 +2040,6 @@ def LU_test2(seed):
     return np.isclose(M1,M2).all()
 
 # assert all([LU_test2(s) for s in range(100)])
-
-def optimize_step(vec):
-    r"""x
-
-    NOT CURRENTLY USED, as it doesn't converge very quickly near the
-    solution, probably due to a poor choice of the direction vector.
-
-    My attempt at an improved line search algorithm, which takes
-    advantage that given a direction vector on an algebraic variety,
-    the projection of the sum of squares onto that line is itself a
-    polynomial, and given a degree bound on the variety's defining
-    polynomials we can put a degree bound on the sum of squares
-    polynomial, thus we can easily compute a polynomial that doesn't
-    just fit the sum of squares, but describes it exactly.
-
-    "Numerical Recipes" recommends against this type of procedure
-    on p. 384, section 9.7, "Line Searches and Backtracking":
-
-        Until the early 1970s, standard practice was to choose λ so
-        that x new exactly minimizes f in the direction p. However, we
-        now know that it is extremely wasteful of function evaluations
-        to do so.
-
-    In this case, NR's advice might not apply so readily.  Each step
-    requires the calculation of the gradient vector, which for us is
-    the most time consuming operation, requiring N(coeff_vars) matrix
-    multiplications, while evaluating the function only requires a
-    single matrix multiplication.  So for N(coeff_vars) large (more
-    than seven, if the variety's degree bound is three), it makes
-    sense to do a few more function evaluations at each step.
-
-    """
-
-    # solve J d = f to find a direction vector
-
-    if use_scipy_lstsq:
-        jacobian = jac_fns_divSqrtA(vec)
-        (evalstep, *_) = scipy.linalg.lstsq(jacobian, fns_divSqrtA(vec))
-    elif use_scipy_lu:
-        jacobian = jac_fns_divSqrtA(vec)
-        (p,l,u) = scipy.linalg.lu(jacobian)
-        pb = scipy.linalg.inv(p).dot(fns_divSqrtA(vec))
-        n = u.shape[0]
-        lu = scipy.linalg.tril(l[0:n], -1) + u
-        piv = np.array(range(0,n))
-        evalstep = scipy.linalg.lu_solve((lu, piv), pb[0:n])
-    else:
-        # XXX - our collector class currently doesn't implement jac_fns_divSqrtA
-        jacobians = [cc.jac_fns_divSqrtA(vec) for cc in ccs]
-        (L, U, f) = LU_decomposition(jacobians)
-        lu = np.tril(L, -1) + U
-        piv = np.array(range(lu.shape[0]))
-        evalstep = scipy.linalg.lu_solve((lu, piv), f)
-
-    # use gradient descent on the sum of squares to find a direction vector
-
-    # v0 = minfunc(vec)
-    # gradient = jac_minfunc(vec)
-    # norm = sum(square(gradient))
-    # evalstep = gradient*v0/norm
-
-    if use_exact_linesearch:
-        # We want to sample at seven points to fit a sixth degree polynomial.
-        # We expect a zero "close" to -1, so this will sample three points
-        # on either size of it
-        points = [vec + i*evalstep for i in [-4,-3,-2,-1,0,1,2]]
-        values = list(map(sum_of_squares, points))
-
-        global N,D
-        # Now fit a polynomial to this data
-        N = np.polynomial.polynomial.Polynomial.fit([-4,-3,-2,-1,0,1,2],values,6,[])
-
-        # The denominator is the sum of (A_0 + lambda A_d)^2 for all As
-        D = sum([square(np.polynomial.polynomial.Polynomial((vec[i], evalstep[i]))) for i in zero_variety_indices])
-
-        # the numerator of the first derivative of the function we're trying to minimize
-        f = (D * N.deriv() - N * D.deriv())
-
-        # find the real roots of the first derivative
-        all_roots = np.roots(list(reversed(list(f.coef))))
-        roots = [c.real for c in all_roots if np.isclose(c.imag, 0)]
-
-        # find the minimum and its location
-        value_root_pairs = [(N(r)/D(r), r) for r in roots]
-        value_root = min(value_root_pairs)
-
-        # return the computed step
-        nextstep = vec + evalstep*value_root[1]
-
-        # just do this to print the value
-        minfunc(nextstep)
-
-    elif use_scipy_line_search:
-
-        (alpha, *_) = scipy.optimize.line_search(minfunc, jac_minfunc, vec, -evalstep)
-        nextstep = vec - evalstep*alpha
-
-    else:
-        nextstep = vec - evalstep
-
-        current_val = minfunc(vec)
-        newton_val = minfunc(nextstep)
-        gradient = jac_minfunc(vec)
-
-        g_deriv = - gradient.dot(evalstep)
-
-        if newton_val > current_val - abs(g_deriv)/1000:
-
-            l = - g_deriv / (2*(newton_val - current_val - g_deriv))
-            #if l < 0.1:
-            #    l = 0.1
-
-            nextstep = vec - l*evalstep
-
-            print('newton step not acceptable - using l =', l)
-
-            nextval = minfunc(nextstep)
-
-            if nextval > current_val - abs(g_deriv)/1000:
-
-                ls = [l, 1.0]
-                gs = [nextval, newton_val]
-
-                while nextval > current_val - abs(g_deriv)/1000:
-                    # A = g(l) - g'(0) l - g(0)
-                    A = [gs[i] - g_deriv * ls[i] - current_val for i in [0,1]]
-                    a = (A[0]/ls[0]^2 - A[1]/ls[1]^2) / (ls[0] - ls[1])
-                    b = (-A[0]*ls[1]/ls[0]^2 + A[1]*ls[0]/ls[1]^2) / (ls[0] - ls[1])
-
-                    nextl = (- b + sqrt(b^2 - 3*a*g_deriv))/(3*a)
-                    nextstep = vec - nextl*evalstep
-                    nextval = minfunc(nextstep)
-
-                    ls.insert(0,nextl)
-                    gs.insert(0,nextval)
-
-                print('second step not acceptable - using ls = ', ls)
-
-    return nextstep
 
 def make_iv(seed):
 
@@ -2521,76 +2112,25 @@ def random_numerical(seed=0, homogenize=None, limit=None):
         homogenize_one_indices = tuple()
         homogenize_derivatives = np.empty(shape=(0, len(coeff_vars)))
 
-    # optimize.minimize searchs for minimums of a scalar-valued
-    # function, in our case the sum of squares of the variety's
-    # defining polynomials.  The problem, as explained in Numerical
-    # Recipes at the end of section 9.6, in the subsection titled
-    # "Newton’s Method versus Minimization", is that the sum of
-    # squares has many local minima that aren't global minima, and any
-    # of these minimization algorithms will tend to latch on to a
-    # local minimum instead of the global minimum.  The solution is to
-    # use an algorithm that searches for zeros of the vector-valued
-    # function instead of the sum of its squares.
+    # optimize.root methods:
+    # 'hybr' (the default) requires same num of eqns as vars
+    # 'lm' uses a QR factorization of the Jacobian, then the Levenberg–Marquardt line search algorithm
+    # the others uses various approximations to the Jacobian
 
-    if use_scipy_minimize:
+    SciMin = scipy.optimize.root(fns_divExpA, iv, jac=jac_fns_divExpA, method='lm')
 
-        SciMin = scipy.optimize.minimize(minfunc, iv, jac=jac_minfunc, method='BFGS', options={'return_all':True})
+    print()
+    print()
 
-        print()
-        print()
-
-        if SciMin.success:
-            sum_of_squares = sum(map(lambda x: x.get(), [cc.sum_of_squares(SciMin.x) for cc in ccs]))
-            print(sum_of_squares)
-            for pair in zip(coeff_vars, SciMin.x): print( pair)
-        else:
-            print( SciMin.message)
-
-    elif use_scipy_root:
-
-        # optimize.root methods:
-        # 'hybr' (the default) requires same num of eqns as vars
-        # 'lm' uses a QR factorization of the Jacobian, then the Levenberg–Marquardt line search algorithm
-        # the others uses various approximations to the Jacobian
-
-        if use_divExp:
-            SciMin = scipy.optimize.root(fns_divExpA, iv, jac=jac_fns_divExpA, method='lm')
-        else:
-            SciMin = scipy.optimize.root(fns_divSqrtA, iv, jac=jac_fns_divSqrtA, method='lm')
-
-        print()
-        print()
-
-        if SciMin.success:
-            sum_of_squares = sum(map(lambda x: x.get(), [cc.sum_of_squares(SciMin.x) for cc in ccs]))
-            print("Sum of squares", sum_of_squares)
-            if sum_of_squares < 1e-10:
-                print()
-                printv(SciMin.x)
-                raise ValueError('solution found')
-        else:
-            print( SciMin.message)
-
+    if SciMin.success:
+        sum_of_squares = sum(map(lambda x: x.get(), [cc.sum_of_squares(SciMin.x) for cc in ccs]))
+        print("Sum of squares", sum_of_squares)
+        if sum_of_squares < 1e-10:
+            print()
+            printv(SciMin.x)
+            raise ValueError('solution found')
     else:
-
-        # Custom root-finding algorithm, based on Numerical Recipes
-        #
-        # - LU factorization of the Jacobian, computed in parallel
-        # - exact-fit line search algorithm
-
-        i = 0
-        gtol = 1e-5
-        gnorm = np.linalg.norm(jac_minfunc(iv))
-
-        while (not limit or i < limit) and gnorm > gtol:
-            #minfunc(iv)
-            iv = optimize_step(iv)
-            gnorm = np.linalg.norm(jac_minfunc(iv))
-            i += 1
-
-        global final_iv
-        final_iv = iv
-        for pair in zip(coeff_vars, iv): print(pair)
+        print( SciMin.message)
 
 def random_numerical_ten(limit=10):
     for i in range(limit):
