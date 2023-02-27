@@ -1862,7 +1862,7 @@ def get_eqn(row):
     raise IndexError("row out of range")
 
 
-def fn(v):
+def fns(v):
     r"""
     Evaluate our polynomials at a given coordinate.
 
@@ -1877,17 +1877,8 @@ def fn(v):
     ALGORITHM:
 
     Call the `eval_fns` method for all CollectionClass's
-    in parallel, then concatenate all of the results together.
-    """
-
-    res = np.hstack(tuple(map(lambda x: x.get(), [cc.eval_fns(v) for cc in ccs])))
-    return res
-
-def fns_divExpA(v):
-    r"""
-    The vector function we're trying to minimize: the polynomials that
-    define the solution variety, divided by (1-exp(-A)), where A is
-    the `zero_variety` we're trying to avoid.
+    in parallel, then concatenate all of the results together,
+    adding additional polynomials to enfore "homogenize" conditions.
     """
 
     # Save a copy of vector to aid in stopping and restarting the
@@ -2117,7 +2108,7 @@ def random_numerical(seed=0, homogenize=None, limit=None):
     # 'lm' uses a QR factorization of the Jacobian, then the Levenberg–Marquardt line search algorithm
     # the others uses various approximations to the Jacobian
 
-    SciMin = scipy.optimize.root(fns_divExpA, iv, jac=jac_fns_divExpA, method='lm')
+    SciMin = scipy.optimize.root(fns, iv, jac=jac_fns_divExpA, method='lm')
 
     print()
     print()
