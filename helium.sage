@@ -570,7 +570,13 @@ def convert_eq_a():
     # math in the Symbolic Ring, which is very slow and memory intensive.  Calling it
     # like 'eq_a.polynomial(ring=F)' recurses through the expression tree and builds the
     # expression from the bottom up using polynomial ring operations, which are much more efficient.
-    F_eq_a = eq_a.polynomial(ring=F)
+    #
+    # This trick (currently) only works on my development Sage, so try it and fall back on the slower way.
+    try:
+        F_eq_a = eq_a.polynomial(ring=F)
+    except:
+        F_eq_a = F(eq_a)
+
     # clear higher powers of roots
     if len(roots) > 0:
         F_eq_a_n = F_eq_a.numerator().mod(mk_ideal(R, roots))
@@ -1086,7 +1092,12 @@ class ExpanderClass(Autoself):
         # return back to the manager before we begin work
         time.sleep(float(0.1))
         # Each term is presented as a tuple of ETuple and cofficient
-        for etuple, coeff in islice(F_eq_a_n.iterator_exp_coeff(), start, stop):
+        # iterator_exp_coeff was introduced later than Sage 9.0, so it doesn't work on Ubuntu 20's stock Sage
+        try:
+            iterator = F_eq_a_n.iterator_exp_coeff()
+        except:
+            iterator = F_eq_a_n.dict().items()
+        for etuple, coeff in islice(iterator, start, stop):
             # the first rvars form the key
             key = etuple[:num_rvars]
             # the remaining variables form the value
