@@ -71,17 +71,15 @@
 # by Brent Baccala
 #
 # first version - August 2019
-# latest version - January 2023
+# latest version - March 2023
 #
 # no rights reserved; you may freely copy, modify, or distribute this
 # program
 #
 # TODO list:
 # - collector should parse directly into matrix form
-# - compile a better regular expression to parse terms
 # - more easily turn multiprocessing on and off
 # - allow worker processes on different hosts
-# - remove unused code like LU decomposition and the regular expression parser
 # - check collected coefficient polynomials to see if they factor
 # - automate finding polynomial relations
 # - save checkpoints of optimization iterations
@@ -102,6 +100,7 @@ import random
 
 current_process = psutil.Process(os.getpid())
 
+import itertools
 from itertools import *
 import scipy.optimize
 
@@ -123,6 +122,17 @@ def powerset(iterable):
 
 
 def trial_polynomial(base, coordinates, roots, degree, homogenize=None, constant=True):
+    """trial_polynomial(base, coordinates, roots, degree, homogenize=None, constant=True)
+    Form a trial polynomial in the Symbolic Ring
+
+    base is a string to which we append numbers to get our coefficient names; i.e, 'a' -> (a0,a1,a2,...)
+    coordinates is a tuple of symbolic expressions (currently all symbols; i.e, x1.is_symbol() == True)
+    roots is a tuple of symbolic expressions for our roots (currently all powers; i.e, r.operator() == pow)
+    degree is maximum degree of the trial polynomial
+    constant=None is optional and drops the constant term (essentially mindeg=1 instead of mindeg=0)
+    homogenize=N is unused right now and is intended as a future performance optimization
+    """
+
     # base is a string to which we append numbers to get our coefficient names; i.e, 'a' -> (a0,a1,a2,...)
     # cterms are coefficient terms
     # rterms are radius terms
