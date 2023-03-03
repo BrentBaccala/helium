@@ -119,7 +119,27 @@ def powerset(iterable):
     s = list(iterable)
     return chain.from_iterable(combinations(s, r) for r in range(len(s)+1))
 
+# https://stackoverflow.com/a/5731531/1493790 contains equivalent Python code for combinations:
 
+def combinations(iterable, r):
+    # combinations('ABCD', 2) --> AB AC AD BC BD CD
+    # combinations(range(4), 3) --> 012 013 023 123
+    pool = tuple(iterable)
+    n = len(pool)
+    if r > n:
+        return
+    indices = range(r)
+    yield tuple(pool[i] for i in indices)
+    while True:
+        for i in reversed(range(r)):
+            if indices[i] != i + n - r:
+                break
+        else:
+            return
+        indices[i] += 1
+        for j in range(i+1, r):
+            indices[j] = indices[j-1] + 1
+        yield tuple(pool[i] for i in indices)
 
 def trial_polynomial(base, coordinates, roots, degree, homogenize=None, constant=True):
     """trial_polynomial(base, coordinates, roots, degree, homogenize=None, constant=True)
