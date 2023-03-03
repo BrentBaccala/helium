@@ -123,7 +123,7 @@ def powerset(iterable):
 #
 # i'm modifying it to pair each item in iterable with a maximum count of times it can be used
 
-def combinations_with_replacement(iterable, r):
+def combinations_with_replacement_with_maxcount_BROKEN(iterable, r):
     # combinations_with_replacement('ABC', 2) --> AA AB AC BB BC CC
     pool = tuple(iterable)
     n = len(pool)
@@ -132,26 +132,37 @@ def combinations_with_replacement(iterable, r):
     indices = [0] * r
     yield tuple(pool[i] for i in indices)
     while True:
-        for i in reversed(range(r)):
-            if indices[i] != n - 1:
-                break
-        else:
-            return
-        indices[i:] = [indices[i] + 1] * (r - i)
-
+        i = 0
         while i < r:
-            if indices[i] == n - 1:
+            # If we're picking three from ABCDE and D and E are limited to one, then
+            # we want ADC -> ADD (rejected) -> ADE -> AEE (rejected) -> BBB
+            for i in reversed(range(r)):
+                if indices[i] != n - 1:
+                    break
+            else:
+                return
+
+            #if indices[i] == n - 1:
                 # break back to outer while loop
                 # back i up even further than selected above
                 # try again
                 # how do we do all this?
-            this_items_max = maxcount[indices[i] + 1]
-            if this_items_max >= (r - i):
-                indices[i:] = [indices[i] + 1] * (r - i)
-                i = r
-            else:
-                indices[i:i+this_items_max] = [indices[i] + 1] * this_items_max
-                i += this_items_max
+            while (i < r) and (indices[i] < n - 1):
+                this_items_max = maxcount[indices[i] + 1]
+                if this_items_max >= (r - i):
+                    indices[i:] = [indices[i] + 1] * (r - i)
+                    i = r
+                    yield tuple(pool[i] for i in indices)
+                    break
+                elif space_is_left:
+                    indices[i:i+this_items_max] = [indices[i] + 1] * this_items_max
+                    i += this_items_max
+                else:
+                    # indices[i] == n - 1 (or is about to be)
+                    # no space is left
+                    indices[i:] = [indices[i] + 1] * (r - i)
+                    i = r
+                    # reject
 
         yield tuple(pool[i] for i in indices)
 
