@@ -119,53 +119,6 @@ def powerset(iterable):
     s = list(iterable)
     return chain.from_iterable(combinations(s, r) for r in range(len(s)+1))
 
-# Python itertools docs contains equivalent code to combinations_with_replacement
-#
-# i'm modifying it to pair each item in iterable with a maximum count of times it can be used
-
-def combinations_with_replacement_with_maxcount_BROKEN(iterable, r):
-    # combinations_with_replacement('ABC', 2) --> AA AB AC BB BC CC
-    pool = tuple(iterable)
-    n = len(pool)
-    if not n and r:
-        return
-    indices = [0] * r
-    yield tuple(pool[i] for i in indices)
-    while True:
-        i = 0
-        while i < r:
-            # If we're picking three from ABCDE and D and E are limited to one, then
-            # we want ADC -> ADD (rejected) -> ADE -> AEE (rejected) -> BBB
-            for i in reversed(range(r)):
-                if indices[i] != n - 1:
-                    break
-            else:
-                return
-
-            #if indices[i] == n - 1:
-                # break back to outer while loop
-                # back i up even further than selected above
-                # try again
-                # how do we do all this?
-            while (i < r) and (indices[i] < n - 1):
-                this_items_max = maxcount[indices[i] + 1]
-                if this_items_max >= (r - i):
-                    indices[i:] = [indices[i] + 1] * (r - i)
-                    i = r
-                    yield tuple(pool[i] for i in indices)
-                    break
-                elif space_is_left:
-                    indices[i:i+this_items_max] = [indices[i] + 1] * this_items_max
-                    i += this_items_max
-                else:
-                    # indices[i] == n - 1 (or is about to be)
-                    # no space is left
-                    indices[i:] = [indices[i] + 1] * (r - i)
-                    i = r
-                    # reject
-
-        yield tuple(pool[i] for i in indices)
-
 def trial_polynomial(base, coordinates, roots, degree, homogenize=None, constant=True):
     """trial_polynomial(base, coordinates, roots, degree, homogenize=None, constant=True)
     Form a trial polynomial in the Symbolic Ring
