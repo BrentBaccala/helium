@@ -125,25 +125,20 @@ def trial_polynomial(base, coordinates, roots, degree, homogenize=None, constant
 
     base is a string to which we append numbers to get our coefficient names; i.e, 'a' -> (a0,a1,a2,...)
     coordinates is a tuple of symbolic expressions (currently all symbols; i.e, x1.is_symbol() == True)
-    roots is a tuple of symbolic expressions for our roots (currently all powers; i.e, r.operator() == pow)
+    roots is a tuple of symbolic expressions for our roots (currently all powers; i.e, r.operator() == pow) (and all square roots)
     degree is maximum degree of the trial polynomial
     constant=None is optional and drops the constant term (essentially mindeg=1 instead of mindeg=0)
     homogenize=N is unused right now and is intended as a future performance optimization
     """
 
-    # base is a string to which we append numbers to get our coefficient names; i.e, 'a' -> (a0,a1,a2,...)
-    # cterms are coefficient terms
-    # rterms are radius terms
-    cterms = flatten([combinations_with_replacement(coordinates, d) for d in range(degree+1)])
-    # use this 'terms' for real
-    # the 'roots' are assumed to be square roots, so all we need is their powerset;
-    #    any higher powers will be replaced with expansions
-    terms = list(map(mul, (product(map(mul, cterms), map(mul, powerset(roots))))))
-    # The first term is the constant 1, so if we don't want a constant term, drop it
     if not constant:
-        terms = terms[1:]
-    # use this 'terms' for testing
-    # terms = list(map(mul,cterms)) + list(roots)
+        mindegree = 1
+    else:
+        mindegree = 0
+    terms = []
+    for deg in range(mindegree, degree+1):
+        terms += list(map(mul, (x for x in combinations_with_replacement(roots + coordinates, deg) if all(x.count(r) < 2 for r in roots))))
+
     coefficients = [var(base+str(c)) for c in range(len(terms))]
     poly_coefficients = list(coefficients)
     if homogenize != None:
