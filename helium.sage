@@ -1878,6 +1878,8 @@ def get_eqn(row):
             return cc.get_eqn(row)
     raise IndexError("row out of range")
 
+def eqns():
+    return [cc.get_eqn(row) for cc in ccs for row in range(cc.nrows())]
 
 def fns(v):
     r"""
