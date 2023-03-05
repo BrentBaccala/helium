@@ -186,7 +186,7 @@ DD=Doperator()
 
 def finish_prep(ansatz):
     global eq, H, coeff_vars, ODE_vars, coordinates, roots
-    global A,B,C,D,F,G,M,N
+    global A,B,C,D,F,G,M,N,V
     global homogenize_groups
 
     (Avars, A) = trial_polynomial('a', coordinates, roots, 1)
@@ -273,23 +273,23 @@ def finish_prep(ansatz):
         ODE_vars = ('Chi', 'DChi')
 
     elif ansatz == 5:
-        # A second-order homogeneous ODE: D(B) d^2 Zeta/dB^2 - M(B) dZeta/dB - N(B) Zeta = 0
-        # where D(B), M(B), and N(B) are linear polynomials in B, which is itself a linear polynomial
+        # A second-order homogeneous ODE: D(V) d^2 Zeta/dV^2 - M(V) dZeta/dV - N(V) Zeta = 0
+        # where D(V), M(V), and N(V) are linear polynomials in V, which is itself a linear polynomial
         #
-        # Homogenization forces B and D to be non-zero; B is also forced to be non-constant
+        # Homogenization forces V and D to be non-zero; V is also forced to be non-constant
         Zeta = SR_function('Zeta')
-        (Bvars, B) = trial_polynomial('b', coordinates, roots, 1, constant=None)
-        Psi = Zeta(B)
-        (Dvars, D) = trial_polynomial('d', [B], [], 1)
-        (Mvars, M) = trial_polynomial('m', [B], [], 1)
-        (Nvars, N) = trial_polynomial('n', [B], [], 1)
+        (Vvars, V) = trial_polynomial('v', coordinates, roots, 1, constant=None)
+        Psi = Zeta(V)
+        (Dvars, D) = trial_polynomial('d', [V], [], 1)
+        (Mvars, M) = trial_polynomial('m', [V], [], 1)
+        (Nvars, N) = trial_polynomial('n', [V], [], 1)
 
-        homogenize_groups = (Dvars, Bvars)
+        homogenize_groups = (Dvars, Vvars)
 
-        coeff_vars = (E,) + Bvars + Dvars + Mvars + Nvars
+        coeff_vars = (E,) + Vvars + Dvars + Mvars + Nvars
 
-        pre_subs = {DD[0,0](Zeta)(B) : (M * DD[0](Zeta)(B) + N * Zeta(B)) / D}
-        post_subs = {Zeta(B) : SR.var('Zeta'), DD[0](Zeta)(B) : SR.var('DZeta')}
+        pre_subs = {DD[0,0](Zeta)(V) : (M * DD[0](Zeta)(V) + N * Zeta(V)) / D}
+        post_subs = {Zeta(V) : SR.var('Zeta'), DD[0](Zeta)(V) : SR.var('DZeta')}
         ODE_vars = ('Zeta', 'DZeta')
 
     elif ansatz == 6:
