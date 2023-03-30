@@ -214,7 +214,7 @@ def finish_prep(ansatz):
         Psi = A * Phi(B)
         pre_subs = {DD[0](Phi)(B) : Phi(B), DD[0,0](Phi)(B) : Phi(B)}
         post_subs = {Phi(B) : SR.var('Phi')}
-        homogenize_groups = (Avars,)
+        homogenize_groups = (Avars, Bvars)
         coeff_vars = (E,) + Avars + Bvars
         ODE_vars = ('Phi', )
 
@@ -539,7 +539,7 @@ def analyze_eq_a(eq, depth=1, print_depth=2, file=sys.stdout):
 # three 64-bit words.  If things don't fit, it throws an exception.
 
 def create_polynomial_ring():
-    global R,F,num_rvars,num_cvars
+    global R,RQQ,F,num_rvars,num_cvars
     roots_names = list(map(varName, roots))
     num_rvars = len(roots_names) + len(ODE_vars) + len(coordinates)
     num_cvars = len(coeff_vars)
@@ -548,10 +548,13 @@ def create_polynomial_ring():
         # FLINT multivariates can't handle reduction modulo an ideal, so use Singular multivariates instead
         print('Using Singular implementation')
         R = PolynomialRing(ZZ, names=tuple(flatten((roots_names, ODE_vars, coordinates, coeff_vars))), order='lex')
+        RQQ = PolynomialRing(QQ, names=tuple(flatten((roots_names, ODE_vars, coordinates, coeff_vars))), order='lex')
     else:
         print('Using FLINT implementation')
         R = PolynomialRing(ZZ, names=tuple(flatten((roots_names, ODE_vars, coordinates, coeff_vars))),
                            implementation="FLINT", order='lex', encoding=encoding)
+        RQQ = PolynomialRing(QQ, names=tuple(flatten((roots_names, ODE_vars, coordinates, coeff_vars))),
+                             implementation="FLINT", order='lex', encoding=encoding)
     F = Frac(R)
 
 def mk_ideal(R, roots):
@@ -1878,8 +1881,11 @@ def get_eqn(row):
             return cc.get_eqn(row)
     raise IndexError("row out of range")
 
-def eqns():
-    return [cc.get_eqn(row) for cc in ccs for row in range(cc.nrows())]
+def eqns(ring=None):
+    if not ring:
+        return [cc.get_eqn(row) for cc in ccs for row in range(cc.nrows())]
+    else:
+        return [ring(cc.get_eqn(row)) for cc in ccs for row in range(cc.nrows())]
 
 def fns(v):
     r"""
