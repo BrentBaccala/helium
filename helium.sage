@@ -447,6 +447,8 @@ def prep_helium(ansatz=6):
         coordinates = (R1,R2,R12)
         roots = tuple()
 
+        # eq (5) in Nakashima and Nakatusji, Solving the Schrodinger equation for helium...
+        # THE JOURNAL OF CHEMICAL PHYSICS 127, 224104 2007
         def H(Psi):
             return - 1/2 *sum(diff(Psi, Ri, 2) + 2/Ri*diff(Psi,Ri) for Ri in [R1,R2])  \
                    - (diff(Psi, R12, 2) + 2/R12*diff(Psi,R12))                          \
@@ -1886,6 +1888,8 @@ def eqns(ring=None):
         return [cc.get_eqn(row) for cc in ccs for row in range(cc.nrows())]
     else:
         return [ring(cc.get_eqn(row)) for cc in ccs for row in range(cc.nrows())]
+
+
 
 def fns(v):
     r"""
