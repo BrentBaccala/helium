@@ -550,13 +550,11 @@ def create_polynomial_ring():
         # FLINT multivariates can't handle reduction modulo an ideal, so use Singular multivariates instead
         print('Using Singular implementation')
         R = PolynomialRing(ZZ, names=tuple(flatten((roots_names, ODE_vars, coordinates, coeff_vars))), order='lex')
-        RQQ = PolynomialRing(QQ, names=tuple(flatten((roots_names, ODE_vars, coordinates, coeff_vars))), order='lex')
     else:
         print('Using FLINT implementation')
         R = PolynomialRing(ZZ, names=tuple(flatten((roots_names, ODE_vars, coordinates, coeff_vars))),
                            implementation="FLINT", order='lex', encoding=encoding)
-        RQQ = PolynomialRing(QQ, names=tuple(flatten((roots_names, ODE_vars, coordinates, coeff_vars))),
-                             implementation="FLINT", order='lex', encoding=encoding)
+    RQQ = PolynomialRing(QQ, names=tuple(flatten((roots_names, ODE_vars, coordinates, coeff_vars))), order='lex')
     F = Frac(R)
 
 def mk_ideal(R, roots):
