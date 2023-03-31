@@ -1889,7 +1889,23 @@ def eqns(ring=None):
     else:
         return [ring(cc.get_eqn(row)) for cc in ccs for row in range(cc.nrows())]
 
+def bertini(eqns=None):
+    if not eqns:
+        eqns = eqns(RQQ)
+    print("""
+CONFIG
 
+TRACKTYPE: 1;
+
+END;
+
+INPUT
+    """)
+    print('variable_group ', ', '.join( [str(var) for var in set().union(*[set(eqn.variables()) for eqn in eqns])]), ';')
+    print("function ", ', '.join([f"f{i}" for i in range(1,len(eqns)+1)]), ';')
+    for i,eqn in enumerate(eqns):
+        print(f"f{i} = ", eqn, ";")
+    print('END;')
 
 def fns(v):
     r"""
