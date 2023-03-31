@@ -1343,6 +1343,7 @@ class CollectorClass(Autoself):
     multi_vec_calls = 0
     dot_times = 0
     dot_calls = 0
+    multi_vec_coeff = None
 
     def register_manager(self, mc):
         self.mc = mc
@@ -1660,10 +1661,11 @@ class CollectorClass(Autoself):
     def get_eqn(self, row):
         r"""
         Recreate and retreive the Sage equation corresponding to a
-        particular row in the matrix.  Only used for debugging
+        particular row in the matrix.
         """
-        B = self.generate_multi_vector(coeff_vars)
-        return sum(self.M[row].toarray() * B)
+        if self.multi_vec_coeff is None:
+            self.multi_vec_coeff = self.generate_multi_vector(coeff_vars)
+        return sum(self.M[row].toarray() * self.multi_vec_coeff)
 
     @async_method
     def compute_partial_mdv(self, vec, shm_name, start, stop):
