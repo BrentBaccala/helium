@@ -1904,7 +1904,7 @@ INPUT
     print('variable_group ', ', '.join( [str(var) for var in set().union(*[set(eqn.variables()) for eqn in eqns])]), ';')
     print("function ", ', '.join([f"f{i}" for i in range(1,len(eqns)+1)]), ';')
     for i,eqn in enumerate(eqns):
-        print(f"f{i} = ", eqn, ";")
+        print(f"f{i+1} = ", eqn, ";")
     print('END;')
 
 def fns(v):
