@@ -614,7 +614,9 @@ def create_polynomial_ring():
         print('Using FLINT implementation')
         R = PolynomialRing(ZZ, names=tuple(flatten((roots_names, ODE_vars, coordinates, coeff_vars))),
                            implementation="FLINT", order='lex', encoding=encoding)
-    RQQ = PolynomialRing(QQ, names=tuple(flatten((roots_names, ODE_vars, coordinates, coeff_vars))), order='lex')
+    # I don't want order=lex because this is the ring I'll use for Groebner basis calculations
+    RQQ = PolynomialRing(QQ, names=tuple(flatten((roots_names, ODE_vars, coordinates, coeff_vars))),
+                         order=f'degrevlex({len(roots_names) + len(ODE_vars) + len(coordinates)}), degrevlex({len(coeff_vars)})')
     F = Frac(R)
 
 def mk_ideal(R, roots):
