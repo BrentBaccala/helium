@@ -292,6 +292,66 @@ def finish_prep(ansatz):
         post_subs = {Zeta(V) : SR.var('Zeta'), DD[0](Zeta)(V) : SR.var('DZeta')}
         ODE_vars = ('Zeta', 'DZeta')
 
+    elif ansatz == 5.1:
+        # A second-order homogeneous ODE: D(V) d^2 Zeta/dV^2 - M(V) dZeta/dV - N(V) Zeta = 0
+        # where D(V), M(V), and N(V) are linear polynomials in V, which is a quadratic polynomial
+        #
+        # Homogenization forces V and D to be non-zero; V is also forced to be non-constant
+        Zeta = SR_function('Zeta')
+        (Vvars, V) = trial_polynomial('v', coordinates, roots, 2, constant=None)
+        Psi = Zeta(V)
+        (Dvars, D) = trial_polynomial('d', [V], [], 1)
+        (Mvars, M) = trial_polynomial('m', [V], [], 1)
+        (Nvars, N) = trial_polynomial('n', [V], [], 1)
+
+        homogenize_groups = (Dvars, Vvars)
+
+        coeff_vars = (E,) + Vvars + Dvars + Mvars + Nvars
+
+        pre_subs = {DD[0,0](Zeta)(V) : (M * DD[0](Zeta)(V) + N * Zeta(V)) / D}
+        post_subs = {Zeta(V) : SR.var('Zeta'), DD[0](Zeta)(V) : SR.var('DZeta')}
+        ODE_vars = ('Zeta', 'DZeta')
+
+    elif ansatz == 5.2:
+        # A second-order homogeneous ODE: D(V) d^2 Zeta/dV^2 - M(V) dZeta/dV - N(V) Zeta = 0
+        # where D(V), M(V), and N(V) are quadratic polynomials in V, which is a linear polynomial
+        #
+        # Homogenization forces V and D to be non-zero; V is also forced to be non-constant
+        Zeta = SR_function('Zeta')
+        (Vvars, V) = trial_polynomial('v', coordinates, roots, 1, constant=None)
+        Psi = Zeta(V)
+        (Dvars, D) = trial_polynomial('d', [V], [], 2)
+        (Mvars, M) = trial_polynomial('m', [V], [], 2)
+        (Nvars, N) = trial_polynomial('n', [V], [], 2)
+
+        homogenize_groups = (Dvars, Vvars)
+
+        coeff_vars = (E,) + Vvars + Dvars + Mvars + Nvars
+
+        pre_subs = {DD[0,0](Zeta)(V) : (M * DD[0](Zeta)(V) + N * Zeta(V)) / D}
+        post_subs = {Zeta(V) : SR.var('Zeta'), DD[0](Zeta)(V) : SR.var('DZeta')}
+        ODE_vars = ('Zeta', 'DZeta')
+
+    elif ansatz == 5.3:
+        # A second-order homogeneous ODE: D(V) d^2 Zeta/dV^2 - M(V) dZeta/dV - N(V) Zeta = 0
+        # where D(V), M(V), and N(V) are quadratic polynomials in V, which is also a quadratic polynomial
+        #
+        # Homogenization forces V and D to be non-zero; V is also forced to be non-constant
+        Zeta = SR_function('Zeta')
+        (Vvars, V) = trial_polynomial('v', coordinates, roots, 2, constant=None)
+        Psi = Zeta(V)
+        (Dvars, D) = trial_polynomial('d', [V], [], 2)
+        (Mvars, M) = trial_polynomial('m', [V], [], 2)
+        (Nvars, N) = trial_polynomial('n', [V], [], 2)
+
+        homogenize_groups = (Dvars, Vvars)
+
+        coeff_vars = (E,) + Vvars + Dvars + Mvars + Nvars
+
+        pre_subs = {DD[0,0](Zeta)(V) : (M * DD[0](Zeta)(V) + N * Zeta(V)) / D}
+        post_subs = {Zeta(V) : SR.var('Zeta'), DD[0](Zeta)(V) : SR.var('DZeta')}
+        ODE_vars = ('Zeta', 'DZeta')
+
     elif ansatz == 6:
         # A second-order homogeneous ODE: D(B/C) d^2 Zeta/d(B/C)^2 - M(B/C) dZeta/d(B/C) - N(B/C) Zeta = 0
         # where D(B/C), M(B/C), and N(B/C) are linear polynomials in B/C, a first-degree rational function
