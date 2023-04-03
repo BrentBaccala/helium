@@ -466,14 +466,30 @@ def finish_prep(ansatz):
         #
         # Homogenization forces V and D to be non-zero; V is also forced to be non-constant
 
-        var('gamma')
+        # anything that isn't constant w.r.t. coordinates is an SR_function
+        global gamma
         (Avars, A) = trial_polynomial('a', coordinates, roots, 1)
         (Bvars, B) = trial_polynomial('b', coordinates, roots, 1)
         (Cvars, C) = trial_polynomial('c', coordinates, roots, 1)
-        alg_exts = ((gamma, A*gamma^2 + B*gamma + C), )
+        #def deriv(self, *args,**kwds): print("{} {}".format(args, kwds)); return args[kwds['diff_param']]^2
+        def deriv(self, *args,**kwds):
+            print("{} {} {}".format(self, args, kwds))
+            wrt = args[kwds['diff_param']]
+            #return -(diff(A, wrt)*gamma(*coordinates)^2+diff(B,wrt)*gamma(*coordinates)+diff(C,wrt)/(2*A*gamma(*coordinates)+B))
+            return -(diff(A, wrt)*self(*coordinates)^2+diff(B,wrt)*self(*coordinates)+diff(C,wrt)/(2*A*self(*coordinates)+B))
+        gamma = SR_function('g', nargs=3, derivative_func=deriv)
+        #gamma = SR_function('g', nargs=3)
+
+        # We can construct derivatives like this, too:
+        # sage: DD[0](gamma)(x1,y1,z1)
+        # diff(g(x1, y1, z1), x1)
+        # sage: DD[1](gamma)(x1,y1,z1)
+        # diff(g(x1, y1, z1), y1)
+        # sage: DD[1,1](gamma)(x1,y1,z1)
+        # diff(g(x1, y1, z1), y1, y1)
 
         Zeta = SR_function('Zeta')
-        (Vvars, V) = trial_polynomial('v', coordinates, roots + (gamma,), 1, constant=None)
+        (Vvars, V) = trial_polynomial('v', coordinates, roots + (gamma(*coordinates),), 1, constant=None)
         Psi = Zeta(V)
         (Dvars, D) = trial_polynomial('d', [V], [], 1)
         (Mvars, M) = trial_polynomial('m', [V], [], 1)
@@ -486,14 +502,17 @@ def finish_prep(ansatz):
 
         pre_subs = {DD[0,0](Zeta)(V) : (M * DD[0](Zeta)(V) + N * Zeta(V)) / D}
         post_subs = {Zeta(V) : SR.var('Zeta'), DD[0](Zeta)(V) : SR.var('DZeta')}
+        post2_subs = {gamma(*coordinates) : SR.var('g')}
         ODE_vars = ('Zeta', 'DZeta')
+
+        alg_exts = (('g', A*gamma(*coordinates)^2 + B*gamma(*coordinates) + C, post2_subs),)
 
     else:
         raise 'Bad ansatz'
 
     eq = H(Psi) - E*Psi
 
-    eq = eq.subs(pre_subs).subs(post_subs)
+    eq = eq.subs(pre_subs).subs(post_subs).subs(post2_subs)
 
     # reduce coeff_vars to those which actually appear in the equation
     # let's not do this, in case we've got algebraic extension elements (like ansatz 11)
@@ -665,10 +684,9 @@ def mk_ideal(R, roots, alg_exts):
         Rexpr = R(v.operands()[0])
         power = int(1/v.operands()[1])
         ideal_generators.append(Rname^power - Rexpr)
-    for v,e in alg_exts:
-        assert v in SR
+    for v,e,postsub in alg_exts:
         assert e in SR
-        ideal_generators.append(R(roots_to_rs(e)))
+        ideal_generators.append(R(roots_to_rs(e).subs(postsub)))
     return ideal(ideal_generators)
 
 def convert_eq_a():
