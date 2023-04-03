@@ -188,6 +188,7 @@ def finish_prep(ansatz):
     global eq, H, coeff_vars, ODE_vars, coordinates, roots
     global A,B,C,D,F,G,M,N,V
     global homogenize_groups
+    global alg_exts
 
     (Avars, A) = trial_polynomial('a', coordinates, roots, 1)
     (Bvars, B) = trial_polynomial('b', coordinates, roots, 1)
@@ -196,9 +197,9 @@ def finish_prep(ansatz):
     (Fvars, F) = trial_polynomial('f', coordinates, roots, 1)
     (Gvars, G) = trial_polynomial('g', coordinates, roots, 1)
 
-    coeff_vars = (E,) + Avars + Bvars + Cvars + Dvars + Fvars + Gvars
-
     SR_function = sage.symbolic.function_factory.function
+
+    alg_exts = tuple()
 
     if ansatz == 1:
         # A linear polynomial times the exponential of a linear polynomial
@@ -458,6 +459,35 @@ def finish_prep(ansatz):
         post_subs = {Zeta(B) : SR.var('Zeta'), DD[0](Zeta)(B) : SR.var('DZeta')}
         ODE_vars = ('Zeta', 'DZeta')
 
+    elif ansatz == 11:
+        # A second-degree algebraic extension (linear coeffs) followed by
+        # a second-order homogeneous ODE: D(V) d^2 Zeta/dV^2 - M(V) dZeta/dV - N(V) Zeta = 0
+        # where D(V), M(V), and N(V) are linear polynomials in V, which is itself a linear polynomial
+        #
+        # Homogenization forces V and D to be non-zero; V is also forced to be non-constant
+
+        var('gamma')
+        (Avars, A) = trial_polynomial('a', coordinates, roots, 1)
+        (Bvars, B) = trial_polynomial('b', coordinates, roots, 1)
+        (Cvars, C) = trial_polynomial('c', coordinates, roots, 1)
+        alg_exts = ((gamma, A*gamma^2 + B*gamma + C), )
+
+        Zeta = SR_function('Zeta')
+        (Vvars, V) = trial_polynomial('v', coordinates, roots + (gamma,), 1, constant=None)
+        Psi = Zeta(V)
+        (Dvars, D) = trial_polynomial('d', [V], [], 1)
+        (Mvars, M) = trial_polynomial('m', [V], [], 1)
+        (Nvars, N) = trial_polynomial('n', [V], [], 1)
+
+        homogenize_groups = (Dvars, Vvars)
+
+        coeff_vars = (E,) + Vvars + Dvars + Mvars + Nvars + Avars + Bvars + Cvars
+        print(coeff_vars)
+
+        pre_subs = {DD[0,0](Zeta)(V) : (M * DD[0](Zeta)(V) + N * Zeta(V)) / D}
+        post_subs = {Zeta(V) : SR.var('Zeta'), DD[0](Zeta)(V) : SR.var('DZeta')}
+        ODE_vars = ('Zeta', 'DZeta')
+
     else:
         raise 'Bad ansatz'
 
@@ -466,8 +496,8 @@ def finish_prep(ansatz):
     eq = eq.subs(pre_subs).subs(post_subs)
 
     # reduce coeff_vars to those which actually appear in the equation
-    coeff_vars = tuple(sorted(set(eq.free_variables()).intersection(coeff_vars), key=lambda x:str(x)))
-    coeff_vec = np.array(coeff_vars)
+    # let's not do this, in case we've got algebraic extension elements (like ansatz 11)
+    # coeff_vars = tuple(sorted(set(eq.free_variables()).intersection(coeff_vars), key=lambda x:str(x)))
 
 def prep_hydrogen(ansatz=1):
     global H, coordinates, roots
@@ -600,27 +630,34 @@ def analyze_eq_a(eq, depth=1, print_depth=2, file=sys.stdout):
 # as a signed 64-bit integer, so this encoding encodes each polynomial term using
 # three 64-bit words.  If things don't fit, it throws an exception.
 
-def create_polynomial_ring():
+def create_polynomial_ring(alg_exts):
     global R,RQQ,F,num_rvars,num_cvars
+    # we need to add gamma to this to make ansatz 11 (algebraic extension) work
     roots_names = list(map(varName, roots))
-    num_rvars = len(roots_names) + len(ODE_vars) + len(coordinates)
+    alg_exts_names = [p[0] for p in alg_exts]
+    num_rvars = len(alg_exts_names) + len(roots_names) + len(ODE_vars) + len(coordinates)
     num_cvars = len(coeff_vars)
     encoding = 'deglex64({}),deglex64({}),sint64'.format(num_rvars, num_cvars)
-    if len(roots) > 0:
+    if len(roots) > 0 or len(alg_exts) > 0:
         # FLINT multivariates can't handle reduction modulo an ideal, so use Singular multivariates instead
         print('Using Singular implementation')
-        R = PolynomialRing(ZZ, names=tuple(flatten((roots_names, ODE_vars, coordinates, coeff_vars))), order='lex')
+        R = PolynomialRing(QQ, names=tuple(flatten((alg_exts_names, roots_names, ODE_vars, coordinates, coeff_vars))), order='lex')
     else:
         print('Using FLINT implementation')
-        R = PolynomialRing(ZZ, names=tuple(flatten((roots_names, ODE_vars, coordinates, coeff_vars))),
+        R = PolynomialRing(ZZ, names=tuple(flatten((alg_exts_names, roots_names, ODE_vars, coordinates, coeff_vars))),
                            implementation="FLINT", order='lex', encoding=encoding)
     # I don't want order=lex because this is the ring I'll use for Groebner basis calculations
-    RQQ = PolynomialRing(QQ, names=tuple(flatten((roots_names, ODE_vars, coordinates, coeff_vars))),
-                         order=f'degrevlex({len(roots_names) + len(ODE_vars) + len(coordinates)}), degrevlex({len(coeff_vars)})')
+    RQQ = PolynomialRing(QQ, names=tuple(flatten((alg_exts_names, roots_names, ODE_vars, coordinates, coeff_vars))),
+                         order=f'degrevlex({len(alg_exts) + len(roots_names) + len(ODE_vars) + len(coordinates)}), degrevlex({len(coeff_vars)})')
     F = Frac(R)
 
-def mk_ideal(R, roots):
+# we need to add gamma to this to make ansatz 11 (algebraic extension) work
+def mk_ideal(R, roots, alg_exts):
     "Given a list or tuple of roots, return a ideal of ring R that reduces the global variable names of those roots"
+    # We expect a tuple of pow's in the Symbolic Ring, so we can easily construct the minimal polynomials
+    #
+    # We can also take a pair of (varName, minpoly) where varName is a var in the Symbolic Ring
+    # and minpoly is a polynomial in the Symbolic Ring that can be converted to R
     ideal_generators = []
     for v in roots:
         assert v.operator() is operator.pow
@@ -628,11 +665,15 @@ def mk_ideal(R, roots):
         Rexpr = R(v.operands()[0])
         power = int(1/v.operands()[1])
         ideal_generators.append(Rname^power - Rexpr)
+    for v,e in alg_exts:
+        assert v in SR
+        assert e in SR
+        ideal_generators.append(R(roots_to_rs(e)))
     return ideal(ideal_generators)
 
 def convert_eq_a():
     global F_eq_a, F_eq_a_n, F_eq_a_d
-    create_polynomial_ring()
+    create_polynomial_ring(alg_exts)
     # If we write this as 'F_eq_a = F(eq_a)', Sage will attempt to construct F_eq_a by calling
     # eq_a.numerator() and eq_a.denominator(), which will perform lots of rational function
     # math in the Symbolic Ring, which is very slow and memory intensive.  Calling it
@@ -647,8 +688,8 @@ def convert_eq_a():
 
     # clear higher powers of roots
     if len(roots) > 0:
-        F_eq_a_n = F_eq_a.numerator().mod(mk_ideal(R, roots))
-        F_eq_a_d = F_eq_a.denominator().mod(mk_ideal(R, roots))
+        F_eq_a_n = F_eq_a.numerator().mod(mk_ideal(R, roots, alg_exts))
+        F_eq_a_d = F_eq_a.denominator().mod(mk_ideal(R, roots, alg_exts))
     else:
         F_eq_a_n = F_eq_a.numerator()
         F_eq_a_d = F_eq_a.denominator()
