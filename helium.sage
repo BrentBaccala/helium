@@ -2004,6 +2004,24 @@ def get_eqn(row):
             return cc.get_eqn(row)
     raise IndexError("row out of range")
 
+from sage.rings.polynomial import polydict
+from sage.rings.polynomial.multi_polynomial_element import MPolynomial_polydict
+
+def eqns_from_eq_a(ring=None):
+    coeff_etuple = list(mul(map(R, coeff_vars)).dict().keys())[0]
+    result = dict()
+    # for use iterator_exp_coeff (introduced after Sage 9.0)
+    for etuple, coeff in F_eq_a_n.dict().items():
+        coeff_d = polydict.PolyDict({etuple.dotprod(coeff_etuple): 1})
+        coeff_term = MPolynomial_polydict(R, d)
+        rest_term = MPolynomial_polydict(R, {etuple: coeff}) / coeff_term
+        coeff_key = coeff_term
+        if (coeff_key) in result:
+            result[coeff_key] += rest_term
+        else:
+            result[coeff_key] = rest_term
+    return result
+
 def eqns(ring=None):
     if not ring:
         return [cc.get_eqn(row) for cc in ccs for row in range(cc.nrows())]
