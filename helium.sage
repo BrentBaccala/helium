@@ -201,6 +201,8 @@ def finish_prep(ansatz):
 
     alg_exts = tuple()
 
+    post2_subs = dict()
+
     if ansatz == 1:
         # A linear polynomial times the exponential of a linear polynomial
         # Phi is an exponential of a linear polynomial
@@ -466,19 +468,16 @@ def finish_prep(ansatz):
         #
         # Homogenization forces V and D to be non-zero; V is also forced to be non-constant
 
-        # anything that isn't constant w.r.t. coordinates is an SR_function
         global gamma
         (Avars, A) = trial_polynomial('a', coordinates, roots, 1)
         (Bvars, B) = trial_polynomial('b', coordinates, roots, 1)
         (Cvars, C) = trial_polynomial('c', coordinates, roots, 1)
-        #def deriv(self, *args,**kwds): print("{} {}".format(args, kwds)); return args[kwds['diff_param']]^2
         def deriv(self, *args,**kwds):
-            print("{} {} {}".format(self, args, kwds))
+            #print("{} {} {}".format(self, args, kwds))
             wrt = args[kwds['diff_param']]
-            #return -(diff(A, wrt)*gamma(*coordinates)^2+diff(B,wrt)*gamma(*coordinates)+diff(C,wrt)/(2*A*gamma(*coordinates)+B))
             return -(diff(A, wrt)*self(*coordinates)^2+diff(B,wrt)*self(*coordinates)+diff(C,wrt)/(2*A*self(*coordinates)+B))
+        # anything that isn't constant w.r.t. coordinates is an SR_function
         gamma = SR_function('g', nargs=3, derivative_func=deriv)
-        #gamma = SR_function('g', nargs=3)
 
         # We can construct derivatives like this, too:
         # sage: DD[0](gamma)(x1,y1,z1)
@@ -2004,22 +2003,21 @@ def get_eqn(row):
             return cc.get_eqn(row)
     raise IndexError("row out of range")
 
-from sage.rings.polynomial import polydict
-from sage.rings.polynomial.multi_polynomial_element import MPolynomial_polydict
-
 def eqns_from_eq_a(ring=None):
-    coeff_etuple = list(mul(map(R, coeff_vars)).dict().keys())[0]
     result = dict()
-    # for use iterator_exp_coeff (introduced after Sage 9.0)
-    for etuple, coeff in F_eq_a_n.dict().items():
-        coeff_d = polydict.PolyDict({etuple.dotprod(coeff_etuple): 1})
-        coeff_term = MPolynomial_polydict(R, d)
-        rest_term = MPolynomial_polydict(R, {etuple: coeff}) / coeff_term
-        coeff_key = coeff_term
-        if (coeff_key) in result:
-            result[coeff_key] += rest_term
+    for coeff, monomial in F_eq_a_n:
+        rest_term = monomial.subs({R(v):1 for v in coeff_vars})
+        coeff_term = monomial / rest_term
+        if (rest_term) in result:
+            if ring:
+                result[rest_term] += ring(coeff * coeff_term)
+            else:
+                result[rest_term] += coeff * coeff_term
         else:
-            result[coeff_key] = rest_term
+            if ring:
+                result[rest_term] = ring(coeff * coeff_term)
+            else:
+                result[rest_term] = coeff * coeff_term
     return result
 
 def eqns(ring=None):
@@ -2040,7 +2038,7 @@ END;
 
 INPUT
     """)
-    print('variable_group ', ', '.join( [str(var) for var in set().union(*[set(eqn.variables()) for eqn in eqns])]), ';')
+    print('variable_group ', ', '.join( [str(var) for var in set().union(*[eqn.variables() for eqn in eqns])]), ';')
     print("function ", ', '.join([f"f{i}" for i in range(1,len(eqns)+1)]), ';')
     for i,eqn in enumerate(eqns):
         print(f"f{i+1} = ", eqn, ";")
