@@ -959,41 +959,6 @@ def find_relation():
         if Lrow[-1] != 0:
             break
 
-# Functions to encode and decode deglex exponents
-
-from sage.functions.other import binomial
-def choose_with_replacement(setsize,num):
-    return binomial(setsize + num - 1, num)
-
-def encode_deglex(exps):
-    # modified Gastineau algorithm to produce graded lexicographic order
-    #    order within each graded block is reversed from Gastineau's paper
-    delta = sum(exps)
-    retval = sum(choose_with_replacement(len(exps), j) for j in range(0,delta+1)) - 1
-    d = delta
-    for i in range(0,len(exps)-1):
-        retval -= sum(choose_with_replacement(len(exps)-i-1, d-j) for j in range(0,exps[i]))
-        d = d - exps[i]
-    return retval
-
-def decode_deglex(ind, len_exps):
-    total_degree = 0
-    exps = []
-    while ind >= choose_with_replacement(len_exps, total_degree):
-        ind -= choose_with_replacement(len_exps, total_degree)
-        total_degree += 1
-    d = total_degree
-    ind -= choose_with_replacement(len_exps, total_degree)
-    for i in range(0, len_exps-1):
-        this_exp = 0
-        while ind < -choose_with_replacement(len_exps-i-1, d-this_exp):
-            ind += choose_with_replacement(len_exps-i-1, d-this_exp)
-            this_exp += 1
-        exps.append(this_exp)
-        d -= this_exp
-    exps.append(d)
-    return exps
-
 # Function to compress files being written out uncompressed by the substitution code
 
 import os
