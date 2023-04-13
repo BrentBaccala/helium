@@ -7,8 +7,7 @@
 #
 # load('helium.sage')
 # prep_hydrogen()
-# multi_init()
-# multi_expand()
+# init()
 # random_numerical()
 #
 # This will produce a solution to the hydrogen atom using its
@@ -703,10 +702,6 @@ def timefunc(func, *args):
     print('{:30} {:10.2f} sec'.format(func.__name__, end_time - start_time))
     return retval
 
-def multi_init():
-    timefunc(create_eq_a)
-    timefunc(convert_eq_a)
-
 # Now expand out powers, and collect like x,y,z's terms together to
 # get a system of polynomials
 #
@@ -715,14 +710,6 @@ def multi_init():
 # Look for solutions using an approximate numerical technique
 
 last_time = 0
-
-def get_eqn(row):
-    for cc in ccs:
-        if row > cc.nrows():
-            row = row - cc.nrows()
-        else:
-            return cc.get_eqn(row)
-    raise IndexError("row out of range")
 
 def eqns_from_eq_a(ring=None):
     result = dict()
@@ -741,10 +728,19 @@ def eqns_from_eq_a(ring=None):
                 result[rest_term] = coeff * coeff_term
     return result
 
-def multi_expand():
+def create_eqns_RQQ():
     global eqns_RQQ, jac_eqns_RQQ
     eqns_RQQ = tuple(set(timefunc(eqns_from_eq_a, RQQ).values()))
+
+def create_jac_eqns_RQQ():
+    global eqns_RQQ, jac_eqns_RQQ
     jac_eqns_RQQ = [[diff(eqn, RQQ(v)) for eqn in eqns_RQQ] for v in coeff_vars]
+
+def init():
+    timefunc(create_eq_a)
+    timefunc(convert_eq_a)
+    timefunc(create_eqns_RQQ)
+    timefunc(create_jac_eqns_RQQ)
 
 def bertini(eqns=None):
     if not eqns:
