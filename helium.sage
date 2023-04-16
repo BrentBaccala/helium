@@ -711,6 +711,9 @@ def timefunc(func, *args, **kwargs):
 
 last_time = 0
 
+global idealnum
+idealnum = 0
+
 def eqns_from_eq_a(ring=None):
     result = dict()
     for coeff, monomial in F_eq_a_n:
@@ -726,7 +729,23 @@ def eqns_from_eq_a(ring=None):
                 result[rest_term] = ring(coeff * coeff_term)
             else:
                 result[rest_term] = coeff * coeff_term
-    return result.values()
+    eqns = result.values()
+    gennames = 'd0,d1,m0,m1,n0,n1'.split(',')
+    labels = [f'l{i}' for i in range(len(gennames))]
+    global RQQ2
+    RQQ2 = PolynomialRing(QQ, names=tuple(flatten((coeff_vars, labels))),
+                         order=f'degrevlex({len(coeff_vars)}), degrevlex({len(labels)})')
+    global labeled_gens
+    labeled_gens = tuple(RQQ2(g) - RQQ2(l) for g,l in zip(gennames, labels))
+    print(labeled_gens)
+    I = ideal(labeled_gens)
+    for eqn in eqns:
+        print(eqn, RQQ2(str(eqn)).reduce(I))
+    #gens = tuple(map(RQQ2, labels))
+    global zerogens
+    zerogens = tuple(gen for i,gen in enumerate(gens) if (idealnum & 2^i) == 0)
+    I = ideal(zerogens)
+    return [eqn.mod(I) for eqn in eqns] + list(zerogens)
 
 def create_eqns_RQQ():
     global eqns_RQQ, jac_eqns_RQQ
