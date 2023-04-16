@@ -729,23 +729,32 @@ def eqns_from_eq_a(ring=None):
                 result[rest_term] = ring(coeff * coeff_term)
             else:
                 result[rest_term] = coeff * coeff_term
-    eqns = result.values()
+    global eqns
+    eqns = tuple(result.values())
+
+    # "Fan out" an ideal by considering all possible states (=0 or !=0)
+    # of its generators.  The idea is to divide out by a prime ideal
+    # and try to find a witness point for the remaining ideals.
+
     gennames = 'd0,d1,m0,m1,n0,n1'.split(',')
-    labels = [f'l{i}' for i in range(len(gennames))]
-    global RQQ2
-    RQQ2 = PolynomialRing(QQ, names=tuple(flatten((coeff_vars, labels))),
-                         order=f'degrevlex({len(coeff_vars)}), degrevlex({len(labels)})')
-    global labeled_gens
-    labeled_gens = tuple(RQQ2(g) - RQQ2(l) for g,l in zip(gennames, labels))
-    print(labeled_gens)
-    I = ideal(labeled_gens)
+    # probably this has to be a Groebner basis
+    gens = tuple(map(RQQ, gennames))
+    def fn2(x,y):
+        Q,R = x.quo_rem(y)
+        print(Q, '*', y, ' + ', end='')
+        return R
     for eqn in eqns:
-        print(eqn, RQQ2(str(eqn)).reduce(I))
-    #gens = tuple(map(RQQ2, labels))
-    global zerogens
+        print(eqn, ' = ', end='')
+        reduce(fn2, (eqn,) + gens)
+        print('')
+    global zerogens, nonzerogens, nonzeroprod
     zerogens = tuple(gen for i,gen in enumerate(gens) if (idealnum & 2^i) == 0)
+    nonzerogens = tuple(gen for i,gen in enumerate(gens) if (idealnum & 2^i) != 0)
+    nonzeroprod = mul(gen for i,gen in enumerate(gens) if (idealnum & 2^i) != 0)
     I = ideal(zerogens)
-    return [eqn.mod(I) for eqn in eqns] + list(zerogens)
+    #return [eqn.mod(I) for eqn in eqns] + list(zerogens)
+    #return [eqn.mod(I)/nonzeroprod for eqn in eqns] + list(zerogens)
+    return [reduce(fn2, (eqn,) + zerogens)/nonzeroprod for eqn in eqns] + list(zerogens)
 
 def create_eqns_RQQ():
     global eqns_RQQ, jac_eqns_RQQ
