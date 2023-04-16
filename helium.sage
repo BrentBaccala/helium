@@ -6,13 +6,13 @@
 # INTERACTIVE USAGE:
 #
 # load('helium.sage')
-# prep_hydrogen()
+# prep_hydrogen(5)
 # init()
-# random_numerical()
+# random_numerical(homogenize=-1)
 #
-# This will produce a solution to the hydrogen atom using its
-# default ansatz (number 1).  You can also prep_helium(), and
-# supply an ansatz number as argument, as in prep_helium(-7).
+# This will produce a solution to the hydrogen atom using ansatz 5.
+# You can also prep_helium(), and supply an ansatz number as argument,
+# as in prep_helium(-7).
 #
 # Negative ansatzen use a spherically symmetric Hamiltonian that
 # reduces the dimension of the problem and lets us use the faster
@@ -37,6 +37,11 @@
 # coefficients, but a new system has to be constructed for every
 # homogenization possibility, so I don't do it this way, and only plan
 # to develop this option if computational complexity becomes an issue.
+#
+# After init(), instead of calling random_numerical(), you can also
+# try an exact calculation:
+#
+# ideal(eqns_RQQ).radical().primary_decomposition()
 #
 # CONCEPT:
 #
@@ -711,8 +716,12 @@ def timefunc(func, *args, **kwargs):
 
 last_time = 0
 
+# idealnum: either a number between 0 and 2^(ngens)-1 that shows (in
+# binary) which generators are in which state, or -1 to do no fanout.
+# ngens is length of gennames below.
+
 global idealnum
-idealnum = 0
+idealnum = -1
 
 def eqns_from_eq_a(ring=None):
     result = dict()
@@ -729,8 +738,10 @@ def eqns_from_eq_a(ring=None):
                 result[rest_term] = ring(coeff * coeff_term)
             else:
                 result[rest_term] = coeff * coeff_term
-    global eqns
-    eqns = tuple(result.values())
+    global eqns_before_fanout
+    eqns_before_fanout = tuple(result.values())
+    if idealnum == -1:
+        return eqns_before_fanout
 
     # "Fan out" an ideal by considering all possible states (=0 or !=0)
     # of its generators.  The idea is to divide out by a prime ideal
