@@ -695,9 +695,9 @@ def convert_eq_a():
 
 import time
 
-def timefunc(func, *args):
+def timefunc(func, *args, **kwargs):
     start_time = time.perf_counter()
-    retval = func(*args)
+    retval = func(*args, **kwargs)
     end_time = time.perf_counter()
     print('{:30} {:10.2f} sec'.format(func.__name__, end_time - start_time))
     return retval
@@ -726,11 +726,11 @@ def eqns_from_eq_a(ring=None):
                 result[rest_term] = ring(coeff * coeff_term)
             else:
                 result[rest_term] = coeff * coeff_term
-    return result
+    return result.values()
 
 def create_eqns_RQQ():
     global eqns_RQQ, jac_eqns_RQQ
-    eqns_RQQ = tuple(set(timefunc(eqns_from_eq_a, RQQ).values()))
+    eqns_RQQ = tuple(set(timefunc(eqns_from_eq_a, RQQ)))
 
 def create_jac_eqns_RQQ():
     global eqns_RQQ, jac_eqns_RQQ
