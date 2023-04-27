@@ -635,7 +635,7 @@ def analyze_eq_a(eq, depth=1, print_depth=2, file=sys.stdout):
 # three 64-bit words.  If things don't fit, it throws an exception.
 
 def create_polynomial_ring(alg_exts):
-    global R,RQQ,F,num_rvars,num_cvars
+    global R,RQQ,R32003,F,num_rvars,num_cvars
     # we need to add gamma to this to make ansatz 11 (algebraic extension) work
     roots_names = list(map(varName, roots))
     alg_exts_names = [p[0] for p in alg_exts]
@@ -652,6 +652,8 @@ def create_polynomial_ring(alg_exts):
                            implementation="FLINT", order='lex', encoding=encoding)
     # I don't want order=lex because this is the ring I'll use for Groebner basis calculations
     RQQ = PolynomialRing(QQ, names=tuple(flatten((alg_exts_names, roots_names, ODE_vars, coordinates, coeff_vars))),
+                         order=f'degrevlex({len(alg_exts) + len(roots_names) + len(ODE_vars) + len(coordinates)}), degrevlex({len(coeff_vars)})')
+    R32003 = PolynomialRing(GF(32003), names=tuple(flatten((alg_exts_names, roots_names, ODE_vars, coordinates, coeff_vars))),
                          order=f'degrevlex({len(alg_exts) + len(roots_names) + len(ODE_vars) + len(coordinates)}), degrevlex({len(coeff_vars)})')
     F = Frac(R)
 
