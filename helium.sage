@@ -682,7 +682,8 @@ def create_polynomial_ring(alg_exts):
     num_rvars = len(alg_exts_names) + len(roots_names) + len(ODE_vars) + len(coordinates)
     num_cvars = len(coeff_vars)
     encoding = 'deglex64({}),deglex64({}),sint64'.format(num_rvars, num_cvars)
-    if len(roots) > 0 or len(alg_exts) > 0:
+    # always use Singular, since we need my custom enhancements to do multivariate FLINT polynomials
+    if len(roots) > 0 or len(alg_exts) > 0 or True:
         # FLINT multivariates can't handle reduction modulo an ideal, so use Singular multivariates instead
         print('Using Singular implementation')
         R = PolynomialRing(QQ, names=tuple(flatten((alg_exts_names, roots_names, ODE_vars, coordinates, coeff_vars))), order='lex')
