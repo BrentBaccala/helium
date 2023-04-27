@@ -503,6 +503,10 @@ def finish_prep(ansatz):
     # let's not do this, in case we've got algebraic extension elements (like ansatz 11)
     # coeff_vars = tuple(sorted(set(eq.free_variables()).intersection(coeff_vars), key=lambda x:str(x)))
 
+    # I used to do this in convert_eq_a(), but that function can be slow, and this is pretty quick,
+    # so let's put it in the "prep()" step instead of the "init()" step
+    create_polynomial_ring(alg_exts)
+
 def prep_hydrogen(ansatz=1):
     global H, coordinates, roots
 
@@ -678,7 +682,6 @@ def mk_ideal(R, roots, alg_exts):
 
 def convert_eq_a():
     global F_eq_a, F_eq_a_n, F_eq_a_d
-    create_polynomial_ring(alg_exts)
     # If we write this as 'F_eq_a = F(eq_a)', Sage will attempt to construct F_eq_a by calling
     # eq_a.numerator() and eq_a.denominator(), which will perform lots of rational function
     # math in the Symbolic Ring, which is very slow and memory intensive.  Calling it
