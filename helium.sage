@@ -175,6 +175,7 @@ def finish_prep(ansatz):
     global A,B,C,D,F,G,M,N,V
     global homogenize_groups
     global alg_exts
+    global gamma
 
     (Avars, A) = trial_polynomial('a', coordinates, roots, 1)
     (Bvars, B) = trial_polynomial('b', coordinates, roots, 1)
@@ -454,7 +455,6 @@ def finish_prep(ansatz):
         #
         # Homogenization forces V and D to be non-zero; V is also forced to be non-constant
 
-        global gamma
         (Avars, A) = trial_polynomial('a', coordinates, roots, 1)
         (Bvars, B) = trial_polynomial('b', coordinates, roots, 1)
         (Cvars, C) = trial_polynomial('c', coordinates, roots, 1)
@@ -491,6 +491,42 @@ def finish_prep(ansatz):
         ODE_vars = ('Zeta', 'DZeta')
 
         alg_exts = (('g', A*gamma(*coordinates)^2 + B*gamma(*coordinates) + C, post2_subs),)
+
+    elif ansatz == 13:
+        # A second-degree algebraic extension (linear coeffs) used as the coefficient ring
+        # in a second-order homogeneous ODE: D(V) d^2 Zeta/dV^2 - M(V) dZeta/dV - N(V) Zeta = 0
+        # where D(V), M(V), and N(V) are linear polynomials in V (a linear polynomial) and gamma.
+        #
+        # Homogenization forces V and D to be non-zero; V is also forced to be non-constant
+
+        Zeta = SR_function('Zeta')
+        (Vvars, V) = trial_polynomial('v', coordinates, roots, 1, constant=None)
+
+        (Avars, A) = trial_polynomial('a', [V], [], 1)
+        (Bvars, B) = trial_polynomial('b', [V], [], 1)
+        (Cvars, C) = trial_polynomial('c', [V], [], 1)
+        def deriv(self, *args,**kwds):
+            #print("{} {} {}".format(self, args, kwds))
+            return -(diff(A, V)*self(*coordinates)^2+diff(B,V)*self(*coordinates)+diff(C,V)/(2*A*self(*coordinates)+B))
+        # anything that isn't constant w.r.t. coordinates is an SR_function
+        gamma = SR_function('g', nargs=1, derivative_func=deriv)
+
+        Psi = Zeta(V)
+        (Dvars, D) = trial_polynomial('d', [V], [gamma(V)], 1)
+        (Mvars, M) = trial_polynomial('m', [V], [gamma(V)], 1)
+        (Nvars, N) = trial_polynomial('n', [V], [gamma(V)], 1)
+
+        homogenize_groups = (Dvars, Vvars)
+
+        coeff_vars = (E,) + Vvars + Dvars + Mvars + Nvars + Avars + Bvars + Cvars
+        print(coeff_vars)
+
+        pre_subs = {DD[0,0](Zeta)(V) : (M * DD[0](Zeta)(V) + N * Zeta(V)) / D}
+        post_subs = {Zeta(V) : SR.var('Zeta'), DD[0](Zeta)(V) : SR.var('DZeta')}
+        post2_subs = {gamma(V) : SR.var('g')}
+        ODE_vars = ('Zeta', 'DZeta')
+
+        alg_exts = (('g', A*gamma(V)^2 + B*gamma(V) + C, post2_subs),)
 
     else:
         raise 'Bad ansatz'
@@ -652,8 +688,11 @@ def create_polynomial_ring(alg_exts):
         R = PolynomialRing(QQ, names=tuple(flatten((alg_exts_names, roots_names, ODE_vars, coordinates, coeff_vars))), order='lex')
     else:
         print('Using FLINT implementation')
+        # used with my custom option to set disk encoding
+        #R = PolynomialRing(ZZ, names=tuple(flatten((alg_exts_names, roots_names, ODE_vars, coordinates, coeff_vars))),
+        #                   implementation="FLINT", order='lex', encoding=encoding)
         R = PolynomialRing(ZZ, names=tuple(flatten((alg_exts_names, roots_names, ODE_vars, coordinates, coeff_vars))),
-                           implementation="FLINT", order='lex', encoding=encoding)
+                           implementation="FLINT", order='lex')
     # I don't want order=lex because this is the ring I'll use for Groebner basis calculations
     RQQ = PolynomialRing(QQ, names=tuple(flatten((alg_exts_names, roots_names, ODE_vars, coordinates, coeff_vars))),
                          order=f'degrevlex({len(alg_exts) + len(roots_names) + len(ODE_vars) + len(coordinates)}), degrevlex({len(coeff_vars)})')
