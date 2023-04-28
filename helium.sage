@@ -492,19 +492,36 @@ def finish_prep(ansatz):
 
         alg_exts = (('g', A*gamma(*coordinates)^2 + B*gamma(*coordinates) + C, post2_subs),)
 
-    elif ansatz == 13:
+    elif int(ansatz) == 13:
         # A second-degree algebraic extension (linear coeffs) used as the coefficient ring
         # in a second-order homogeneous ODE: D(V) d^2 Zeta/dV^2 - M(V) dZeta/dV - N(V) Zeta = 0
         # where D(V), M(V), and N(V) are linear polynomials in V (a linear polynomial) and gamma.
         #
         # Homogenization forces V and D to be non-zero; V is also forced to be non-constant
 
-        Zeta = SR_function('Zeta')
-        (Vvars, V) = trial_polynomial('v', coordinates, roots, 1, constant=None)
+        if ansatz == 13:
+            maxdeg_v = 1
+            maxdeg_alg = 1
+            maxdeg_ode = 1
+        elif ansatz == 13.1:
+            maxdeg_v = 2
+            maxdeg_ode = 1
+            maxdeg_alg = 1
+        elif ansatz == 13.2:
+            maxdeg_v = 1
+            maxdeg_ode = 2
+            maxdeg_alg = 1
+        elif ansatz == 13.3:
+            maxdeg_v = 1
+            maxdeg_ode = 1
+            maxdeg_alg = 2
 
-        (Avars, A) = trial_polynomial('a', [V], [], 1)
-        (Bvars, B) = trial_polynomial('b', [V], [], 1)
-        (Cvars, C) = trial_polynomial('c', [V], [], 1)
+        Zeta = SR_function('Zeta')
+        (Vvars, V) = trial_polynomial('v', coordinates, roots, maxdeg_v, constant=None)
+
+        (Avars, A) = trial_polynomial('a', [V], [], maxdeg_alg)
+        (Bvars, B) = trial_polynomial('b', [V], [], maxdeg_alg)
+        (Cvars, C) = trial_polynomial('c', [V], [], maxdeg_alg)
         def deriv(self, *args,**kwds):
             #print("{} {} {}".format(self, args, kwds))
             return -(diff(A, V)*self(*coordinates)^2+diff(B,V)*self(*coordinates)+diff(C,V)/(2*A*self(*coordinates)+B))
@@ -512,9 +529,9 @@ def finish_prep(ansatz):
         gamma = SR_function('g', nargs=1, derivative_func=deriv)
 
         Psi = Zeta(V)
-        (Dvars, D) = trial_polynomial('d', [V], [gamma(V)], 1)
-        (Mvars, M) = trial_polynomial('m', [V], [gamma(V)], 1)
-        (Nvars, N) = trial_polynomial('n', [V], [gamma(V)], 1)
+        (Dvars, D) = trial_polynomial('d', [V], [gamma(V)], maxdeg_ode)
+        (Mvars, M) = trial_polynomial('m', [V], [gamma(V)], maxdeg_ode)
+        (Nvars, N) = trial_polynomial('n', [V], [gamma(V)], maxdeg_ode)
 
         homogenize_groups = (Dvars, Vvars)
 
