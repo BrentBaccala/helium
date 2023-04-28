@@ -515,6 +515,22 @@ def finish_prep(ansatz):
             maxdeg_v = 1
             maxdeg_ode = 1
             maxdeg_alg = 2
+        elif ansatz == 13.4:
+            maxdeg_v = 2
+            maxdeg_ode = 2
+            maxdeg_alg = 1
+        elif ansatz == 13.5:
+            maxdeg_v = 2
+            maxdeg_ode = 1
+            maxdeg_alg = 2
+        elif ansatz == 13.5:
+            maxdeg_v = 1
+            maxdeg_ode = 2
+            maxdeg_alg = 2
+        elif ansatz == 13.6:
+            maxdeg_v = 2
+            maxdeg_ode = 2
+            maxdeg_alg = 2
 
         Zeta = SR_function('Zeta')
         (Vvars, V) = trial_polynomial('v', coordinates, roots, maxdeg_v, constant=None)
