@@ -526,7 +526,8 @@ def finish_prep(ansatz):
         post2_subs = {gamma(V) : SR.var('g')}
         ODE_vars = ('Zeta', 'DZeta')
 
-        alg_exts = (('g', A*gamma(V)^2 + B*gamma(V) + C, post2_subs),)
+        #alg_exts = (('g', A*gamma(V)^2 + B*gamma(V) + C, post2_subs),)
+        alg_exts = (('g', A*SR.var('g')^2 + B*SR.var('g') + C, post2_subs),)
 
     else:
         raise 'Bad ansatz'
