@@ -202,8 +202,10 @@ def finish_prep(ansatz):
         (Avars, A) = trial_polynomial('a', coordinates, roots, 1)
         (Bvars, B) = trial_polynomial('b', coordinates, roots, 1)
         Psi = A * Phi(B)
-        pre_subs = {DD[0](Phi)(B) : Phi(B), DD[0,0](Phi)(B) : Phi(B)}
-        post_subs = {Phi(B) : SR.var('Phi')}
+        # subs is a list of dictionaries defining substitutions.  They are executed in order.
+        subs = [{DD[0](Phi)(B) : Phi(B), DD[0,0](Phi)(B) : Phi(B)},
+                {Phi(B) : SR.var('Phi')}
+        ]
         homogenize_groups = (Avars, Bvars)
         coeff_vars = (E,) + Avars + Bvars
         ODE_vars = ('Phi', )
@@ -217,8 +219,9 @@ def finish_prep(ansatz):
         # I've used this ansatz very little.
         Xi = SR_function('Xi')
         Psi = A * Xi(C)
-        pre_subs = {DD[0](Xi)(C) : 1/C, DD[0,0](Xi)(C) : -1/C^2}
-        post_subs = {Xi(C) : SR.var('Xi')}
+        subs = [{DD[0](Xi)(C) : 1/C, DD[0,0](Xi)(C) : -1/C^2},
+                {Xi(C) : SR.var('Xi')}
+        ]
         homogenize_groups = (Avars, Cvars)
         coeff_vars = (E,) + Avars + Cvars
         ODE_vars = ('Xi', )
@@ -240,8 +243,9 @@ def finish_prep(ansatz):
         homogenize_groups = (Avars, Bvars, Cvars)
         coeff_vars = (E,) + Avars + Bvars + Cvars + Dvars + Fvars + Gvars
 
-        pre_subs = {DD[0,0](Chi)(B) : (D/C * DD[0](Chi)(B) + F/C * Chi(B)) + G/C}
-        post_subs = {Chi(B) : SR.var('Chi'), DD[0](Chi)(B) : SR.var('DChi')}
+        subs = [{DD[0,0](Chi)(B) : (D/C * DD[0](Chi)(B) + F/C * Chi(B)) + G/C},
+                {Chi(B) : SR.var('Chi'), DD[0](Chi)(B) : SR.var('DChi')}
+        ]
         ODE_vars = ('Chi', 'DChi')
 
     elif ansatz == 4:
@@ -258,8 +262,9 @@ def finish_prep(ansatz):
         homogenize_groups = (Bvars, Cvars)
         coeff_vars = (E,) + Bvars + Cvars + Dvars + Fvars + Gvars
 
-        pre_subs = {DD[0,0](Chi)(B) : (D/C * DD[0](Chi)(B) + F/C * Chi(B)) + G/C}
-        post_subs = {Chi(B) : SR.var('Chi'), DD[0](Chi)(B) : SR.var('DChi')}
+        subs = [{DD[0,0](Chi)(B) : (D/C * DD[0](Chi)(B) + F/C * Chi(B)) + G/C},
+                {Chi(B) : SR.var('Chi'), DD[0](Chi)(B) : SR.var('DChi')}
+        ]
         ODE_vars = ('Chi', 'DChi')
 
     elif ansatz == 5:
@@ -278,8 +283,9 @@ def finish_prep(ansatz):
 
         coeff_vars = (E,) + Vvars + Dvars + Mvars + Nvars
 
-        pre_subs = {DD[0,0](Zeta)(V) : (M * DD[0](Zeta)(V) + N * Zeta(V)) / D}
-        post_subs = {Zeta(V) : SR.var('Zeta'), DD[0](Zeta)(V) : SR.var('DZeta')}
+        subs = [{DD[0,0](Zeta)(V) : (M * DD[0](Zeta)(V) + N * Zeta(V)) / D},
+                {Zeta(V) : SR.var('Zeta'), DD[0](Zeta)(V) : SR.var('DZeta')}
+        ]
         ODE_vars = ('Zeta', 'DZeta')
 
     elif ansatz == 5.1:
@@ -298,8 +304,9 @@ def finish_prep(ansatz):
 
         coeff_vars = (E,) + Vvars + Dvars + Mvars + Nvars
 
-        pre_subs = {DD[0,0](Zeta)(V) : (M * DD[0](Zeta)(V) + N * Zeta(V)) / D}
-        post_subs = {Zeta(V) : SR.var('Zeta'), DD[0](Zeta)(V) : SR.var('DZeta')}
+        subs = [{DD[0,0](Zeta)(V) : (M * DD[0](Zeta)(V) + N * Zeta(V)) / D},
+                {Zeta(V) : SR.var('Zeta'), DD[0](Zeta)(V) : SR.var('DZeta')}
+        ]
         ODE_vars = ('Zeta', 'DZeta')
 
     elif ansatz == 5.2:
@@ -318,8 +325,9 @@ def finish_prep(ansatz):
 
         coeff_vars = (E,) + Vvars + Dvars + Mvars + Nvars
 
-        pre_subs = {DD[0,0](Zeta)(V) : (M * DD[0](Zeta)(V) + N * Zeta(V)) / D}
-        post_subs = {Zeta(V) : SR.var('Zeta'), DD[0](Zeta)(V) : SR.var('DZeta')}
+        subs = [{DD[0,0](Zeta)(V) : (M * DD[0](Zeta)(V) + N * Zeta(V)) / D},
+                {Zeta(V) : SR.var('Zeta'), DD[0](Zeta)(V) : SR.var('DZeta')}
+        ]
         ODE_vars = ('Zeta', 'DZeta')
 
     elif ansatz == 5.3:
@@ -338,8 +346,9 @@ def finish_prep(ansatz):
 
         coeff_vars = (E,) + Vvars + Dvars + Mvars + Nvars
 
-        pre_subs = {DD[0,0](Zeta)(V) : (M * DD[0](Zeta)(V) + N * Zeta(V)) / D}
-        post_subs = {Zeta(V) : SR.var('Zeta'), DD[0](Zeta)(V) : SR.var('DZeta')}
+        subs = [{DD[0,0](Zeta)(V) : (M * DD[0](Zeta)(V) + N * Zeta(V)) / D},
+                {Zeta(V) : SR.var('Zeta'), DD[0](Zeta)(V) : SR.var('DZeta')}
+        ]
         ODE_vars = ('Zeta', 'DZeta')
 
     elif ansatz == 6:
@@ -353,8 +362,9 @@ def finish_prep(ansatz):
 
         coeff_vars = (E,) + Bvars + Cvars + Dvars + Mvars + Nvars
 
-        pre_subs = {DD[0,0](Zeta)(B/C) : (M * DD[0](Zeta)(B/C) + N * Zeta(B/C)) / D}
-        post_subs = {Zeta(B/C) : SR.var('Zeta'), DD[0](Zeta)(B/C) : SR.var('DZeta')}
+        subs = [{DD[0,0](Zeta)(B/C) : (M * DD[0](Zeta)(B/C) + N * Zeta(B/C)) / D},
+                {Zeta(B/C) : SR.var('Zeta'), DD[0](Zeta)(B/C) : SR.var('DZeta')}
+        ]
         ODE_vars = ('Zeta', 'DZeta')
 
     elif ansatz == 7:
@@ -370,8 +380,9 @@ def finish_prep(ansatz):
 
         coeff_vars = (E,) + Bvars + Cvars + Dvars + Mvars + Nvars
 
-        pre_subs = {DD[0,0](Zeta)(B/C) : (M * DD[0](Zeta)(B/C) + N * Zeta(B/C)) / D}
-        post_subs = {Zeta(B/C) : SR.var('Zeta'), DD[0](Zeta)(B/C) : SR.var('DZeta')}
+        subs = [{DD[0,0](Zeta)(B/C) : (M * DD[0](Zeta)(B/C) + N * Zeta(B/C)) / D},
+                {Zeta(B/C) : SR.var('Zeta'), DD[0](Zeta)(B/C) : SR.var('DZeta')}
+        ]
         ODE_vars = ('Zeta', 'DZeta')
 
     elif ansatz == 8:
@@ -399,9 +410,10 @@ def finish_prep(ansatz):
         # Yet we know that M = m1*B + m0, so diff(M,B)=m1
         m1 = Mvars[1]
         n1 = Nvars[1]
-        pre_subs = {DD[0](Zeta)(B) : (N * Zeta(B)) / M,
-                    DD[0,0](Zeta)(B) : (n1 * Zeta(B) * M + N * N * Zeta(B) - N * Zeta(B) * m1 ) / (M*M) }
-        post_subs = {Zeta(B) : SR.var('Zeta')}
+        subs = [{DD[0](Zeta)(B) : (N * Zeta(B)) / M,
+                 DD[0,0](Zeta)(B) : (n1 * Zeta(B) * M + N * N * Zeta(B) - N * Zeta(B) * m1 ) / (M*M) },
+                {Zeta(B) : SR.var('Zeta')}
+        ]
         ODE_vars = ('Zeta', )
 
     elif ansatz == 9:
@@ -423,9 +435,10 @@ def finish_prep(ansatz):
         #  DD[0,0](Zeta)(B)  = n0^2 Zeta(B)
 
         n0 = Nvars[0]
-        pre_subs = {DD[0](Zeta)(B) : n0 * Zeta(B),
-                    DD[0,0](Zeta)(B) : n0^2 * Zeta(B)}
-        post_subs = {Zeta(B) : SR.var('Zeta')}
+        subs = [{DD[0](Zeta)(B) : n0 * Zeta(B),
+                 DD[0,0](Zeta)(B) : n0^2 * Zeta(B)},
+                {Zeta(B) : SR.var('Zeta')}
+        ]
         ODE_vars = ('Zeta', )
 
     elif ansatz == 10:
@@ -444,8 +457,9 @@ def finish_prep(ansatz):
 
         coeff_vars = (E,) + Bvars + Dvars + Mvars + Nvars
 
-        pre_subs = {DD[0,0](Zeta)(B) : (M * DD[0](Zeta)(B) + N * Zeta(B)) / D}
-        post_subs = {Zeta(B) : SR.var('Zeta'), DD[0](Zeta)(B) : SR.var('DZeta')}
+        subs = [{DD[0,0](Zeta)(B) : (M * DD[0](Zeta)(B) + N * Zeta(B)) / D},
+                {Zeta(B) : SR.var('Zeta'), DD[0](Zeta)(B) : SR.var('DZeta')}
+        ]
         ODE_vars = ('Zeta', 'DZeta')
 
     elif ansatz == 11:
@@ -485,12 +499,13 @@ def finish_prep(ansatz):
         coeff_vars = (E,) + Vvars + Dvars + Mvars + Nvars + Avars + Bvars + Cvars
         print(coeff_vars)
 
-        pre_subs = {DD[0,0](Zeta)(V) : (M * DD[0](Zeta)(V) + N * Zeta(V)) / D}
-        post_subs = {Zeta(V) : SR.var('Zeta'), DD[0](Zeta)(V) : SR.var('DZeta')}
-        post2_subs = {gamma(*coordinates) : SR.var('g')}
+        subs = [{DD[0,0](Zeta)(V) : (M * DD[0](Zeta)(V) + N * Zeta(V)) / D},
+                {Zeta(V) : SR.var('Zeta'), DD[0](Zeta)(V) : SR.var('DZeta')},
+                {gamma(*coordinates) : SR.var('g')}
+        ]
         ODE_vars = ('Zeta', 'DZeta')
 
-        alg_exts = (('g', A*gamma(*coordinates)^2 + B*gamma(*coordinates) + C, post2_subs),)
+        alg_exts = (('g', A*gamma(*coordinates)^2 + B*gamma(*coordinates) + C, subs[2]),)
 
     elif int(ansatz) == 13:
         # A second-degree algebraic extension (linear coeffs) used as the coefficient ring
@@ -554,20 +569,22 @@ def finish_prep(ansatz):
         coeff_vars = (E,) + Vvars + Dvars + Mvars + Nvars + Avars + Bvars + Cvars
         print(coeff_vars)
 
-        pre_subs = {DD[0,0](Zeta)(V) : (M * DD[0](Zeta)(V) + N * Zeta(V)) / D}
-        post_subs = {Zeta(V) : SR.var('Zeta'), DD[0](Zeta)(V) : SR.var('DZeta')}
-        post2_subs = {gamma(V) : SR.var('g')}
+        subs = [{DD[0,0](Zeta)(V) : (M * DD[0](Zeta)(V) + N * Zeta(V)) / D},
+                {Zeta(V) : SR.var('Zeta'), DD[0](Zeta)(V) : SR.var('DZeta')},
+                {gamma(V) : SR.var('g')}
+        ]
         ODE_vars = ('Zeta', 'DZeta')
 
         #alg_exts = (('g', A*gamma(V)^2 + B*gamma(V) + C, post2_subs),)
-        alg_exts = (('g', A*SR.var('g')^2 + B*SR.var('g') + C, post2_subs),)
+        alg_exts = (('g', A*SR.var('g')^2 + B*SR.var('g') + C, subs[2]),)
 
     else:
         raise 'Bad ansatz'
 
     eq = H(Psi) - E*Psi
 
-    eq = eq.subs(pre_subs).subs(post_subs).subs(post2_subs)
+    for sub in subs:
+        eq = eq.subs(sub)
 
     # reduce coeff_vars to those which actually appear in the equation
     # let's not do this, in case we've got algebraic extension elements (like ansatz 11)
