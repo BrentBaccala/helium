@@ -460,6 +460,51 @@ def finish_prep(ansatz):
         ]
         ODE_vars = ('Zeta', 'DZeta')
 
+    elif ansatz == 11:
+        # A second-degree algebraic extension (linear coeffs) followed by
+        # a second-order homogeneous ODE: D(V) d^2 Zeta/dV^2 - M(V) dZeta/dV - N(V) Zeta = 0
+        # where D(V), M(V), and N(V) are linear polynomials in V, which is itself a linear polynomial
+        #
+        # Homogenization forces V and D to be non-zero; V is also forced to be non-constant
+
+        (Avars, A) = trial_polynomial('a', coordinates, roots, 1)
+        (Bvars, B) = trial_polynomial('b', coordinates, roots, 1)
+        (Cvars, C) = trial_polynomial('c', coordinates, roots, 1)
+        def deriv(self, *args,**kwds):
+            #print("{} {} {}".format(self, args, kwds))
+            wrt = args[kwds['diff_param']]
+            return -(diff(A, wrt)*self(*coordinates)^2+diff(B,wrt)*self(*coordinates)+diff(C,wrt)/(2*A*self(*coordinates)+B))
+        # anything that isn't constant w.r.t. coordinates is an SR_function
+        gamma = SR_function('g', nargs=3, derivative_func=deriv)
+
+        # We can construct derivatives like this, too:
+        # sage: DD[0](gamma)(x1,y1,z1)
+        # diff(g(x1, y1, z1), x1)
+        # sage: DD[1](gamma)(x1,y1,z1)
+        # diff(g(x1, y1, z1), y1)
+        # sage: DD[1,1](gamma)(x1,y1,z1)
+        # diff(g(x1, y1, z1), y1, y1)
+
+        Zeta = SR_function('Zeta')
+        (Vvars, V) = trial_polynomial('v', coordinates, roots + (gamma(*coordinates),), 1, constant=None)
+        Psi = Zeta(V)
+        (Dvars, D) = trial_polynomial('d', [V], [], 1)
+        (Mvars, M) = trial_polynomial('m', [V], [], 1)
+        (Nvars, N) = trial_polynomial('n', [V], [], 1)
+
+        homogenize_groups = (Dvars, Vvars)
+
+        coeff_vars = (E,) + Vvars + Dvars + Mvars + Nvars + Avars + Bvars + Cvars
+        print(coeff_vars)
+
+        subs = [{DD[0,0](Zeta)(V) : (M * DD[0](Zeta)(V) + N * Zeta(V)) / D},
+                {Zeta(V) : SR.var('Zeta'), DD[0](Zeta)(V) : SR.var('DZeta')},
+                {gamma(*coordinates) : SR.var('g')}
+        ]
+        ODE_vars = ('Zeta', 'DZeta')
+
+        alg_exts = (('g', A*gamma(*coordinates)^2 + B*gamma(*coordinates) + C, subs[2]),)
+
     elif int(ansatz) == 12:
         # A second-degree homogenous ODE (linear coeffs) followed by another
         # second-order homogeneous ODE: D(V) d^2 Zeta/dV^2 - M(V) dZeta/dV - N(V) Zeta = 0
