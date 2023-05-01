@@ -514,18 +514,44 @@ def finish_prep(ansatz):
 
         # trial_polynomial returns a tuple: the coefficient variables used, and the polynomial itself
 
+        if ansatz == 12:
+            maxdeg_v = 1
+            maxdeg_u = 1
+            maxdeg_ode_v = 1
+            maxdeg_ode_u = 1
+        elif ansatz == 12.1:
+            maxdeg_v = 2
+            maxdeg_u = 1
+            maxdeg_ode_v = 1
+            maxdeg_ode_u = 1
+        elif ansatz == 12.2:
+            maxdeg_v = 1
+            maxdeg_u = 2
+            maxdeg_ode_v = 1
+            maxdeg_ode_u = 1
+        elif ansatz == 12.3:
+            maxdeg_v = 1
+            maxdeg_u = 1
+            maxdeg_ode_v = 2
+            maxdeg_ode_u = 1
+        elif ansatz == 12.4:
+            maxdeg_v = 1
+            maxdeg_u = 1
+            maxdeg_ode_v = 1
+            maxdeg_ode_u = 2
+
         Theta = SR_function('Theta')
-        (Uvars, U) = trial_polynomial('u', coordinates, roots, 1, constant=None)
-        (Avars, A) = trial_polynomial('a', [U], [], 1)
-        (Bvars, B) = trial_polynomial('b', [U], [], 1)
-        (Cvars, C) = trial_polynomial('c', [U], [], 1)
+        (Uvars, U) = trial_polynomial('u', coordinates, roots, maxdeg_u, constant=None)
+        (Avars, A) = trial_polynomial('a', [U], [], maxdeg_ode_u)
+        (Bvars, B) = trial_polynomial('b', [U], [], maxdeg_ode_u)
+        (Cvars, C) = trial_polynomial('c', [U], [], maxdeg_ode_u)
 
         Zeta = SR_function('Zeta')
-        (Vvars, V) = trial_polynomial('v', coordinates + (Theta(U),), roots, 1, constant=None)
+        (Vvars, V) = trial_polynomial('v', coordinates + (Theta(U),), roots, maxdeg_v, constant=None)
 
-        (Dvars, D) = trial_polynomial('d', [V], [], 1)
-        (Mvars, M) = trial_polynomial('m', [V], [], 1)
-        (Nvars, N) = trial_polynomial('n', [V], [], 1)
+        (Dvars, D) = trial_polynomial('d', [V], [], maxdeg_ode_v)
+        (Mvars, M) = trial_polynomial('m', [V], [], maxdeg_ode_v)
+        (Nvars, N) = trial_polynomial('n', [V], [], maxdeg_ode_v)
 
         # Psi is the solution to the PDE
         Psi = Zeta(V)
