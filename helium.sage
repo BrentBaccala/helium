@@ -644,6 +644,51 @@ def finish_prep(ansatz):
         #alg_exts = (('g', A*gamma(V)^2 + B*gamma(V) + C, post2_subs),)
         alg_exts = (('g', A*SR.var('g')^2 + B*SR.var('g') + C, subs[2]),)
 
+    elif ansatz == 16:
+        # A second-degree algebraic extension (root of a linear polynomial) followed by
+        # a second-order homogeneous ODE: D(V) d^2 Zeta/dV^2 - M(V) dZeta/dV - N(V) Zeta = 0
+        # where D(V), M(V), and N(V) are linear polynomials in V, which is itself a linear polynomial
+        #
+        # Homogenization forces V and D to be non-zero; V is also forced to be non-constant
+
+        (Avars, A) = trial_polynomial('a', coordinates, roots, 1)
+        def deriv(self, *args,**kwds):
+            wrt = args[kwds['diff_param']]
+            return diff(A, wrt)/(2*A*self(*coordinates))
+        # anything that isn't constant w.r.t. coordinates is an SR_function
+        gamma = SR_function('g', nargs=3, derivative_func=deriv)
+
+        # We can construct derivatives like this, too:
+        # sage: DD[0](gamma)(x1,y1,z1)
+        # diff(g(x1, y1, z1), x1)
+        # sage: DD[1](gamma)(x1,y1,z1)
+        # diff(g(x1, y1, z1), y1)
+        # sage: DD[1,1](gamma)(x1,y1,z1)
+        # diff(g(x1, y1, z1), y1, y1)
+
+        Zeta = SR_function('Zeta')
+        (Vvars, V) = trial_polynomial('v', coordinates, roots + (gamma(*coordinates),), 1, constant=None)
+        Psi = Zeta(V)
+        (Dvars, D) = trial_polynomial('d', [V], [], 1)
+        (Mvars, M) = trial_polynomial('m', [V], [], 1)
+        (Nvars, N) = trial_polynomial('n', [V], [], 1)
+
+        homogenize_groups = (Dvars, Vvars)
+
+        coeff_vars = (E,) + Vvars + Dvars + Mvars + Nvars + Avars
+        print(coeff_vars)
+
+        subs = [{DD[0,0](Zeta)(V) : (M * DD[0](Zeta)(V) + N * Zeta(V)) / D},
+                {Zeta(V) : SR.var('Zeta'), DD[0](Zeta)(V) : SR.var('DZeta')},
+                {gamma(*coordinates) : SR.var('g')}
+        ]
+        ODE_vars = ('Zeta', 'DZeta')
+
+        # alg_exts is a list of tuples
+        # each tuple is (name, minimal polynomial, substitution)
+        # minimal polynomial has its roots converted to rs, then subsitution is applied, then append to ideal to mod out by
+        alg_exts = (('g', gamma(*coordinates)^2 - A, subs[2]),)
+
     else:
         raise 'Bad ansatz'
 
