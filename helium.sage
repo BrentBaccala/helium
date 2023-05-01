@@ -982,11 +982,16 @@ def create_jac_eqns_RQQ():
     global eqns_RQQ, jac_eqns_RQQ
     jac_eqns_RQQ = [[diff(eqn, RQQ(v)) for eqn in eqns_RQQ] for v in coeff_vars]
 
+def create_eqns_R32003():
+    global eqns_R32003
+    eqns_R32003 = tuple(map(lambda arg: arg.map_coefficients(GF(32003), GF(32003)), eqns_RQQ))
+
 def init():
     timefunc(create_eq_a)
     timefunc(convert_eq_a)
     timefunc(create_eqns_RQQ)
     timefunc(create_jac_eqns_RQQ)
+    timefunc(create_eqns_R32003)
 
 def bertini(eqns=None):
     if not eqns:
