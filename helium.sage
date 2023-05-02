@@ -736,7 +736,7 @@ def finish_prep(ansatz):
 
     # I used to do this in convert_eq_a(), but that function can be slow, and this is pretty quick,
     # so let's put it in the "prep()" step instead of the "init()" step
-    create_polynomial_ring(alg_exts)
+    create_polynomial_rings(alg_exts)
     create_eq_a()
 
 def prep_hydrogen(ansatz=1):
@@ -870,32 +870,50 @@ def analyze_eq_a(eq, depth=1, print_depth=2, file=sys.stdout):
 # as a signed 64-bit integer, so this encoding encodes each polynomial term using
 # three 64-bit words.  If things don't fit, it throws an exception.
 
-def create_polynomial_ring(alg_exts):
-    global R,RQQ,R32003,F,num_rvars,num_cvars
+def create_polynomial_rings(alg_exts):
+    global convertRing,reduceRing,RQQ,R32003,convertField,num_rvars,num_cvars
     # we need to add gamma to this to make ansatz 11 (algebraic extension) work
     roots_names = list(map(varName, roots))
     alg_exts_names = [p[0] for p in alg_exts]
     num_rvars = len(alg_exts_names) + len(roots_names) + len(ODE_vars) + len(coordinates)
     num_cvars = len(coeff_vars)
     encoding = 'deglex64({}),deglex64({}),sint64'.format(num_rvars, num_cvars)
-    # always use Singular, since we need my custom enhancements to do multivariate FLINT polynomials
-    if len(roots) > 0 or len(alg_exts) > 0 or True:
-        # FLINT multivariates can't handle reduction modulo an ideal, so use Singular multivariates instead
-        print('Using Singular implementation')
-        R = PolynomialRing(QQ, names=tuple(flatten((alg_exts_names, roots_names, ODE_vars, coordinates, coeff_vars))), order='lex')
+
+    Rsingular = PolynomialRing(QQ, names=tuple(flatten((alg_exts_names, roots_names, ODE_vars, coordinates, coeff_vars))), order='lex')
+
+    # used with my custom option to set disk encoding
+    #R = PolynomialRing(ZZ, names=tuple(flatten((alg_exts_names, roots_names, ODE_vars, coordinates, coeff_vars))),
+    #                   implementation="FLINT", order='lex', encoding=encoding)
+    try:
+        Rflint = PolynomialRing(ZZ, names=tuple(flatten((alg_exts_names, roots_names, ODE_vars, coordinates, coeff_vars))),
+                                implementation="FLINT", order='lex')
+    except:
+        Rflint = None
+        print('multivariate FLINT rings unavailable')
+
+    # not only might FLINT be unavailable, it doesn't implement Groebner bases, so can't be used for reduction
+
+    if Rflint:
+        print('Using FLINT rings for convertion')
+        convertRing = Rflint
     else:
-        print('Using FLINT implementation')
-        # used with my custom option to set disk encoding
-        #R = PolynomialRing(ZZ, names=tuple(flatten((alg_exts_names, roots_names, ODE_vars, coordinates, coeff_vars))),
-        #                   implementation="FLINT", order='lex', encoding=encoding)
-        R = PolynomialRing(ZZ, names=tuple(flatten((alg_exts_names, roots_names, ODE_vars, coordinates, coeff_vars))),
-                           implementation="FLINT", order='lex')
+        print('Using Singular rings for convertion')
+        convertRing = Rsingular
+
+    if len(roots) > 0 or len(alg_exts) > 0:
+        print('Using Singular rings for reduction')
+        reduceRing = Rsingular
+    else:
+        print('Using convertion ring for reduction')
+        reduceRing = convertRing
+
+    convertField = Frac(convertRing)
+
     # I don't want order=lex because this is the ring I'll use for Groebner basis calculations
     RQQ = PolynomialRing(QQ, names=tuple(flatten((alg_exts_names, roots_names, ODE_vars, coordinates, coeff_vars))),
                          order=f'degrevlex({len(alg_exts) + len(roots_names) + len(ODE_vars) + len(coordinates)}), degrevlex({len(coeff_vars)})')
     R32003 = PolynomialRing(GF(32003), names=tuple(flatten((alg_exts_names, roots_names, ODE_vars, coordinates, coeff_vars))),
                          order=f'degrevlex({len(alg_exts) + len(roots_names) + len(ODE_vars) + len(coordinates)}), degrevlex({len(coeff_vars)})')
-    F = Frac(R)
 
 # we need to add gamma to this to make ansatz 11 (algebraic extension) work
 def mk_ideal(R, roots, alg_exts):
@@ -926,16 +944,20 @@ def convert_eq_a():
     #
     # This trick (currently) only works on my development Sage, so try it and fall back on the slower way.
     try:
-        F_eq_a = eq_a.polynomial(ring=F)
+        F_eq_a = eq_a.polynomial(ring=convertField)
     except:
         print('WARNING: converting eq_a using the Symbolic Ring (this is slow)')
-        F_eq_a = F(eq_a)
+        F_eq_a = convertField(eq_a)
 
 def reduce_mod_ideal(I=None):
     global F_eq_a_n, F_eq_a_d
     if I:
-        F_eq_a_n = F_eq_a.numerator().mod(I)
-        F_eq_a_d = F_eq_a.denominator().mod(I)
+        # this doesn't work with my current development sage:
+        # F_eq_a_n = reduceRing(F_eq_a.numerator()).mod(I)
+        # F_eq_a_d = reduceRing(F_eq_a.denominator()).mod(I)
+        # go this way instead:
+        F_eq_a_n = reduceRing(str(F_eq_a.numerator())).mod(I)
+        F_eq_a_d = reduceRing(str(F_eq_a.denominator())).mod(I)
     else:
         F_eq_a_n = F_eq_a.numerator()
         F_eq_a_d = F_eq_a.denominator()
@@ -966,10 +988,10 @@ last_time = 0
 global idealnum
 idealnum = -1
 
-def eqns_from_eq_a(ring=None):
+def build_system_of_equations(ring=None):
     result = dict()
     for coeff, monomial in F_eq_a_n:
-        rest_term = monomial.subs({R(v):1 for v in coeff_vars})
+        rest_term = monomial.subs({reduceRing(v):1 for v in coeff_vars})
         coeff_term = monomial / rest_term
         if (rest_term) in result:
             if ring:
@@ -1012,7 +1034,7 @@ def eqns_from_eq_a(ring=None):
 
 def create_eqns_RQQ():
     global eqns_RQQ, jac_eqns_RQQ
-    eqns_RQQ = tuple(set(timefunc(eqns_from_eq_a, RQQ)))
+    eqns_RQQ = tuple(set(timefunc(build_system_of_equations, RQQ)))
 
 def create_jac_eqns_RQQ():
     global eqns_RQQ, jac_eqns_RQQ
@@ -1026,7 +1048,7 @@ def init():
     # convert_eq_a is the first really time consuming step
     timefunc(convert_eq_a)
     if len(roots) > 0 or len(alg_exts) > 0:
-        I = timefunc(mk_ideal, R, roots, alg_exts)
+        I = timefunc(mk_ideal, reduceRing, roots, alg_exts)
     else:
         I = None
     timefunc(reduce_mod_ideal, I)
