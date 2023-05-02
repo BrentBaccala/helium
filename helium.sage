@@ -475,7 +475,7 @@ def finish_prep(ansatz):
             wrt = args[kwds['diff_param']]
             return -(diff(A, wrt)*self(*coordinates)^2+diff(B,wrt)*self(*coordinates)+diff(C,wrt)/(2*A*self(*coordinates)+B))
         # anything that isn't constant w.r.t. coordinates is an SR_function
-        gamma = SR_function('g', nargs=3, derivative_func=deriv)
+        gamma = SR_function('g', nargs=len(coordinates), derivative_func=deriv)
 
         # We can construct derivatives like this, too:
         # sage: DD[0](gamma)(x1,y1,z1)
@@ -689,7 +689,7 @@ def finish_prep(ansatz):
             wrt = args[kwds['diff_param']]
             return diff(A, wrt)/(2*A*self(*coordinates))
         # anything that isn't constant w.r.t. coordinates is an SR_function
-        gamma = SR_function('g', nargs=3, derivative_func=deriv)
+        gamma = SR_function('g', nargs=len(coordinates), derivative_func=deriv)
 
         # We can construct derivatives like this, too:
         # sage: DD[0](gamma)(x1,y1,z1)
