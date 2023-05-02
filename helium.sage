@@ -956,9 +956,12 @@ def reduce_mod_ideal(I=None):
         # this doesn't work with my current development sage:
         # F_eq_a_n = reduceRing(F_eq_a.numerator()).mod(I)
         # F_eq_a_d = reduceRing(F_eq_a.denominator()).mod(I)
+        # I tried converting to a string, but that hits "RecursionError: maximum recursion depth exceeded during compilation"
+        # F_eq_a_n = reduceRing(str(F_eq_a.numerator())).mod(I)
+        # F_eq_a_d = reduceRing(str(F_eq_a.denominator())).mod(I)
         # go this way instead:
-        F_eq_a_n = reduceRing(str(F_eq_a.numerator())).mod(I)
-        F_eq_a_d = reduceRing(str(F_eq_a.denominator())).mod(I)
+        F_eq_a_n = reduceRing(F_eq_a.numerator().dict()).mod(I)
+        F_eq_a_d = reduceRing(F_eq_a.denominator().dict()).mod(I)
     else:
         F_eq_a_n = F_eq_a.numerator()
         F_eq_a_d = F_eq_a.denominator()
