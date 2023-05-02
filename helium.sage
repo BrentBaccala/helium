@@ -927,10 +927,11 @@ def convert_eq_a():
     try:
         F_eq_a = eq_a.polynomial(ring=F)
     except:
+        print('WARNING: converting eq_a using the Symbolic Ring (this is slow)')
         F_eq_a = F(eq_a)
 
     # clear higher powers of roots
-    if len(roots) > 0:
+    if len(roots) > 0 or len(alg_exts) > 0:
         F_eq_a_n = F_eq_a.numerator().mod(mk_ideal(R, roots, alg_exts))
         F_eq_a_d = F_eq_a.denominator().mod(mk_ideal(R, roots, alg_exts))
     else:
