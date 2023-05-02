@@ -950,8 +950,7 @@ def convert_eq_a():
         print('WARNING: converting eq_a using the Symbolic Ring (this is slow)')
         F_eq_a = convertField(eq_a)
 
-def reduce_mod_ideal(I=None):
-    global F_eq_a_n, F_eq_a_d
+def reduce_mod_ideal(element, I=None):
     if I:
         # this doesn't work with my current development sage:
         # F_eq_a_n = reduceRing(F_eq_a.numerator()).mod(I)
@@ -960,12 +959,19 @@ def reduce_mod_ideal(I=None):
         # F_eq_a_n = reduceRing(str(F_eq_a.numerator())).mod(I)
         # F_eq_a_d = reduceRing(str(F_eq_a.denominator())).mod(I)
         # go this way instead:
-        F_eq_a_n = reduceRing(F_eq_a.numerator().dict()).mod(I)
-        F_eq_a_d = reduceRing(F_eq_a.denominator().dict()).mod(I)
+        return reduceRing(element.dict()).mod(I)
     else:
-        F_eq_a_n = F_eq_a.numerator()
-        F_eq_a_d = F_eq_a.denominator()
-    print('F_eq_a: numerator', F_eq_a_n.number_of_terms(), 'terms; denominator', F_eq_a_d.number_of_terms(), 'terms')
+        return reduceRing(element.dict())
+
+def reduce_numerator(I=None):
+    global F_eq_a_n
+    F_eq_a_n = reduce_mod_ideal(F_eq_a.numerator(), I)
+    print('F_eq_a: numerator', F_eq_a_n.number_of_terms(), 'terms')
+
+def reduce_denominator(I=None):
+    global F_eq_a_d
+    F_eq_a_d = reduce_mod_ideal(F_eq_a.denominator(), I)
+    print('F_eq_a: denominator', F_eq_a_d.number_of_terms(), 'terms')
 
 import time
 
@@ -1055,7 +1061,8 @@ def init():
         I = timefunc(mk_ideal, reduceRing, roots, alg_exts)
     else:
         I = None
-    timefunc(reduce_mod_ideal, I)
+    timefunc(reduce_numerator, I)
+    timefunc(reduce_denominator, I)
     timefunc(create_eqns_RQQ)
     timefunc(create_jac_eqns_RQQ)
     timefunc(create_eqns_R32003)
