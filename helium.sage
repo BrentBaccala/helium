@@ -737,6 +737,7 @@ def finish_prep(ansatz):
     # I used to do this in convert_eq_a(), but that function can be slow, and this is pretty quick,
     # so let's put it in the "prep()" step instead of the "init()" step
     create_polynomial_ring(alg_exts)
+    create_eq_a()
 
 def prep_hydrogen(ansatz=1):
     global H, coordinates, roots
@@ -1022,7 +1023,7 @@ def create_eqns_R32003():
     eqns_R32003 = tuple(map(lambda arg: arg.map_coefficients(GF(32003), GF(32003)), eqns_RQQ))
 
 def init():
-    timefunc(create_eq_a)
+    # convert_eq_a is the first really time consuming step
     timefunc(convert_eq_a)
     if len(roots) > 0 or len(alg_exts) > 0:
         I = timefunc(mk_ideal, R, roots, alg_exts)
