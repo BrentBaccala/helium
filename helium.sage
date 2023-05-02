@@ -916,7 +916,7 @@ def mk_ideal(R, roots, alg_exts):
     return ideal(ideal_generators)
 
 def convert_eq_a():
-    global F_eq_a, F_eq_a_n, F_eq_a_d
+    global F_eq_a
     # If we write this as 'F_eq_a = F(eq_a)', Sage will attempt to construct F_eq_a by calling
     # eq_a.numerator() and eq_a.denominator(), which will perform lots of rational function
     # math in the Symbolic Ring, which is very slow and memory intensive.  Calling it
@@ -930,10 +930,11 @@ def convert_eq_a():
         print('WARNING: converting eq_a using the Symbolic Ring (this is slow)')
         F_eq_a = F(eq_a)
 
-    # clear higher powers of roots
-    if len(roots) > 0 or len(alg_exts) > 0:
-        F_eq_a_n = F_eq_a.numerator().mod(mk_ideal(R, roots, alg_exts))
-        F_eq_a_d = F_eq_a.denominator().mod(mk_ideal(R, roots, alg_exts))
+def reduce_mod_ideal(I=None):
+    global F_eq_a_n, F_eq_a_d
+    if I:
+        F_eq_a_n = F_eq_a.numerator().mod(I)
+        F_eq_a_d = F_eq_a.denominator().mod(I)
     else:
         F_eq_a_n = F_eq_a.numerator()
         F_eq_a_d = F_eq_a.denominator()
@@ -1023,6 +1024,11 @@ def create_eqns_R32003():
 def init():
     timefunc(create_eq_a)
     timefunc(convert_eq_a)
+    if len(roots) > 0 or len(alg_exts) > 0:
+        I = timefunc(mk_ideal, R, roots, alg_exts)
+    else:
+        I = None
+    timefunc(reduce_mod_ideal, I)
     timefunc(create_eqns_RQQ)
     timefunc(create_jac_eqns_RQQ)
     timefunc(create_eqns_R32003)
