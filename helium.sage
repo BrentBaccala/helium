@@ -887,9 +887,10 @@ def create_polynomial_rings(alg_exts):
     try:
         Rflint = PolynomialRing(ZZ, names=tuple(flatten((alg_exts_names, roots_names, ODE_vars, coordinates, coeff_vars))),
                                 implementation="FLINT", order='lex')
-    except:
-        Rflint = None
+    except Exception as ex:
+        print(ex)
         print('multivariate FLINT rings unavailable')
+        Rflint = None
 
     # not only might FLINT be unavailable, it doesn't implement Groebner bases, so can't be used for reduction
 
