@@ -936,42 +936,42 @@ def mk_ideal(R, roots, alg_exts):
     return ideal(ideal_generators)
 
 def convert_eq_a():
-    global F_eq_a
-    # If we write this as 'F_eq_a = F(eq_a)', Sage will attempt to construct F_eq_a by calling
+    global eq_a_convertField
+    # If we write this as 'eq_a_convertField = convertField(eq_a)', Sage will attempt to construct eq_a_convertField by calling
     # eq_a.numerator() and eq_a.denominator(), which will perform lots of rational function
     # math in the Symbolic Ring, which is very slow and memory intensive.  Calling it
-    # like 'eq_a.polynomial(ring=F)' recurses through the expression tree and builds the
+    # like 'eq_a.polynomial(ring=convertField)' recurses through the expression tree and builds the
     # expression from the bottom up using polynomial ring operations, which are much more efficient.
     #
     # This trick (currently) only works on my development Sage, so try it and fall back on the slower way.
     try:
-        F_eq_a = eq_a.polynomial(ring=convertField)
+        eq_a_convertField = eq_a.polynomial(ring=convertField)
     except:
         print('WARNING: converting eq_a using the Symbolic Ring (this is slow)')
-        F_eq_a = convertField(eq_a)
+        eq_a_convertField = convertField(eq_a)
 
 def reduce_mod_ideal(element, I=None):
     if I:
         # this doesn't work with my current development sage:
-        # F_eq_a_n = reduceRing(F_eq_a.numerator()).mod(I)
-        # F_eq_a_d = reduceRing(F_eq_a.denominator()).mod(I)
+        # eq_a_reduceRing_n = reduceRing(eq_a_convertField.numerator()).mod(I)
+        # eq_a_reduceRing_d = reduceRing(eq_a_convertField.denominator()).mod(I)
         # I tried converting to a string, but that hits "RecursionError: maximum recursion depth exceeded during compilation"
-        # F_eq_a_n = reduceRing(str(F_eq_a.numerator())).mod(I)
-        # F_eq_a_d = reduceRing(str(F_eq_a.denominator())).mod(I)
+        # eq_a_reduceRing_n = reduceRing(str(eq_a_convertField.numerator())).mod(I)
+        # eq_a_reduceRing_d = reduceRing(str(eq_a_convertField.denominator())).mod(I)
         # go this way instead:
         return reduceRing(element.dict()).mod(I)
     else:
         return reduceRing(element.dict())
 
 def reduce_numerator(I=None):
-    global F_eq_a_n
-    F_eq_a_n = reduce_mod_ideal(F_eq_a.numerator(), I)
-    print('F_eq_a: numerator', F_eq_a_n.number_of_terms(), 'terms')
+    global eq_a_reduceRing_n
+    eq_a_reduceRing_n = reduce_mod_ideal(eq_a_convertField.numerator(), I)
+    print('eq_a_convertField: numerator', eq_a_reduceRing_n.number_of_terms(), 'terms')
 
 def reduce_denominator(I=None):
-    global F_eq_a_d
-    F_eq_a_d = reduce_mod_ideal(F_eq_a.denominator(), I)
-    print('F_eq_a: denominator', F_eq_a_d.number_of_terms(), 'terms')
+    global eq_a_reduceRing_d
+    eq_a_reduceRing_d = reduce_mod_ideal(eq_a_convertField.denominator(), I)
+    print('eq_a_convertField: denominator', eq_a_reduceRing_d.number_of_terms(), 'terms')
 
 import time
 
@@ -998,21 +998,25 @@ last_time = 0
 global idealnum
 idealnum = -1
 
+# We're going from reduceRing to whatever ring is specified, or reduceRing (if not specified)
+
 def build_system_of_equations(ring=None):
     result = dict()
-    for coeff, monomial in F_eq_a_n:
-        rest_term = monomial.subs({reduceRing(v):1 for v in coeff_vars})
-        coeff_term = monomial / rest_term
-        if (rest_term) in result:
-            if ring:
-                result[rest_term] += ring(coeff * coeff_term)
-            else:
-                result[rest_term] += coeff * coeff_term
+    if ring:
+        element = ring(eq_a_reduceRing_n.dict())
+    else:
+        element = eq_a_reduceRing_n
+    for coeff, monomial in element:
+        rest_term = monomial.subs({ring(v):1 for v in coeff_vars})
+        # this cast needs to be here because otherwise the division (even though it's exact) takes us to the fraction field
+        if ring:
+            coeff_term = ring(monomial / rest_term)
         else:
-            if ring:
-                result[rest_term] = ring(coeff * coeff_term)
-            else:
-                result[rest_term] = coeff * coeff_term
+            coeff_term = reduceRing(monomial / rest_term)
+        if (rest_term) in result:
+            result[rest_term] += coeff * coeff_term
+        else:
+            result[rest_term] = coeff * coeff_term
     global eqns_before_fanout
     eqns_before_fanout = tuple(result.values())
     if idealnum == -1:
