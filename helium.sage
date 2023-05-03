@@ -1089,7 +1089,8 @@ def init():
     else:
         I = None
     timefunc(reduce_numerator, I)
-    timefunc(reduce_denominator, I)
+    # We don't use the denominator for anything, currently
+    # timefunc(reduce_denominator, I)
     timefunc(create_eqns_RQQ)
     timefunc(create_jac_eqns_RQQ)
     timefunc(create_eqns_R32003)
