@@ -906,6 +906,11 @@ def create_polynomial_rings(alg_exts):
 
     if len(roots) > 0 or len(alg_exts) > 0:
         print('Using Singular rings for reduction')
+        # This doesn't work - Singular interface doesn't support splitting variables with the coeff field like this
+        # (according to the first few lines of multi_polynomial_libsingular.pyx)
+        # I'm not sure about Singular proper.  It has some kind of support for "transcendental extension of Q"
+        #Rsingular1 = PolynomialRing(QQ, names=tuple(flatten((ODE_vars, coordinates, coeff_vars))))
+        #Rsingular2 = PolynomialRing(FractionField(Rsingular1), names=tuple(flatten((alg_exts_names, roots_names))), order='lex')
         reduceRing = Rsingular
     else:
         print('Using convertion ring for reduction')
@@ -953,18 +958,32 @@ def convert_eq_a():
         print('WARNING: converting eq_a using the Symbolic Ring (this is slow)')
         eq_a_convertField = convertField(eq_a)
 
+def convertRing_to_reduceRing(element):
+    # this doesn't work with my current development sage:
+    #   eq_a_reduceRing_n = reduceRing(eq_a_convertField.numerator()).mod(I)
+    #   eq_a_reduceRing_d = reduceRing(eq_a_convertField.denominator()).mod(I)
+    # I tried converting to a string, but that hits "RecursionError: maximum recursion depth exceeded during compilation"
+    #   eq_a_reduceRing_n = reduceRing(str(eq_a_convertField.numerator())).mod(I)
+    #   eq_a_reduceRing_d = reduceRing(str(eq_a_convertField.denominator())).mod(I)
+    # go this way instead: (works on a simple reduceRing)
+    return reduceRing(element.dict())
+    # if reduceRing is a ring over a field with convertRing variables split between the two, we need something else
+    # don't bother with this code, as Singular can't support splitting variables between the ring and the coeff field
+    #
+    #baseRing = reduceRing.base_ring()
+    #rest_term_sub = {convertRing(v):1 for v in reduceRing.variable_names()}
+    #result = reduceRing(0)
+    #for coeff, monomial in element:
+    #    coeff_term = monomial.subs(rest_term_sub)
+    #    ring_term = reduceRing(monomial / coeff_term)
+    #    result += coeff * baseRing(coeff_term) * ring_term
+    #return result
+
 def reduce_mod_ideal(element, I=None):
     if I:
-        # this doesn't work with my current development sage:
-        # eq_a_reduceRing_n = reduceRing(eq_a_convertField.numerator()).mod(I)
-        # eq_a_reduceRing_d = reduceRing(eq_a_convertField.denominator()).mod(I)
-        # I tried converting to a string, but that hits "RecursionError: maximum recursion depth exceeded during compilation"
-        # eq_a_reduceRing_n = reduceRing(str(eq_a_convertField.numerator())).mod(I)
-        # eq_a_reduceRing_d = reduceRing(str(eq_a_convertField.denominator())).mod(I)
-        # go this way instead:
-        return reduceRing(element.dict()).mod(I)
+        return convertRing_to_reduceRing(element).mod(I)
     else:
-        return reduceRing(element.dict())
+        return convertRing_to_reduceRing(element)
 
 def reduce_numerator(I=None):
     global eq_a_reduceRing_n
@@ -1009,6 +1028,7 @@ def build_system_of_equations(ring=None):
         element = ring(eq_a_reduceRing_n.dict())
     else:
         element = eq_a_reduceRing_n
+    # this loop works on FLINT or Singular elements, but not other things like rings with variables in their coeff field
     for coeff, monomial in element:
         rest_term = monomial.subs({ring(v):1 for v in coeff_vars})
         # this cast needs to be here because otherwise the division (even though it's exact) takes us to the fraction field
