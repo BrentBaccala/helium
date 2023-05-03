@@ -877,9 +877,12 @@ def create_polynomial_rings(alg_exts):
     alg_exts_names = [p[0] for p in alg_exts]
     num_rvars = len(alg_exts_names) + len(roots_names) + len(ODE_vars) + len(coordinates)
     num_cvars = len(coeff_vars)
+    # encoding isn't used except for writing FLINT polynomials to disk with my custom code
     encoding = 'deglex64({}),deglex64({}),sint64'.format(num_rvars, num_cvars)
 
-    Rsingular = PolynomialRing(QQ, names=tuple(flatten((alg_exts_names, roots_names, ODE_vars, coordinates, coeff_vars))), order='lex')
+    # the ordering here is intended to make reduction mod alg_exts and roots easy
+    Rsingular = PolynomialRing(QQ, names=tuple(flatten((alg_exts_names, roots_names, ODE_vars, coordinates, coeff_vars))),
+                         order=f'lex({len(alg_exts) + len(roots_names)}), degrevlex({len(ODE_vars) + len(coordinates) + len(coeff_vars)})')
 
     # used with my custom option to set disk encoding
     #R = PolynomialRing(ZZ, names=tuple(flatten((alg_exts_names, roots_names, ODE_vars, coordinates, coeff_vars))),
