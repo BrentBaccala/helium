@@ -981,7 +981,12 @@ def convertRing_to_reduceRing(element):
 
 def reduce_mod_ideal(element, I=None):
     if I:
-        return convertRing_to_reduceRing(element).mod(I)
+        # This is slower if convertRing is FLINT and reduceRing is Singular; it does the reduction in Singular
+        #return convertRing_to_reduceRing(element).mod(I)
+        # This way does the reduction in FLINT
+        for p in I.groebner_basis():
+            element %= convertRing(str(p))
+        return convertRing_to_reduceRing(element)
     else:
         return convertRing_to_reduceRing(element)
 
