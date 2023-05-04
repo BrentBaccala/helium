@@ -983,9 +983,9 @@ def convertRing_to_reduceRing(element):
 
 def reduce_mod_ideal(element, I=None):
     if I:
-        # This is slower if convertRing is FLINT and reduceRing is Singular; it does the reduction in Singular
-        #return convertRing_to_reduceRing(element).mod(I)
-        # This way does the reduction in FLINT
+        # This is slower if convertRing is FLINT and reduceRing is Singular; it does the reduction in Singular:
+        #    return convertRing_to_reduceRing(element).mod(I)
+        # This way does the reduction in FLINT:
         for p in I.groebner_basis():
             element %= convertRing(str(p))
         return convertRing_to_reduceRing(element)
@@ -1031,22 +1031,18 @@ idealnum = -1
 
 def build_system_of_equations(ring=None):
     result = dict()
-    if ring:
-        element = ring(eq_a_reduceRing_n.dict())
-    else:
-        element = eq_a_reduceRing_n
     # this loop works on FLINT or Singular elements, but not other things like rings with variables in their coeff field
-    for coeff, monomial in element:
-        rest_term = monomial.subs({ring(v):1 for v in coeff_vars})
+    for coeff, monomial in eq_a_reduceRing_n:
+        non_coeff_part = monomial.subs({reduceRing(v):1 for v in coeff_vars})
         # this cast needs to be here because otherwise the division (even though it's exact) takes us to the fraction field
         if ring:
-            coeff_term = ring(monomial / rest_term)
+            coeff_part = ring(monomial / non_coeff_part)
         else:
-            coeff_term = reduceRing(monomial / rest_term)
-        if (rest_term) in result:
-            result[rest_term] += coeff * coeff_term
+            coeff_part = reduceRing(monomial / non_coeff_part)
+        if (non_coeff_part) in result:
+            result[non_coeff_part] += coeff * coeff_part
         else:
-            result[rest_term] = coeff * coeff_term
+            result[non_coeff_part] = coeff * coeff_part
     global eqns_before_fanout
     eqns_before_fanout = tuple(result.values())
     if idealnum == -1:
