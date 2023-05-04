@@ -927,6 +927,7 @@ def create_polynomial_rings(alg_exts):
 # we need to add gamma to this to make ansatz 11 (algebraic extension) work
 def mk_ideal(R, roots, alg_exts):
     "Given a list or tuple of roots, return a ideal of ring R that reduces the global variable names of those roots"
+    global reductionIdeal
     # We expect a tuple of pow's in the Symbolic Ring, so we can easily construct the minimal polynomials
     #
     # We can also take a pair of (varName, minpoly) where varName is a var in the Symbolic Ring
@@ -941,7 +942,7 @@ def mk_ideal(R, roots, alg_exts):
     for v,e,postsub in alg_exts:
         assert e in SR
         ideal_generators.append(R(roots_to_rs(e).subs(postsub)))
-    return ideal(ideal_generators)
+    reductionIdeal = ideal(ideal_generators)
 
 def convert_eq_a():
     global eq_a_convertField
@@ -1087,15 +1088,16 @@ def create_eqns_R32003():
     eqns_R32003 = tuple(map(lambda arg: arg.map_coefficients(GF(32003), GF(32003)), eqns_RQQ))
 
 def init():
+    global reductionIdeal
     # convert_eq_a is the first really time consuming step
     timefunc(convert_eq_a)
     if len(roots) > 0 or len(alg_exts) > 0:
-        I = timefunc(mk_ideal, reduceRing, roots, alg_exts)
+        timefunc(mk_ideal, reduceRing, roots, alg_exts)
     else:
-        I = None
-    timefunc(reduce_numerator, I)
+        reductionIdeal = None
+    timefunc(reduce_numerator, reductionIdeal)
     # We don't use the denominator for anything, currently
-    # timefunc(reduce_denominator, I)
+    # timefunc(reduce_denominator, reductionIdeal)
     timefunc(create_eqns_RQQ)
     timefunc(create_jac_eqns_RQQ)
     timefunc(create_eqns_R32003)
