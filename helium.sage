@@ -1020,13 +1020,6 @@ def timefunc(func, *args, **kwargs):
 
 last_time = 0
 
-# idealnum: either a number between 0 and 2^(ngens)-1 that shows (in
-# binary) which generators are in which state, or -1 to do no fanout.
-# ngens is length of gennames below.
-
-global idealnum
-idealnum = -1
-
 # We're going from reduceRing to whatever ring is specified, or reduceRing (if not specified)
 
 def build_system_of_equations(ring=None):
@@ -1043,38 +1036,11 @@ def build_system_of_equations(ring=None):
             result[non_coeff_part] += coeff * coeff_part
         else:
             result[non_coeff_part] = coeff * coeff_part
-    global eqns_before_fanout
-    eqns_before_fanout = tuple(result.values())
-    if idealnum == -1:
-        return eqns_before_fanout
-
-    # "Fan out" an ideal by considering all possible states (=0 or !=0)
-    # of its generators.  The idea is to divide out by a prime ideal
-    # and try to find a witness point for the remaining ideals.
-
-    gennames = 'd0,d1,m0,m1,n0,n1'.split(',')
-    # probably this has to be a Groebner basis
-    gens = tuple(map(RQQ, gennames))
-    def fn2(x,y):
-        Q,R = x.quo_rem(y)
-        print(Q, '*', y, ' + ', end='')
-        return R
-    for eqn in eqns:
-        print(eqn, ' = ', end='')
-        reduce(fn2, (eqn,) + gens)
-        print('')
-    global zerogens, nonzerogens, nonzeroprod
-    zerogens = tuple(gen for i,gen in enumerate(gens) if (idealnum & 2^i) == 0)
-    nonzerogens = tuple(gen for i,gen in enumerate(gens) if (idealnum & 2^i) != 0)
-    nonzeroprod = mul(gen for i,gen in enumerate(gens) if (idealnum & 2^i) != 0)
-    I = ideal(zerogens)
-    #return [eqn.mod(I) for eqn in eqns] + list(zerogens)
-    #return [eqn.mod(I)/nonzeroprod for eqn in eqns] + list(zerogens)
-    return [reduce(fn2, (eqn,) + zerogens)/nonzeroprod for eqn in eqns] + list(zerogens)
+    return tuple(set(result.values()))
 
 def create_eqns_RQQ():
     global eqns_RQQ, jac_eqns_RQQ
-    eqns_RQQ = tuple(set(timefunc(build_system_of_equations, RQQ)))
+    eqns_RQQ = timefunc(build_system_of_equations, RQQ)
 
 def create_jac_eqns_RQQ():
     global eqns_RQQ, jac_eqns_RQQ
