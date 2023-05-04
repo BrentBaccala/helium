@@ -958,6 +958,7 @@ def convert_eq_a():
     except:
         print('WARNING: converting eq_a using the Symbolic Ring (this is slow)')
         eq_a_convertField = convertField(eq_a)
+    print('eq_a_convertField numerator:', eq_a_convertField.numerator().number_of_terms(), 'terms')
 
 def convertRing_to_reduceRing(element):
     # this doesn't work with my current development sage:
@@ -994,7 +995,7 @@ def reduce_mod_ideal(element, I=None):
 def reduce_numerator(I=None):
     global eq_a_reduceRing_n
     eq_a_reduceRing_n = reduce_mod_ideal(eq_a_convertField.numerator(), I)
-    print('eq_a_convertField: numerator', eq_a_reduceRing_n.number_of_terms(), 'terms')
+    print('eq_a_reduceRing_n:', eq_a_reduceRing_n.number_of_terms(), 'terms')
 
 def reduce_denominator(I=None):
     global eq_a_reduceRing_d
