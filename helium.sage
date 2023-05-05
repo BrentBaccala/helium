@@ -871,7 +871,7 @@ def analyze_eq_a(eq, depth=1, print_depth=2, file=sys.stdout):
 # three 64-bit words.  If things don't fit, it throws an exception.
 
 def create_polynomial_rings(alg_exts):
-    global convertRing,reduceRing,RQQ,R32003,convertField,num_rvars,num_cvars
+    global convertRing,idealRing,reduceRing,RQQ,R32003,convertField,num_rvars,num_cvars
     # we need to add gamma to this to make ansatz 11 (algebraic extension) work
     roots_names = list(map(varName, roots))
     alg_exts_names = [p[0] for p in alg_exts]
@@ -904,14 +904,19 @@ def create_polynomial_rings(alg_exts):
         print('Using Singular rings for convertion')
         convertRing = Rsingular
 
-    if len(roots) > 0 or len(alg_exts) > 0:
+    print('Using Singular rings for reduction ideal')
+    idealRing = Rsingular
+
+    #if len(roots) > 0 or len(alg_exts) > 0:
+    if False:
         print('Using Singular rings for reduction')
+        reduceRing = Rsingular
+
         # This doesn't work - Singular interface doesn't support splitting variables with the coeff field like this
         # (according to the first few lines of multi_polynomial_libsingular.pyx)
         # I'm not sure about Singular proper.  It has some kind of support for "transcendental extension of Q"
         #Rsingular1 = PolynomialRing(QQ, names=tuple(flatten((ODE_vars, coordinates, coeff_vars))))
         #Rsingular2 = PolynomialRing(FractionField(Rsingular1), names=tuple(flatten((alg_exts_names, roots_names))), order='lex')
-        reduceRing = Rsingular
     else:
         print('Using convertion ring for reduction')
         reduceRing = convertRing
@@ -968,7 +973,10 @@ def convertRing_to_reduceRing(element):
     #   eq_a_reduceRing_n = reduceRing(str(eq_a_convertField.numerator())).mod(I)
     #   eq_a_reduceRing_d = reduceRing(str(eq_a_convertField.denominator())).mod(I)
     # go this way instead: (works on a simple reduceRing)
-    return reduceRing(element.dict())
+    if convertRing != reduceRing:
+        return reduceRing(element.dict())
+    else:
+        return element
     # if reduceRing is a ring over a field with convertRing variables split between the two, we need something else
     # don't bother with this code, as Singular can't support splitting variables between the ring and the coeff field
     #
@@ -986,6 +994,7 @@ def reduce_mod_ideal(element, I=None):
         # This is slower if convertRing is FLINT and reduceRing is Singular; it does the reduction in Singular:
         #    return convertRing_to_reduceRing(element).mod(I)
         # This way does the reduction in FLINT:
+        # if type(reduceRing) == sage.rings.polynomial.multi_polynomial_flint.MPolynomialRing_flint:
         for p in I.groebner_basis():
             element %= convertRing(str(p))
         return convertRing_to_reduceRing(element)
@@ -1024,7 +1033,8 @@ last_time = 0
 
 def build_system_of_equations(ring=None):
     result = dict()
-    # this loop works on FLINT or Singular elements, but not other things like rings with variables in their coeff field
+    # this loop works on Singular elements, but not other things like rings with variables in their coeff field
+    # it doesn't work on FLINT elements, because they return an ETuple for monomial (I just fixed this)
     for coeff, monomial in eq_a_reduceRing_n:
         non_coeff_part = monomial.subs({reduceRing(v):1 for v in coeff_vars})
         # this cast needs to be here because otherwise the division (even though it's exact) takes us to the fraction field
@@ -1055,7 +1065,7 @@ def init():
     # convert_eq_a is the first really time consuming step
     timefunc(convert_eq_a)
     if len(roots) > 0 or len(alg_exts) > 0:
-        timefunc(mk_ideal, reduceRing, roots, alg_exts)
+        timefunc(mk_ideal, idealRing, roots, alg_exts)
     else:
         reductionIdeal = None
     timefunc(reduce_numerator, reductionIdeal)
