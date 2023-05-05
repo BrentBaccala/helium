@@ -94,6 +94,12 @@ from sage.symbolic.operators import add_vararg, mul_vararg
 
 from sage.rings.polynomial.polydict import ETuple
 
+try:
+    from clint.textui.progress import Bar as ProgressBar
+except ModuleNotFoundError:
+    print("clint package not available; no progress bars will be displayed")
+    ProgressBar = None
+
 # from python docs
 def flatten(listOfLists):
     "Flatten one level of nesting"
@@ -1032,10 +1038,13 @@ last_time = 0
 # We're going from reduceRing to whatever ring is specified, or reduceRing (if not specified)
 
 def build_system_of_equations(ring=None):
+    pb = ProgressBar(label='build_system_of_equations ', expected_size=eq_a_reduceRing_n.number_of_terms())
     result = dict()
     # this loop works on Singular elements, but not other things like rings with variables in their coeff field
     # it doesn't work on FLINT elements, because they return an ETuple for monomial (I just fixed this)
-    for coeff, monomial in eq_a_reduceRing_n:
+    for i, (coeff, monomial) in enumerate(eq_a_reduceRing_n):
+        if i%100 == 99:
+            pb.show(i+1)
         non_coeff_part = monomial.subs({reduceRing(v):1 for v in coeff_vars})
         # this cast needs to be here because otherwise the division (even though it's exact) takes us to the fraction field
         if ring:
@@ -1046,6 +1055,8 @@ def build_system_of_equations(ring=None):
             result[non_coeff_part] += coeff * coeff_part
         else:
             result[non_coeff_part] = coeff * coeff_part
+    pb.show(i+1)
+    pb.done()
     return tuple(set(result.values()))
 
 def create_eqns_RQQ():
