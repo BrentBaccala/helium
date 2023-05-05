@@ -1038,14 +1038,15 @@ last_time = 0
 # We're going from reduceRing to whatever ring is specified, or reduceRing (if not specified)
 
 def build_system_of_equations(ring=None):
-    pb = ProgressBar(label='build_system_of_equations ', expected_size=eq_a_reduceRing_n.number_of_terms())
     result = dict()
-    # this loop works on Singular elements, but not other things like rings with variables in their coeff field
-    # it doesn't work on FLINT elements, because they return an ETuple for monomial (I just fixed this)
+    # for speed, build this tuple here instead of letting the subs method do it in monomial.subs
+    non_coeff_sub = tuple(1 if reduceRing.gen(n) in coeff_vars else reduceRing.gen(n) for n in range(reduceRing.ngens()))
+    pb = ProgressBar(label='build_system_of_equations ', expected_size=eq_a_reduceRing_n.number_of_terms())
+    # this loop works on Singular or FLINT elements, but not other things like rings with variables in their coeff field
     for i, (coeff, monomial) in enumerate(eq_a_reduceRing_n):
         if i%100 == 99:
             pb.show(i+1)
-        non_coeff_part = monomial.subs({reduceRing(v):1 for v in coeff_vars})
+        non_coeff_part = monomial(non_coeff_sub)
         # this cast needs to be here because otherwise the division (even though it's exact) takes us to the fraction field
         if ring:
             coeff_part = ring(monomial / non_coeff_part)
