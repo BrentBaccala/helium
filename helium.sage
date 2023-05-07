@@ -1135,7 +1135,17 @@ def fns(v):
     last_v = v.copy()
 
     homogenize_terms = [v[i] for i in homogenize_zero_indices] + [v[i] - 1 for i in homogenize_one_indices]
-    res = np.hstack([eqn.subs(dict(zip(map(RQQ, coeff_vars), v))) for eqn in eqns_RQQ] + homogenize_terms)
+
+    # original code:
+    # res = np.hstack([eqn.subs(dict(zip(map(RQQ, coeff_vars), v))) for eqn in eqns_RQQ] + homogenize_terms)
+
+    # optimized code:
+    substitution = dict(zip(map(RQQ, coeff_vars), v))
+    #res = np.hstack([eqn.subs(substitution) for eqn in eqns_RQQ] + homogenize_terms)
+
+    # further optimized code:
+    call_substitution = tuple(substitution.get(RQQ.gen(n), 0) for n in range(RQQ.ngens()))
+    res = np.hstack([eqn(call_substitution) for eqn in eqns_RQQ] + homogenize_terms)
 
     global last_time
     sum_of_squares = sum(res*res)
