@@ -1189,20 +1189,18 @@ def fns(v):
     # not really used anymore; older "homogenization" code
     homogenize_terms = [v[i] for i in homogenize_zero_indices] + [v[i] - 1 for i in homogenize_one_indices]
 
-    if ED_polynomials:
-        global ED_eqns
-        ED_eqns = [EDpoly.subs(dict(zip(map(lambda x: RED('u_' + str(x)), coeff_vars), v))) for EDpoly in ED_polynomials]
+    ED_terms = []
+    for EDpoly in ED_polynomials:
+        ED_eqn = EDpoly.subs(dict(zip(map(lambda x: RED('u_' + str(x)), coeff_vars), v)))
         #print(ED_eqns)
-        s = solve([SR(EDpoly) == 0 for EDpoly in ED_eqns], SR('t'))
+        soleqns = solve(SR(ED_eqn) == 0, SR('t'), solution_dict=True)
         #for sol in solve([SR(EDpoly) == 0 for EDpoly in ED_eqns], SR('t'), solution_dict=True): print(sol[SR('t')].n())
 
-        solset = [sol[SR('t')].n() for sol in solve([SR(EDpoly) == 0 for EDpoly in ED_eqns], SR('t'), solution_dict=True)]
+        solset = [sol[SR('t')].n() for sol in soleqns]
         sol = min(filter(lambda x: x>=0, solset))
         #print(sol)
         #raise ValueError
-        ED_terms = [masking_function(sol)]
-    else:
-        ED_terms = []
+        ED_terms.append(masking_function(sol))
 
     # original code:
     # res = np.hstack([eqn.subs(dict(zip(map(RQQ, coeff_vars), v))) for eqn in eqns_RQQ] + homogenize_terms)
@@ -1242,23 +1240,24 @@ def jac_fns(v):
 
     # compute sol and masking_function(sol)
 
-    if ED_polynomials:
-        global RED_mapper, ED_derivs, t_deriv, coeff_derivs, coeff_derivs_eval, ED_derivatives
+    global ED_derivatives
+    ED_derivatives = [np.zeros((0, len(coeff_vars)))]
+    for EDpoly in ED_polynomials:
+        global RED_mapper, ED_derivs, t_deriv, coeff_derivs, coeff_derivs_eval
 
-        sol = ED_function(v, ED_polynomials[0])
+        sol = ED_function(v, EDpoly)
         if masking_function(sol) == 0:
-            ED_derivatives = np.array([[0 for cv in coeff_vars] for EDpoly in ED_polynomials])
+            ED_derivatives.append(np.array([0 for cv in coeff_vars]))
         else:
             RED_mapper = dict(zip(map(lambda x: RED('u_' + str(x)), coeff_vars), v))
             RED_mapper[RED('t')] = sol
-            ED_derivs = [[EDpoly.derivative(RED('u_' + str(cv))).subs(RED_mapper) for cv in coeff_vars] for EDpoly in ED_polynomials]
-            t_deriv = sum(c*m.derivative(RED('t')) for c,m in ED_polynomials[0])
+            ED_derivs = [EDpoly.derivative(RED('u_' + str(cv))).subs(RED_mapper) for cv in coeff_vars]
+            t_deriv = sum(c*m.derivative(RED('t')) for c,m in EDpoly)
             #d0_deriv = sum(c*m.derivative(RED('u_d0')) for c,m in ED_polynomials[0])
-            coeff_derivs = [-sum(c*m.derivative(RED('u_' + str(cv)))/t_deriv for c,m in ED_polynomials[0]) for cv in coeff_vars]
+            coeff_derivs = [-sum(c*m.derivative(RED('u_' + str(cv)))/t_deriv for c,m in EDpoly) for cv in coeff_vars]
             coeff_derivs_eval = [coeff_deriv.subs(RED_mapper) for coeff_deriv in coeff_derivs]
-            ED_derivatives = np.array([[masking_function_derivative(sol)*cde for cde in coeff_derivs_eval]])
-    else:
-        ED_derivatives = np.zeros((0, len(coeff_vars)))
+            ED_derivatives.append(np.array([masking_function_derivative(sol)*cde for cde in coeff_derivs_eval]))
+    ED_derivatives = np.vstack(ED_derivatives)
 
     # this can be done faster too, using call instead of subs (see function fn())
     mapper = dict(zip(map(RQQ, coeff_vars), v))
