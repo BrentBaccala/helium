@@ -1043,10 +1043,11 @@ def build_system_of_equations(ring=None):
     result = dict()
     # for speed, build this tuple here instead of letting the subs method do it in monomial.subs
     non_coeff_sub = tuple(1 if reduceRing.gen(n) in coeff_vars else reduceRing.gen(n) for n in range(reduceRing.ngens()))
-    pb = ProgressBar(label='build_system_of_equations ', expected_size=eq_a_reduceRing_n.number_of_terms())
+    if ProgressBar:
+        pb = ProgressBar(label='build_system_of_equations ', expected_size=eq_a_reduceRing_n.number_of_terms())
     # this loop works on Singular or FLINT elements, but not other things like rings with variables in their coeff field
     for i, (coeff, monomial) in enumerate(eq_a_reduceRing_n):
-        if i%100 == 99:
+        if i%100 == 99 and ProgressBar:
             pb.show(i+1)
         non_coeff_part = monomial(non_coeff_sub)
         # this cast needs to be here because otherwise the division (even though it's exact) takes us to the fraction field
@@ -1058,8 +1059,9 @@ def build_system_of_equations(ring=None):
             result[non_coeff_part] += coeff * coeff_part
         else:
             result[non_coeff_part] = coeff * coeff_part
-    pb.show(i+1)
-    pb.done()
+    if ProgressBar:
+        pb.show(i+1)
+        pb.done()
     return tuple(set(result.values()))
 
 def create_eqns_RQQ():
