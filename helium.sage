@@ -929,13 +929,10 @@ def create_polynomial_rings(alg_exts):
 
     convertField = Frac(convertRing)
 
-    # I don't want order=lex because this is the ring I'll use for Groebner basis calculations
-    RQQ = PolynomialRing(QQ, names=tuple(flatten((alg_exts_names, roots_names, ODE_vars, coordinates, coeff_vars))),
-                         order=f'degrevlex({len(alg_exts) + len(roots_names) + len(ODE_vars) + len(coordinates)}), degrevlex({len(coeff_vars)})')
-    RZZflint = PolynomialRing(ZZ, names=tuple(flatten((alg_exts_names, roots_names, ODE_vars, coordinates, coeff_vars))),
-                              implementation='FLINT')
-    R32003 = PolynomialRing(GF(32003), names=tuple(flatten((alg_exts_names, roots_names, ODE_vars, coordinates, coeff_vars))),
-                         order=f'degrevlex({len(alg_exts) + len(roots_names) + len(ODE_vars) + len(coordinates)}), degrevlex({len(coeff_vars)})')
+    # These are the rings used for the system of equations in the coefficients
+    RQQ = PolynomialRing(QQ, names=coeff_vars)
+    RZZflint = PolynomialRing(ZZ, names=coeff_vars, implementation='FLINT')
+    R32003 = PolynomialRing(GF(32003), names=coeff_vars)
 
 # we need to add gamma to this to make ansatz 11 (algebraic extension) work
 def mk_ideal(R, roots, alg_exts):
