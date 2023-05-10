@@ -1265,7 +1265,11 @@ def convert_to_matrix(system_of_equations):
     max_degree = -1
     dok = scipy.sparse.dok_matrix((len(system_of_equations), 0), np.int64)
 
+    if ProgressBar:
+        pb = ProgressBar(label='convert_to_matrix ', expected_size=len(system_of_equations))
     for i,l in enumerate(system_of_equations):
+        if i%100 == 99 and ProgressBar:
+            pb.show(i+1)
         for etuple, coeff in l.iterator_exp_coeff():
             if etuple.unweighted_degree() > max_degree:
                 # increase max_degree and rebuild indices
@@ -1275,7 +1279,10 @@ def convert_to_matrix(system_of_equations):
                 dok.resize((len(system_of_equations), veclen))
             index = encode_deglex(etuple)
             dok[i, index] += coeff
-        print(i, "of", len(system_of_equations), "done")
+
+    if ProgressBar:
+        pb.show(i+1)
+        pb.done()
 
     matrix_RQQ = sp_unique(dok, axis=0, new_format='csr')
     matrix_RQQ.max_degree = max_degree
