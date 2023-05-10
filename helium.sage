@@ -1106,6 +1106,9 @@ INPUT
         print(f"f{i+1} = ", eqn, ";")
     print('END;')
 
+# Euclidean Distance polynomials are used to construct a masking function to drive our
+# numerical solution algorithm away from known varieties.
+
 def construct_ED_polynomial(I):
     """Construct and return the Euclidean Distance polynomial for a given ideal"""
     uvars = tuple('u_' + str(var) for var in coeff_vars)
@@ -1155,6 +1158,154 @@ def ED_function(v, EDpoly):
     solset_numerical = [sol[SR('t')].n() for sol in solset_symbolic]
     sol = min(filter(lambda x: x>=0, solset_numerical))
     return sol
+
+# Now we want to evaluate possibly lots of polynomials, as well as
+# their first derivatives.  For speed, we use scipy sparse matrices.
+# Each row in the matrix is a polynomial and each column corresponds
+# to a monomial.  The matrix entry is that monomial's coefficient.  We
+# can then evaluate all the polynomials at once by forming a vector of
+# all the monomials (up to a given maximum degree) and multiplying it
+# by the matrix.
+
+# Given a vector, generate a multi-vector of the vector itself,
+# then all the biproducts of the vector elements, then all the
+# triproducts of the vector elements, etc.
+#
+# [a,b,c]
+# [a,b,c] * a, [b,c] * b, [c] * c = [a^2, a*b, a*c, b^2, b*c, c^2]
+#
+# Graded lexicographic order
+#
+# generate_multi_vector([a,b,c])
+#   -> [a,b,c,a^2,a*b,a*c,b^2,b*c,c^2,a^3,a^2*b,a^2*c,a*b^2,a*b*c,a*c^2,a*b^2,b^2*c,b*c^2,c^3]
+
+def generate_multi_vector(max_degree, v):
+    npv = np.array(v)
+    stack = [[1], npv]
+    for d in range(1, max_degree):
+        stack.append([np.hstack(stack[-1][i:]) * npv[i] for i in range(len(v))])
+    res = np.hstack(tuple(flatten(stack)))
+    return res
+
+# same idea, but for a first derivative
+
+def generate_multi_D_vector(max_degree, v, var):
+    ind = coeff_vars.index(var)
+
+    npv = np.array(v)
+
+    firsts = np.zeros(npv.size)
+    firsts[ind] = int(1)
+    D_stack = [[0], firsts]
+    stack = [[1], npv]
+
+    for d in range(1, max_degree):
+        D_stack.append([np.hstack(stack[-1][i:]) * firsts[i] + np.hstack(D_stack[-1][i:]) * npv[i]
+                        for i in range(len(v))])
+        stack.append([np.hstack(stack[-1][i:]) * npv[i] for i in range(len(v))])
+
+    res = np.hstack(tuple(flatten(D_stack)))
+
+    return res
+
+from sage.functions.other import binomial
+def choose_with_replacement(setsize,num):
+    return binomial(setsize + num - 1, num)
+
+def encode_deglex(exps):
+    # Needs to produce indices in the same ordering as generate_multi_vector()
+    #
+    # modified Gastineau algorithm to produce graded lexicographic order
+    #    order within each graded block is reversed from Gastineau's paper
+    delta = sum(exps)
+    retval = sum(choose_with_replacement(len(exps), j) for j in range(0,delta+1)) - 1
+    d = delta
+    for i in range(0,len(exps)-1):
+        retval -= sum(choose_with_replacement(len(exps)-i-1, d-j) for j in range(0,exps[i]))
+        d = d - exps[i]
+    return retval
+
+# from https://stackoverflow.com/questions/46126840
+import scipy.sparse as sp
+def sp_unique(sp_matrix, axis=0, new_format=None):
+    ''' Returns a sparse matrix with the unique rows (axis=0)
+    or columns (axis=1) of an input sparse matrix sp_matrix'''
+    if axis == 1:
+        sp_matrix = sp_matrix.T
+
+    old_format = sp_matrix.getformat()
+    dt = sp_matrix.dtype
+    ncols = sp_matrix.shape[1]
+
+    if old_format != 'lil':
+        sp_matrix = sp_matrix.tolil()
+
+    _, ind = np.unique(sp_matrix.data + sp_matrix.rows, return_index=True)
+    rows = sp_matrix.rows[ind]
+    data = sp_matrix.data[ind]
+    nrows_uniq = data.shape[0]
+
+    sp_matrix = sp.lil_matrix((nrows_uniq, ncols), dtype=dt)  #  or sp_matrix.resize(nrows_uniq, ncols)
+    sp_matrix.data = data
+    sp_matrix.rows = rows
+
+    if new_format is None:
+        new_format = old_format
+
+    ret = sp_matrix.asformat(new_format)
+    if axis == 1:
+        ret = ret.T
+    return ret
+
+def convert_to_matrix(system_of_equations):
+    global matrix_RQQ
+    # I haven't calculated in advance the maximum degree of the monomials,
+    # so start at -1 and reshape the matrix every time we hit a monomial
+    # that's too big.
+    max_degree = -1
+    dok = scipy.sparse.dok_matrix((len(system_of_equations), 0), np.int64)
+
+    for i,l in enumerate(system_of_equations):
+        for etuple, coeff in l.iterator_exp_coeff():
+            if etuple.unweighted_degree() > max_degree:
+                # increase max_degree and rebuild indices
+                max_degree = etuple.unweighted_degree()
+                # index of the smallest tuple of the next higher degree
+                veclen=encode_deglex([max_degree + 1] + [0]*(len(etuple) - 1))
+                dok.resize((len(system_of_equations), veclen))
+            index = encode_deglex(etuple)
+            dok[i, index] += coeff
+        print(i, "of", len(system_of_equations), "done")
+
+    matrix_RQQ = sp_unique(dok, axis=0, new_format='csr')
+    matrix_RQQ.max_degree = max_degree
+
+# MATRIX CODE
+
+def matrix_fns(vec):
+    r"""
+        Evaluate our polynomials
+
+        INPUT:
+
+        - ``vec`` -- a vector of real values for all coeff_vars
+
+        OUTPUT:
+
+        - a vector of all of our polynomials, evaluated at ``vec``
+        """
+    multivec = generate_multi_vector(matrix_RQQ.max_degree, vec)
+    res = matrix_RQQ.dot(multivec)
+
+    sum_of_squares = sum(res*res)
+    print(sum_of_squares)
+
+    return res
+
+def matrix_jac_fns(vec):
+    mdv = np.stack([generate_multi_D_vector(matrix_RQQ.max_degree, vec, var) for var in coeff_vars], axis=1)
+    JacM = matrix_RQQ.dot(mdv)
+    return JacM
 
 def fns(v):
     r"""
@@ -1209,6 +1360,9 @@ def fns(v):
     # further optimized code (use call instead of subs):
     call_substitution = tuple(substitution.get(RQQ.gen(n), 0) for n in range(RQQ.ngens()))
     res = np.hstack([eqn(call_substitution) for eqn in eqns_RQQ] + homogenize_terms + ED_terms)
+
+    # MATRIX CODE
+    # res = np.hstack(list(map(lambda x: x.get(), [cc.eval_fns(v) for cc in ccs])) + homogenize_terms + ED_terms)
 
     global last_time
     sum_of_squares = sum(res*res)
