@@ -1039,14 +1039,23 @@ last_time = 0
 def build_system_of_equations(ring=None):
     result = dict()
     # for speed, build this tuple here instead of letting the subs method do it in monomial.subs
-    non_coeff_sub = tuple(1 if reduceRing.gen(n) in coeff_vars else reduceRing.gen(n) for n in range(reduceRing.ngens()))
+    # if my custom __evaluate function is available, use it, it's yet faster
+    if '__evaluate' in dir(eq_a_reduceRing_n):
+        FLINT_evaluate = tuple((n,1) for n in range(reduceRing.ngens()) if reduceRing.gen(n) in coeff_vars)
+        print('Using FLINT __evaluate method')
+    else:
+        FLINT_evaluate = None
+        non_coeff_sub = tuple(1 if reduceRing.gen(n) in coeff_vars else reduceRing.gen(n) for n in range(reduceRing.ngens()))
     if ProgressBar:
         pb = ProgressBar(label='build_system_of_equations ', expected_size=eq_a_reduceRing_n.number_of_terms())
     # this loop works on Singular or FLINT elements, but not other things like rings with variables in their coeff field
     for i, (coeff, monomial) in enumerate(eq_a_reduceRing_n):
         if i%100 == 99 and ProgressBar:
             pb.show(i+1)
-        non_coeff_part = monomial(non_coeff_sub)
+        if FLINT_evaluate:
+            non_coeff_part = monomial.__evaluate(FLINT_evaluate)
+        else:
+            non_coeff_part = monomial(non_coeff_sub)
         # this cast needs to be here because otherwise the division (even though it's exact) takes us to the fraction field
         if ring:
             coeff_part = ring(monomial / non_coeff_part)
