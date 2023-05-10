@@ -1267,18 +1267,17 @@ def convert_to_matrix(system_of_equations):
 
     if ProgressBar:
         pb = ProgressBar(label='convert_to_matrix ', expected_size=len(system_of_equations))
-    for i,l in enumerate(system_of_equations):
-        if i%100 == 99 and ProgressBar:
-            pb.show(i+1)
-        for etuple, coeff in l.iterator_exp_coeff():
-            if etuple.unweighted_degree() > max_degree:
-                # increase max_degree and rebuild indices
-                max_degree = etuple.unweighted_degree()
-                # index of the smallest tuple of the next higher degree
-                veclen=encode_deglex([max_degree + 1] + [0]*(len(etuple) - 1))
-                dok.resize((len(system_of_equations), veclen))
+    for i,eqn in enumerate(system_of_equations):
+        if eqn.degree() > max_degree:
+            # increase max_degree and rebuild indices
+            max_degree = eqn.degree()
+            # index of the smallest tuple of the next higher degree
+            veclen=encode_deglex([max_degree + 1] + [0]*(len(etuple) - 1))
+            dok.resize((len(system_of_equations), veclen))
+        for etuple, coeff in eqn.iterator_exp_coeff():
             index = encode_deglex(etuple)
             dok[i, index] += coeff
+        pb.show(i+1)
 
     if ProgressBar:
         pb.show(i+1)
