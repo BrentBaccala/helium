@@ -1286,7 +1286,8 @@ def convert_to_matrix(system_of_equations):
         for etuple, coeff in eqn.iterator_exp_coeff():
             index = encode_deglex(etuple)
             dok[i, index] += coeff
-        pb.show(i+1)
+        if ProgressBar:
+            pb.show(i+1)
 
     if ProgressBar:
         pb.show(i+1)
