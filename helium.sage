@@ -1359,7 +1359,7 @@ def fns(v):
         print(sum_of_squares)
     else:
         if time.time() - last_time > 10:
-            print(res)
+            printv(res)
         print("{:<30} {:10.2f} sec".format(sum_of_squares, time.time()-last_time))
     last_time = time.time()
     return res
