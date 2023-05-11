@@ -98,7 +98,13 @@ try:
     from clint.textui.progress import Bar as ProgressBar
 except ModuleNotFoundError:
     print("clint package not available; no progress bars will be displayed")
-    ProgressBar = None
+    class ProgressBar:
+        def __init__(self, label, expected_size):
+            pass
+        def show(self, i):
+            pass
+        def done(self):
+            pass
 
 # from python docs
 def flatten(listOfLists):
@@ -1046,11 +1052,10 @@ def build_system_of_equations(ring=None):
     else:
         FLINT_evaluate = None
         non_coeff_sub = tuple(1 if reduceRing.gen(n) in coeff_vars else reduceRing.gen(n) for n in range(reduceRing.ngens()))
-    if ProgressBar:
-        pb = ProgressBar(label='build_system_of_equations ', expected_size=eq_a_reduceRing_n.number_of_terms())
+    pb = ProgressBar(label='build_system_of_equations ', expected_size=eq_a_reduceRing_n.number_of_terms())
     # this loop works on Singular or FLINT elements, but not other things like rings with variables in their coeff field
     for i, (coeff, monomial) in enumerate(eq_a_reduceRing_n):
-        if i%100 == 99 and ProgressBar:
+        if i%100 == 99:
             pb.show(i+1)
         if FLINT_evaluate:
             non_coeff_part = monomial.__evaluate(FLINT_evaluate)
@@ -1065,9 +1070,8 @@ def build_system_of_equations(ring=None):
             result[non_coeff_part] += coeff * coeff_part
         else:
             result[non_coeff_part] = coeff * coeff_part
-    if ProgressBar:
-        pb.show(i+1)
-        pb.done()
+    pb.show(i+1)
+    pb.done()
     return tuple(set(result.values()))
 
 def create_eqns_RQQ():
@@ -1274,8 +1278,7 @@ def convert_to_matrix(system_of_equations):
     max_degree = -1
     dok = scipy.sparse.dok_matrix((len(system_of_equations), 0), np.int64)
 
-    if ProgressBar:
-        pb = ProgressBar(label='convert_to_matrix ', expected_size=len(system_of_equations))
+    pb = ProgressBar(label='convert_to_matrix ', expected_size=len(system_of_equations))
     for i,eqn in enumerate(system_of_equations):
         if eqn.degree() > max_degree:
             # increase max_degree and rebuild indices
@@ -1286,12 +1289,10 @@ def convert_to_matrix(system_of_equations):
         for etuple, coeff in eqn.iterator_exp_coeff():
             index = encode_deglex(etuple)
             dok[i, index] += coeff
-        if ProgressBar:
-            pb.show(i+1)
-
-    if ProgressBar:
         pb.show(i+1)
-        pb.done()
+
+    pb.show(i+1)
+    pb.done()
 
     matrix_RQQ = sp_unique(dok, axis=0, new_format='csr')
     matrix_RQQ.max_degree = max_degree
