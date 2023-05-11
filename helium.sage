@@ -1056,10 +1056,10 @@ def build_system_of_equations(ring=None):
             non_coeff_part = monomial.__evaluate(FLINT_evaluate)
         else:
             non_coeff_part = monomial(non_coeff_sub)
-        # this cast needs to be here because otherwise the division (even though it's exact) takes us to the fraction field
         if ring:
             coeff_part = ring(monomial / non_coeff_part)
         else:
+            # this cast needs to be here because otherwise the division (even though it's exact) takes us to the fraction field
             coeff_part = reduceRing(monomial / non_coeff_part)
         if (non_coeff_part) in result:
             result[non_coeff_part] += coeff * coeff_part
@@ -1281,7 +1281,7 @@ def convert_to_matrix(system_of_equations):
             # increase max_degree and rebuild indices
             max_degree = eqn.degree()
             # index of the smallest tuple of the next higher degree
-            veclen=encode_deglex([max_degree + 1] + [0]*(len(etuple) - 1))
+            veclen=encode_deglex([max_degree + 1] + [0]*(eqn.parent().ngens() - 1))
             dok.resize((len(system_of_equations), veclen))
         for etuple, coeff in eqn.iterator_exp_coeff():
             index = encode_deglex(etuple)
