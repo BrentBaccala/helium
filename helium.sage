@@ -1296,32 +1296,7 @@ def convert_to_matrix(system_of_equations):
     matrix_RQQ = sp_unique(dok, axis=0, new_format='csr')
     matrix_RQQ.max_degree = max_degree
 
-# MATRIX CODE
-
-def matrix_fns(vec):
-    r"""
-        Evaluate our polynomials
-
-        INPUT:
-
-        - ``vec`` -- a vector of real values for all coeff_vars
-
-        OUTPUT:
-
-        - a vector of all of our polynomials, evaluated at ``vec``
-        """
-    multivec = generate_multi_vector(matrix_RQQ.max_degree, vec)
-    res = matrix_RQQ.dot(multivec)
-
-    sum_of_squares = sum(res*res)
-    print(sum_of_squares)
-
-    return res
-
-def matrix_jac_fns(vec):
-    mdv = np.stack([generate_multi_D_vector(matrix_RQQ.max_degree, vec, var) for var in coeff_vars], axis=1)
-    JacM = matrix_RQQ.dot(mdv)
-    return JacM
+use_matrix_code = False
 
 def fns(v):
     r"""
@@ -1366,19 +1341,17 @@ def fns(v):
         #raise ValueError
         ED_terms.append(masking_function(sol))
 
-    # original code:
-    # res = np.hstack([eqn.subs(dict(zip(map(RQQ, coeff_vars), v))) for eqn in eqns_RQQ] + homogenize_terms)
+    if use_matrix_code:
+        multivec = generate_multi_vector(matrix_RQQ.max_degree, v)
+        res = np.hstack((matrix_RQQ.dot(multivec), homogenize_terms, ED_terms))
+    else:
+        # optimized code (only construct dict once):
+        substitution = dict(zip(map(RQQ, coeff_vars), v))
+        #res = np.hstack([eqn.subs(substitution) for eqn in eqns_RQQ] + homogenize_terms)
 
-    # optimized code (only construct dict once):
-    substitution = dict(zip(map(RQQ, coeff_vars), v))
-    #res = np.hstack([eqn.subs(substitution) for eqn in eqns_RQQ] + homogenize_terms)
-
-    # further optimized code (use call instead of subs):
-    call_substitution = tuple(substitution.get(RQQ.gen(n), 0) for n in range(RQQ.ngens()))
-    res = np.hstack([eqn(call_substitution) for eqn in eqns_RQQ] + homogenize_terms + ED_terms)
-
-    # MATRIX CODE
-    # res = np.hstack(list(map(lambda x: x.get(), [cc.eval_fns(v) for cc in ccs])) + homogenize_terms + ED_terms)
+        # further optimized code (use call instead of subs):
+        call_substitution = tuple(substitution.get(RQQ.gen(n), 0) for n in range(RQQ.ngens()))
+        res = np.hstack([eqn(call_substitution) for eqn in eqns_RQQ] + homogenize_terms + ED_terms)
 
     global last_time
     sum_of_squares = sum(res*res)
@@ -1391,7 +1364,7 @@ def fns(v):
     last_time = time.time()
     return res
 
-def jac_fns(v):
+def jac_fns(vec):
     r"""
     Evaluate the Jacobian matrix (the matrix of first-order
     partial derivatives) of our polynomials
@@ -1414,11 +1387,11 @@ def jac_fns(v):
     for EDpoly in ED_polynomials:
         global RED_mapper, ED_derivs, t_deriv, coeff_derivs, coeff_derivs_eval
 
-        sol = ED_function(v, EDpoly)
+        sol = ED_function(vec, EDpoly)
         if masking_function(sol) == 0:
             ED_derivatives.append(np.array([0 for cv in coeff_vars]))
         else:
-            RED_mapper = dict(zip(map(lambda x: RED('u_' + str(x)), coeff_vars), v))
+            RED_mapper = dict(zip(map(lambda x: RED('u_' + str(x)), coeff_vars), vec))
             RED_mapper[RED('t')] = sol
             ED_derivs = [EDpoly.derivative(RED('u_' + str(cv))).subs(RED_mapper) for cv in coeff_vars]
             t_deriv = sum(c*m.derivative(RED('t')) for c,m in EDpoly)
@@ -1428,13 +1401,13 @@ def jac_fns(v):
             ED_derivatives.append(np.array([masking_function_derivative(sol)*cde for cde in coeff_derivs_eval]))
     ED_derivatives = np.vstack(ED_derivatives)
 
-    # this can be done faster too, using call instead of subs (see function fn())
-    mapper = dict(zip(map(RQQ, coeff_vars), v))
-    call_substitution = tuple(mapper.get(RQQ.gen(n), 0) for n in range(RQQ.ngens()))
-    # dN = np.vstack(list(map(lambda x: x.get(), [cc.jac_fns(v) for cc in ccs])) + [homogenize_derivatives])
-    #dN = np.hstack([np.vstack([eqn.subs(mapper) for eqn in eqnblock] + [homogenize_derivatives]) for eqnblock in jac_eqns_RQQ])
-    #dN = np.vstack([np.hstack([np.vstack([eqn.subs(mapper) for eqn in eqnblock]) for eqnblock in jac_eqns_RQQ]), homogenize_derivatives, ED_derivatives])
-    dN = np.vstack([np.hstack([np.vstack([eqn(call_substitution) for eqn in eqnblock]) for eqnblock in jac_eqns_RQQ]), homogenize_derivatives, ED_derivatives])
+    if use_matrix_code:
+        mdv = np.stack([generate_multi_D_vector(matrix_RQQ.max_degree, vec, var) for var in coeff_vars], axis=1)
+        dN = np.vstack((matrix_RQQ.dot(mdv), homogenize_derivatives, ED_derivatives))
+    else:
+        mapper = dict(zip(map(RQQ, coeff_vars), vec))
+        call_substitution = tuple(mapper.get(RQQ.gen(n), 0) for n in range(RQQ.ngens()))
+        dN = np.vstack([np.hstack([np.vstack([eqn(call_substitution) for eqn in eqnblock]) for eqnblock in jac_eqns_RQQ]), homogenize_derivatives, ED_derivatives])
     return dN
 
 def make_iv(seed):
