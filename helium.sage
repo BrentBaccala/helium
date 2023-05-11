@@ -90,12 +90,31 @@ import numpy as np
 
 import scipy.optimize
 
+import threading
+
 from sage.symbolic.operators import add_vararg, mul_vararg
 
 from sage.rings.polynomial.polydict import ETuple
 
 try:
-    from clint.textui.progress import Bar as ProgressBar
+    from clint.textui.progress import Bar
+    # like Bar, but don't display ProgressBar at all if the whole event takes less than a second
+    class ProgressBar(Bar):
+        def __init__(self, label, expected_size):
+            self.timer = threading.Timer(float(1.0), lambda: self.show(-1))
+            self.timer.start()
+            super().__init__(label=label, expected_size=expected_size, hide=True)
+        def show(self, i):
+            if i == -1:
+                self.hide = False
+                super().show(self.last_progress)
+            else:
+                super().show(i)
+        def done(self):
+            if self.timer:
+                self.timer.cancel()
+            else:
+                super().done()
 except ModuleNotFoundError:
     print("clint package not available; no progress bars will be displayed")
     class ProgressBar:
