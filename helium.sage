@@ -1402,8 +1402,8 @@ def jac_fns(vec):
     ED_derivatives = np.vstack(ED_derivatives)
 
     if use_matrix_code:
-        mdv = np.stack([generate_multi_D_vector(matrix_RQQ.max_degree, vec, var) for var in coeff_vars], axis=1)
-        dN = np.vstack((matrix_RQQ.dot(mdv), homogenize_derivatives, ED_derivatives))
+        mdv = tuple(matrix_RQQ.dot(generate_multi_D_vector(matrix_RQQ.max_degree, vec, var)) for var in coeff_vars)
+        dN = np.vstack(mdv + (homogenize_derivatives, ED_derivatives))
     else:
         mapper = dict(zip(map(RQQ, coeff_vars), vec))
         call_substitution = tuple(mapper.get(RQQ.gen(n), 0) for n in range(RQQ.ngens()))
