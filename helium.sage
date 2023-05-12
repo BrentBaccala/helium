@@ -1427,7 +1427,7 @@ def jac_fns(vec):
         # each dot product is neqns in size; this is a tuple of ngens vectors, each neqns in size
         def dot_and_show(i,var):
             res = matrix_RQQ.dot(generate_multi_D_vector(matrix_RQQ.max_degree, vec, var))
-            pb.show(i)
+            pb.show(i+1)
             return res
         mdv = tuple(dot_and_show(i,var) for i,var in enumerate(coeff_vars))
         # eqns on the vertical axis, coeffs on the horizontal
