@@ -1234,6 +1234,27 @@ def ED_function(v, EDpoly):
 #
 # generate_multi_vector([a,b,c])
 #   -> [a,b,c,a^2,a*b,a*c,b^2,b*c,c^2,a^3,a^2*b,a^2*c,a*b^2,a*b*c,a*c^2,a*b^2,b^2*c,b*c^2,c^3]
+#
+# Array of n-th degree terms: [terms involving a, terms involving b but not a, terms involving only c]
+#
+# To generate array of n-th degree terms:
+#    - multiply a by all (n-1)-th degree terms to get all n-th degree terms involving a
+#    - multiply b by all (n-1)-th degree terms not involving a to get all n-th degree terms involving b but not a
+#      etc
+#
+# stack is an array of arrays.  The second array is special, it's actually a numpy vector,
+# not a python array, but the logic still works.
+#
+# second array (first degree terms):
+#   -> [a,b,c]
+#
+# third array (second degree terms):
+#   -> [[a^2,a*b,a*c],[b^2,b*c],[c^2]]
+#   -> [a*[a,b,c], b*[b,c], c*[c]]
+#
+# fourth array (third order terms):
+#   -> [[a^3,a^2*b,a^2*c,a*b^2,a*b*c,a*c^2,a*b^2,b^2*c,b*c^2,c^3]
+#   -> [a*[a^2,a*b,a*c,b^2,b*c,c^2], b*[b^2,b*c,c^2], c*[c^2]]
 
 def generate_multi_vector(max_degree, v):
     npv = np.array(v)
@@ -1360,6 +1381,8 @@ def fns(v):
       add additional polynomials to enfore "homogenize" conditions.
     """
 
+    start_time = time.time()
+
     # Save a copy of vector to aid in stopping and restarting the
     # calculation.  An explicit call to the copy method is required if
     # we're using the Fortran minpack code (i.e, scipy's optimize
@@ -1402,9 +1425,11 @@ def fns(v):
     if last_time == 0:
         print(sum_of_squares)
     else:
-        if time.time() - last_time > 10:
+        #if time.time() - last_time > 10:
+        if time.time() - start_time > 10:
             printv(res)
-        print("{:<30} {:10.2f} sec".format(sum_of_squares, time.time()-last_time))
+        #print("{:<30} {:10.2f} sec".format(sum_of_squares, time.time()-last_time))
+        print("{:<30} {:10.2f} sec".format(sum_of_squares, time.time()-start_time))
     last_time = time.time()
     return res
 
