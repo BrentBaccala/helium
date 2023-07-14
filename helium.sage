@@ -1138,6 +1138,11 @@ INPUT
         print(f"f{i+1} = ", eqn, ";")
     print('END;')
 
+def cocoa_dump(fn, eqns, elim=None):
+    with open(fn, 'w') as f:
+        print('use R ::= QQ[', ','.join(str(g) for g in eqns[0].parent().gens()), ']', ',' + elim if elim else '', ';', file=f)
+        print('I := ideal(', ','.join(str(e) for e in eqns if e != 0), ');', file=f)
+
 # Euclidean Distance polynomials are used to construct a masking function to drive our
 # numerical solution algorithm away from known varieties.
 
