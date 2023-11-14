@@ -1120,7 +1120,7 @@ def init():
     timefunc(create_jac_eqns_RQQ)
     timefunc(create_eqns_R32003)
 
-def bertini(eqns=None):
+def bertini(eqns=None, file=sys.stdout):
     if not eqns:
         eqns = eqns(RQQ)
     print("""
@@ -1131,12 +1131,12 @@ TRACKTYPE: 1;
 END;
 
 INPUT
-    """)
-    print('variable_group ', ', '.join( [str(var) for var in set().union(*[eqn.variables() for eqn in eqns])]), ';')
-    print("function ", ', '.join([f"f{i}" for i in range(1,len(eqns)+1)]), ';')
+    """, file=file)
+    print('variable_group ', ', '.join( [str(var) for var in set().union(*[eqn.variables() for eqn in eqns])]), ';', file=file)
+    print("function ", ', '.join([f"f{i}" for i in range(1,len(eqns)+1)]), ';', file=file)
     for i,eqn in enumerate(eqns):
-        print(f"f{i+1} = ", eqn, ";")
-    print('END;')
+        print(f"f{i+1} = ", eqn, ";", file=file)
+    print('END;', file=file)
 
 def cocoa_dump(fn, eqns, elim=None):
     with open(fn, 'w') as f:
