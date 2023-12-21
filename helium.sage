@@ -304,15 +304,15 @@ def finish_prep(ansatz):
         Zeta = SR_function('Zeta')
         (Vvars, V) = trial_polynomial('v', coordinates, roots, 1, constant=None)
         Psi = Zeta(V)
-        (Dvars, D) = trial_polynomial('d', [V], [], 1)
-        (Mvars, M) = trial_polynomial('m', [V], [], 1)
-        (Nvars, N) = trial_polynomial('n', [V], [], 1)
+        (Avars, A) = trial_polynomial('a', [V], [], 1)
+        (Bvars, B) = trial_polynomial('b', [V], [], 1)
+        (Cvars, C) = trial_polynomial('c', [V], [], 1)
 
-        homogenize_groups = (Dvars, Vvars)
+        homogenize_groups = (Avars, Vvars)
 
-        coeff_vars = (E,) + Vvars + Dvars + Mvars + Nvars
+        coeff_vars = (E,) + Vvars + Avars + Bvars + Cvars
 
-        subs = [{DD[0,0](Zeta)(V) : (M * DD[0](Zeta)(V) + N * Zeta(V)) / D},
+        subs = [{DD[0,0](Zeta)(V) : (B * DD[0](Zeta)(V) + C * Zeta(V)) / A},
                 {Zeta(V) : SR.var('Zeta'), DD[0](Zeta)(V) : SR.var('DZeta')}
         ]
         ODE_vars = ('Zeta', 'DZeta')
