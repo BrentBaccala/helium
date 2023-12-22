@@ -1631,25 +1631,35 @@ def find_relation():
 # commented out so it won't run on load, but needs to be done in build_systems():
 
 def init_build_systems():
-    global factored_eqns, factors, factor_dict, index_dict, indices
+    global factored_eqns, factors, factor_dict, index_dict, indices, findices
     factored_eqns = [factor(eq) for eq in eqns_RQQ]
-    factors=tuple(set(f for factored_eqn in factored_eqns for f,m in factored_eqn))
+    factors=list(set(f for factored_eqn in factored_eqns for f,m in factored_eqn))
     factor_dict = {f:i for i,f in enumerate(factors)}
     index_dict = {i:f for i,f in enumerate(factors)}
+    # indices is a tuple of tuples, each sub-tuple is a set of factor indexes for a single equation in the original system
     indices = tuple(tuple(factor_dict[f] for f,m in factored_eqn) for factored_eqn in factored_eqns)
+    # findices is a tuples of tuples of factors, with the multiplicities dropped
+    findices = tuple(tuple(f for f,m in factored_eqn) for factored_eqn in factored_eqns)
+
+def add_factor(f):
+    if f not in factors:
+        factors.append(f)
+        factor_dict[f] = len(factors)-1
+        index_dict[len(factors)-1] = f
 
 def build_systems():
     global systems
     systems = set()
     working_ideal = set()
     tracking_info = list()
+    substitutions = dict()
     last_i = -1
     while True:
-        for i in range(last_i+1, len(indices)):
+        for i in range(last_i+1, len(findices)):
             # if any index in the working ideal is in this equation, skip it, as it's already satisfied
-            if not working_ideal.isdisjoint(indices[i]):
+            if not working_ideal.isdisjoint(findices[i]):
                 continue
-            working_ideal.add(indices[i][0])
+            working_ideal.add(findices[i][0])
             tracking_info.append((i, 0))
             #print('adding', i, 0)
         # yield working_ideal
@@ -1659,10 +1669,15 @@ def build_systems():
                 last_i, last_index = tracking_info.pop()
             except IndexError:
                 return
-            working_ideal.remove(indices[last_i][last_index])
+            # remove will raise KeyError if this doesn't work
+            try:
+                working_ideal.remove(findices[last_i][last_index])
+            except KeyError:
+                print('KeyError removing from', working_ideal)
+                raise
             #print('removing', last_i, last_index)
             if last_index < len(indices[last_i])-1:
                 break
-        working_ideal.add(indices[last_i][last_index + 1])
+        working_ideal.add(findices[last_i][last_index + 1])
         tracking_info.append((last_i, last_index + 1))
         #print('adding', last_i, last_index+1)
