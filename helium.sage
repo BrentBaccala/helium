@@ -1647,6 +1647,48 @@ def add_factor(f):
         factor_dict[f] = len(factors)-1
         index_dict[len(factors)-1] = f
 
+def add_polynomial_to_working_ideal(working_ideal, tracking_info, substitutions, i, j):
+    # working ideal is a set of polynomials
+    # tracking info is a list of tuples that record our old state every time we add a polynomial,
+    #    so that we can backtrack, remove it, and try other possibilities
+    #    XXX if the i,j'th polynomial can now be factored, we'll be adding multiple polynomials at this state
+    poly1 = findices[i][j].subs(substitutions)
+    print('adding', i, j, poly1)
+    if poly1.is_zero(): return
+    # maybe the polynomial can be factored further now that we've applied substitutions
+    for poly,e in poly1.factor():
+        # determine if the polynomial has a simple linear term that can be substituted out in the rest of the ideal
+        subvar = None
+        old_working_ideal = working_ideal.copy()
+        for v in coeff_vars:
+            if poly.degree(RQQ(v)) == 1 and poly.coefficient(RQQ(v)).is_constant():
+                subvar = RQQ(v)
+                replacement = RQQ(v) - (poly / poly.coefficient(RQQ(v)))
+                substitutions[RQQ(v)] = replacement
+                print("substituting", replacement, "for", subvar)
+                print("old working_ideal", working_ideal)
+                # we can't do this:
+                #   working_ideal = set(p.subs(substitutions) for p in working_ideal)
+                # because there might be a prior substitution like "v0 -> 0" which can't be applied to the "v0" in working_ideal
+                # but if there's a subsitution like "a -> b", and we add "b -> 0", we want that transformed to "a -> 0"
+                #   in this case, there's "a - b" in the working ideal, which transforms to "a"
+                #   there's a substitution "a -> b" that we want transformed to "a -> 0"
+                #   XXX therefore, we have to apply {subvar: replacement} to pre-existing substitutions
+                working_ideal_2 = set()
+                for poly2 in working_ideal:
+                    poly2 = poly2.subs({subvar: replacement})
+                    if not poly2.is_zero():
+                        for p,e in poly2.factor():
+                            working_ideal_2.add(p)
+                print('working_ideal_2', working_ideal_2)
+                working_ideal.clear()
+                working_ideal.update(working_ideal_2)
+                # XXX we might now have a 0 in the ideal
+                break
+        working_ideal.add(poly)
+    print("new working_ideal", working_ideal)
+    tracking_info.append((i,j,subvar,old_working_ideal))
+
 def build_systems():
     global systems
     systems = set()
@@ -1659,25 +1701,39 @@ def build_systems():
             # if any index in the working ideal is in this equation, skip it, as it's already satisfied
             if not working_ideal.isdisjoint(findices[i]):
                 continue
-            working_ideal.add(findices[i][0])
-            tracking_info.append((i, 0))
-            #print('adding', i, 0)
+            add_polynomial_to_working_ideal(working_ideal, tracking_info, substitutions, i, 0)
         # yield working_ideal
+        print('adding', tuple(sorted(working_ideal)))
         systems.add(tuple(sorted(working_ideal)))
         while True:
             try:
-                last_i, last_index = tracking_info.pop()
+                last_i, last_index, subvar, old_ideal = tracking_info.pop()
             except IndexError:
                 return
-            # remove will raise KeyError if this doesn't work
-            try:
-                working_ideal.remove(findices[last_i][last_index])
-            except KeyError:
-                print('KeyError removing from', working_ideal)
-                raise
-            #print('removing', last_i, last_index)
+            ### I don't do this anymore because the polys in the ideal have been modified by substitutions
+            ### # remove will raise KeyError if this doesn't work
+            ### try:
+            ###     working_ideal.remove(findices[last_i][last_index])
+            ### except KeyError:
+            ###     print('KeyError removing from', working_ideal, last_i, last_index)
+            ###     raise
+            # del raises an exception if this doesn't work
+            print('removing', last_i, last_index, subvar, old_ideal)
+            if subvar:
+                del substitutions[subvar]
+            working_ideal = old_ideal
             if last_index < len(indices[last_i])-1:
                 break
-        working_ideal.add(findices[last_i][last_index + 1])
-        tracking_info.append((last_i, last_index + 1))
-        #print('adding', last_i, last_index+1)
+        add_polynomial_to_working_ideal(working_ideal, tracking_info, substitutions, last_i, last_index + 1)
+
+def remove_redundant_systems():
+    global systems
+    systems_copy = systems.copy()
+    for s in systems_copy:
+        for t in systems_copy:
+            # if s is a strict subset of t, remove t
+            if len(s) < len(t) and all(p in t for p in s):
+                try:
+                    systems.remove(t)
+                except KeyError:
+                    pass
