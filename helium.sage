@@ -1641,32 +1641,84 @@ def init_build_systems():
     # findices is a tuples of tuples of factors, with the multiplicities dropped
     findices = tuple(tuple(f for f,m in factored_eqn) for factored_eqn in factored_eqns)
 
-def add_factor(f):
-    if f not in factors:
-        factors.append(f)
-        factor_dict[f] = len(factors)-1
-        index_dict[len(factors)-1] = f
+def is_irreducible(eq):
+    factors = factor(eq)
+    return len(factors) == 1 and not any(m > 1 for f,m in factors)
 
-def add_polynomial_to_working_ideal(working_ideal, tracking_info, substitutions, i, j):
-    # working ideal is a set of polynomials
-    # tracking info is a list of tuples that record our old state every time we add a polynomial,
-    #    so that we can backtrack, remove it, and try other possibilities
-    #    XXX if the i,j'th polynomial can now be factored, we'll be adding multiple polynomials at this state
-    poly1 = findices[i][j].subs(substitutions)
-    print('adding', i, j, poly1)
-    if poly1.is_zero(): return
-    # maybe the polynomial can be factored further now that we've applied substitutions
-    for poly,e in poly1.factor():
+def build_systems():
+    global systems
+    global working_ideal, substitutions, tracking_info, last_i, i
+    systems = set()
+    working_ideal = set()
+    substitutions = dict()
+    tracking_info = list()
+    last_i = -1
+    while True:
+        for i in range(last_i+1, len(findices)):
+            # if any index in the working ideal is in this equation, skip it, as it's already satisfied
+            if not working_ideal.isdisjoint(findices[i]):
+                continue
+            if eqns_RQQ[i].subs(substitutions).is_zero():
+                continue
+            working_ideal.add(eqns_RQQ[i].subs(substitutions))
+            tracking_info.extend(subroutine_one(working_ideal, substitutions, i))
+            for r,a,b in tracking_info:
+                for eq2 in r:
+                    assert is_irreducible(eq2), "loop 1"
+            if i == 33:
+                # force it to pop from tracking_info
+                i = 0
+            break
+        #print('i', i)
+        # working_ideal might have factors in it, if we broke out of the loop, but we're about to discard it in that case
+        if i == len(findices) - 1:
+            old_working_ideal = working_ideal.copy()
+            for k in substitutions:
+                working_ideal.add(k - substitutions[k])
+            systems.add(tuple(sorted(tuple(working_ideal))))
+            for eq in working_ideal:
+                try:
+                    assert is_irreducible(eq), "point 2"
+                except AssertionError:
+                    print(old_working_ideal)
+                    print(working_ideal)
+                    raise
+        try:
+            working_ideal, substitutions, last_i = tracking_info.pop()
+            for eq in working_ideal:
+                assert is_irreducible(eq), "point 3"
+        except IndexError:
+            return
+
+def subroutine_one(equations, substitutions, equation_number):
+    #print('subroutine_one', equations, substitutions, equation_number)
+    assert type(equations) == set
+    result = []
+    for eq in equations:
+        #if not eq.is_prime():
+        if not is_irreducible(eq):
+            for f,m in factor(eq):
+                newset = equations.copy()
+                newset.remove(eq)
+                newset.add(f)
+                result.extend(subroutine_one(newset, substitutions, equation_number))
+            for r,a,b in result:
+                for eq2 in r:
+                    assert is_irreducible(eq2), "point 4"
+            return result
+    # all equations are now irreducible
+    for eq in equations:
+        assert is_irreducible(eq), "point 5"
+    for poly in equations:
         # determine if the polynomial has a simple linear term that can be substituted out in the rest of the ideal
         subvar = None
-        old_working_ideal = working_ideal.copy()
         for v in coeff_vars:
             if poly.degree(RQQ(v)) == 1 and poly.coefficient(RQQ(v)).is_constant():
                 subvar = RQQ(v)
                 replacement = RQQ(v) - (poly / poly.coefficient(RQQ(v)))
-                substitutions[RQQ(v)] = replacement
-                print("substituting", replacement, "for", subvar)
-                print("old working_ideal", working_ideal)
+                newsubs = substitutions.copy()
+                assert subvar not in newsubs
+                newsubs[RQQ(v)] = replacement
                 # we can't do this:
                 #   working_ideal = set(p.subs(substitutions) for p in working_ideal)
                 # because there might be a prior substitution like "v0 -> 0" which can't be applied to the "v0" in working_ideal
@@ -1674,57 +1726,18 @@ def add_polynomial_to_working_ideal(working_ideal, tracking_info, substitutions,
                 #   in this case, there's "a - b" in the working ideal, which transforms to "a"
                 #   there's a substitution "a -> b" that we want transformed to "a -> 0"
                 #   XXX therefore, we have to apply {subvar: replacement} to pre-existing substitutions
-                working_ideal_2 = set()
-                for poly2 in working_ideal:
-                    poly2 = poly2.subs({subvar: replacement})
-                    if not poly2.is_zero():
-                        for p,e in poly2.factor():
-                            working_ideal_2.add(p)
-                print('working_ideal_2', working_ideal_2)
-                working_ideal.clear()
-                working_ideal.update(working_ideal_2)
-                # XXX we might now have a 0 in the ideal
-                break
-        working_ideal.add(poly)
-    print("new working_ideal", working_ideal)
-    tracking_info.append((i,j,subvar,old_working_ideal))
-
-def build_systems():
-    global systems
-    systems = set()
-    working_ideal = set()
-    tracking_info = list()
-    substitutions = dict()
-    last_i = -1
-    while True:
-        for i in range(last_i+1, len(findices)):
-            # if any index in the working ideal is in this equation, skip it, as it's already satisfied
-            if not working_ideal.isdisjoint(findices[i]):
-                continue
-            add_polynomial_to_working_ideal(working_ideal, tracking_info, substitutions, i, 0)
-        # yield working_ideal
-        print('adding', tuple(sorted(working_ideal)))
-        systems.add(tuple(sorted(working_ideal)))
-        while True:
-            try:
-                last_i, last_index, subvar, old_ideal = tracking_info.pop()
-            except IndexError:
-                return
-            ### I don't do this anymore because the polys in the ideal have been modified by substitutions
-            ### # remove will raise KeyError if this doesn't work
-            ### try:
-            ###     working_ideal.remove(findices[last_i][last_index])
-            ### except KeyError:
-            ###     print('KeyError removing from', working_ideal, last_i, last_index)
-            ###     raise
-            # del raises an exception if this doesn't work
-            print('removing', last_i, last_index, subvar, old_ideal)
-            if subvar:
-                del substitutions[subvar]
-            working_ideal = old_ideal
-            if last_index < len(indices[last_i])-1:
-                break
-        add_polynomial_to_working_ideal(working_ideal, tracking_info, substitutions, last_i, last_index + 1)
+                newset = set()
+                for poly2 in equations:
+                    if poly2 is not poly:
+                        poly2 = poly2.subs({subvar: replacement})
+                        if not poly2.is_zero():
+                            newset.add(poly2)
+                for k in newsubs:
+                    newsubs[k] = newsubs[k].subs({subvar: replacement})
+                return subroutine_one(newset, newsubs, equation_number)
+    for eq in equations:
+        assert is_irreducible(eq), "point 6"
+    return [(equations, substitutions, equation_number)]
 
 def remove_redundant_systems():
     global systems
