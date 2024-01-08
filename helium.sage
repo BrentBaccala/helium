@@ -1645,6 +1645,8 @@ def is_irreducible(eq):
     factors = factor(eq)
     return len(factors) == 1 and not any(m > 1 for f,m in factors)
 
+debug_build_systems = False
+
 def build_systems():
     global systems
     global working_ideal, substitutions, tracking_info, last_i, i
@@ -1662,9 +1664,10 @@ def build_systems():
                 continue
             working_ideal.add(eqns_RQQ[i].subs(substitutions))
             tracking_info.extend(subroutine_one(working_ideal, substitutions, i))
-            for r,a,b in tracking_info:
-                for eq2 in r:
-                    assert is_irreducible(eq2), "loop 1"
+            if debug_build_systems:
+                for r,a,b in tracking_info:
+                    for eq2 in r:
+                        assert is_irreducible(eq2), "loop 1"
             if i == 33:
                 # force it to pop from tracking_info
                 i = 0
@@ -1676,39 +1679,43 @@ def build_systems():
             for k in substitutions:
                 working_ideal.add(k - substitutions[k])
             systems.add(tuple(sorted(tuple(working_ideal))))
-            for eq in working_ideal:
-                try:
-                    assert is_irreducible(eq), "point 2"
-                except AssertionError:
-                    print(old_working_ideal)
-                    print(working_ideal)
-                    raise
+            if debug_build_systems:
+                for eq in working_ideal:
+                    try:
+                        assert is_irreducible(eq), "point 2"
+                    except AssertionError:
+                        print(old_working_ideal)
+                        print(working_ideal)
+                        raise
         try:
             working_ideal, substitutions, last_i = tracking_info.pop()
-            for eq in working_ideal:
-                assert is_irreducible(eq), "point 3"
+            if debug_build_systems:
+                for eq in working_ideal:
+                    assert is_irreducible(eq), "point 3"
         except IndexError:
             return
 
 def subroutine_one(equations, substitutions, equation_number):
     #print('subroutine_one', equations, substitutions, equation_number)
-    assert type(equations) == set
+    if debug_build_systems:
+        assert type(equations) == set
     result = []
     for eq in equations:
-        #if not eq.is_prime():
         if not is_irreducible(eq):
             for f,m in factor(eq):
                 newset = equations.copy()
                 newset.remove(eq)
                 newset.add(f)
                 result.extend(subroutine_one(newset, substitutions, equation_number))
-            for r,a,b in result:
-                for eq2 in r:
-                    assert is_irreducible(eq2), "point 4"
+            if debug_build_systems:
+                for r,a,b in result:
+                    for eq2 in r:
+                        assert is_irreducible(eq2), "point 4"
             return result
     # all equations are now irreducible
-    for eq in equations:
-        assert is_irreducible(eq), "point 5"
+    if debug_build_systems:
+        for eq in equations:
+            assert is_irreducible(eq), "point 5"
     for poly in equations:
         # determine if the polynomial has a simple linear term that can be substituted out in the rest of the ideal
         subvar = None
@@ -1735,8 +1742,9 @@ def subroutine_one(equations, substitutions, equation_number):
                 for k in newsubs:
                     newsubs[k] = newsubs[k].subs({subvar: replacement})
                 return subroutine_one(newset, newsubs, equation_number)
-    for eq in equations:
-        assert is_irreducible(eq), "point 6"
+    if debug_build_systems:
+        for eq in equations:
+            assert is_irreducible(eq), "point 6"
     return [(equations, substitutions, equation_number)]
 
 def remove_redundant_systems():
