@@ -1656,6 +1656,11 @@ def build_systems():
     tracking_info = list()
     last_i = -1
     while True:
+        # put this here in case we've just popped from tracking_info and last_i = len(findices)-1
+        # In that case, we don't have anything to do in the next for loop (all of the equations are accounted for),
+        #    but we need to make sure that the "i == len(findices) - 1" test triggers, and the for loop won't
+        #    change i at all if the range is empty
+        i = last_i
         for i in range(last_i+1, len(findices)):
             # if any index in the working ideal is in this equation, skip it, as it's already satisfied
             if not working_ideal.isdisjoint(findices[i]):
@@ -1668,7 +1673,7 @@ def build_systems():
                 for r,a,b in tracking_info:
                     for eq2 in r:
                         assert is_irreducible(eq2), "loop 1"
-            if i == 33:
+            if i == len(findices) - 1:
                 # force it to pop from tracking_info
                 i = 0
             break
