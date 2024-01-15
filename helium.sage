@@ -1647,6 +1647,23 @@ def is_irreducible(eq):
 
 debug_build_systems = False
 
+# Algorithm:
+#   - run through the system of equations from beginning to end
+#   - we're tracking a system of equations and a substitution dictionary, both initially empty
+#   - for each equation, either its already satisfied, or we need to change something to satisfy it
+#   - to check if the equation is satisfied, look first to see if any of its factors are in the system of equations
+#     (if so it's satisfied), then apply the substitution dictionary to each of its factors to see if any of them are zero
+#     (if so it's satisfied)
+#   - the equation might still factor further after making the substitutions, just note that right now
+#   - if the equation is satisfied, skip to the next one
+#   - if the equation is not satisfied, we need to change something
+#   - if we need to change something, add the substituted equation to the system and call subroutine one;
+#     it returns a list of tuples
+#   - each tuple is a system of equations, a substitution dictionary, and the number of the equation we're working on
+#   - for each tuple in the list, continue the main loop starting with the next equation
+#   - when we get through the entire system, add the system of equations (plus the substitutions) to the output
+#   - pop the last tuple on the list and go back to the top of this loop
+
 def build_systems():
     global systems
     global working_ideal, substitutions, tracking_info, last_i, i
@@ -1699,6 +1716,25 @@ def build_systems():
                     assert is_irreducible(eq), "point 3"
         except IndexError:
             return
+
+# Call subroutine one:
+#   - input is a set of equations (to be satisfied) and a set of substitutions (and an equation number for labeling purposes)
+#         the substitutions have already been applied, but the equations might factor, and so might the substitutions
+#         the equations corresponding to the subsitutitons are not in the set of equations
+#   - IF WE'RE BEING CALLED FROM THE MAIN ALGORITHM, ONLY ONE EQUATION MIGHT FACTOR
+#   - IF WE'RE BEING CALLED FROM THE NEXT-TO-LAST STEP IN SUBROUTINE ONE, NEED TO CHECK ALL EQS FOR FACTORIZATION
+#   - for each equation that factors, loop over the factors and recurse on subroutine one on each one,
+#     returning the union of all the resulting lists
+#   - if we got past the last step, we now have a set of irreducibles
+#   - for each irreducible, check to see if it has a simple linear term
+#   - if so, use that simple linear term to generate a new substitution
+#       - remove the equation with the simple linear term from the system of equations, and add the new substitution
+#         (don't add the irreducible with the simple linear term to the system of equations)
+#       - apply the new substitution (and the new substitution only) to the system of equations, and to the subsitutions
+#       - remove any equations that now map to zero
+#       - call subroutine one on the new system (old system with subsitutions done) and new substitutions
+#         and return the resulting list (the recursive call will check other equations for simple linear terms)
+#   - otherwise, return a single item list containing the input system and the input subsitutions
 
 def subroutine_one(equations, substitutions, equation_number):
     #print('subroutine_one', equations, substitutions, equation_number)
