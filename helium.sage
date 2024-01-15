@@ -1634,9 +1634,10 @@ def find_relation():
 # commented out so it won't run on load, but needs to be done in build_systems():
 
 def init_build_systems():
-    global eqns_RQQ_factors, coeff_vars_RQQ
-    # eqns_RQQ_factors is a tuples of tuples of factors, with the multiplicities dropped
-    eqns_RQQ_factors = tuple(tuple(f for f,m in factor(eqn)) for eqn in eqns_RQQ)
+    global factored_eqns, findices, coeff_vars_RQQ
+    factored_eqns = [factor(eq) for eq in eqns_RQQ]
+    # findices is a tuples of tuples of factors, with the multiplicities dropped
+    findices = tuple(tuple(f for f,m in factored_eqn) for factored_eqn in factored_eqns)
     coeff_vars_RQQ = tuple(map(RQQ, coeff_vars))
 
 def is_irreducible(eq):
@@ -1680,14 +1681,14 @@ def build_systems():
     tracking_info = list()
     last_i = -1
     while True:
-        # put this here in case we've just popped from tracking_info and last_i = len(eqns_RQQ)-1
+        # put this here in case we've just popped from tracking_info and last_i = len(findices)-1
         # In that case, we don't have anything to do in the next for loop (all of the equations are accounted for),
-        #    but we need to make sure that the "i == len(eqns_RQQ) - 1" test triggers, and the for loop won't
+        #    but we need to make sure that the "i == len(findices) - 1" test triggers, and the for loop won't
         #    change i at all if the range is empty
         i = last_i
         for i in range(last_i+1, len(eqns_RQQ)):
             # if any polynomial in the working ideal is a factor of this equation, skip the equation, as it's already satisfied
-            if not working_ideal.isdisjoint(eqns_RQQ_factors[i]):
+            if not working_ideal.isdisjoint(findices[i]):
                 continue
             if eqns_RQQ[i].subs(substitutions).is_zero():
                 continue
