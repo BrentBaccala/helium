@@ -86,6 +86,9 @@ import random
 import itertools
 from itertools import *
 
+# import functools for functools.lru_cache
+import functools
+
 import numpy as np
 
 import scipy.optimize
@@ -1631,7 +1634,7 @@ def find_relation():
 # commented out so it won't run on load, but needs to be done in build_systems():
 
 def init_build_systems():
-    global factored_eqns, factors, factor_dict, index_dict, indices, findices
+    global factored_eqns, factors, factor_dict, index_dict, indices, findices, coeff_vars_RQQ
     factored_eqns = [factor(eq) for eq in eqns_RQQ]
     factors=list(set(f for factored_eqn in factored_eqns for f,m in factored_eqn))
     factor_dict = {f:i for i,f in enumerate(factors)}
@@ -1640,12 +1643,22 @@ def init_build_systems():
     indices = tuple(tuple(factor_dict[f] for f,m in factored_eqn) for factored_eqn in factored_eqns)
     # findices is a tuples of tuples of factors, with the multiplicities dropped
     findices = tuple(tuple(f for f,m in factored_eqn) for factored_eqn in factored_eqns)
+    coeff_vars_RQQ = tuple(map(RQQ, coeff_vars))
 
 def is_irreducible(eq):
     factors = factor(eq)
     return len(factors) == 1 and not any(m > 1 for f,m in factors)
 
 debug_build_systems = False
+
+# Setup caching for factorization and degree testing, which together speed hydrogen-5 from 90 sec to 15 sec
+
+if type(factor) is not functools._lru_cache_wrapper:
+    factor = functools.lru_cache(maxsize=None)(factor)
+
+@functools.lru_cache(maxsize=None)
+def is_linear_in_var(poly, v):
+    return poly.degree(v) == 1 and poly.coefficient(v).is_constant()
 
 # Algorithm:
 #   - run through the system of equations from beginning to end
@@ -1760,13 +1773,13 @@ def subroutine_one(equations, substitutions, equation_number):
     for poly in equations:
         # determine if the polynomial has a simple linear term that can be substituted out in the rest of the ideal
         subvar = None
-        for v in coeff_vars:
-            if poly.degree(RQQ(v)) == 1 and poly.coefficient(RQQ(v)).is_constant():
-                subvar = RQQ(v)
-                replacement = RQQ(v) - (poly / poly.coefficient(RQQ(v)))
+        for v in coeff_vars_RQQ:
+            if is_linear_in_var(poly, v):
+                subvar = v
+                replacement = v - (poly / poly.coefficient(v))
                 newsubs = substitutions.copy()
                 assert subvar not in newsubs
-                newsubs[RQQ(v)] = replacement
+                newsubs[v] = replacement
                 # we can't do this:
                 #   working_ideal = set(p.subs(substitutions) for p in working_ideal)
                 # because there might be a prior substitution like "v0 -> 0" which can't be applied to the "v0" in working_ideal
