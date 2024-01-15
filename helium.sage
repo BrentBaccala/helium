@@ -1786,7 +1786,13 @@ def subroutine_one(equations, substitutions, equation_number):
                 for poly2 in equations:
                     if poly2 is not poly:
                         poly2 = poly2.subs({subvar: replacement})
-                        if not poly2.is_zero():
+                        # if poly2 is zero, just don't add it to the system of equations, as it's satisfied already
+                        # if poly2 is a non-zero constant, then the system has become inconsistent
+                        if poly2.is_zero():
+                            pass
+                        elif poly2.is_constant():
+                            return []
+                        else:
                             newset.add(poly2)
                 for k in newsubs:
                     newsubs[k] = newsubs[k].subs({subvar: replacement})
