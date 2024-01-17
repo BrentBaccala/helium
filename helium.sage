@@ -166,11 +166,19 @@ def trial_polynomial(base, coordinates, roots, degree, homogenize=None, constant
         #   and set all previous terms to 0.
         # The idea is to prevent a polynomial from being zero by running successive
         #   calculations running through all the terms of the polynomial, forcing them to be 1.
-        homogenize_coefficient = homogenize % len(coefficients)
-        if homogenize_coefficient > 0:
-            poly_coefficients[0:homogenize_coefficient] = [0] * (homogenize_coefficient)
-        poly_coefficients[homogenize_coefficient]= 1
-        del coefficients[0:homogenize_coefficient+1]
+        if homogenize >= 0:
+            homogenize_coefficient = homogenize % len(coefficients)
+            if homogenize_coefficient > 0:
+                poly_coefficients[0:homogenize_coefficient] = [0] * (homogenize_coefficient)
+            poly_coefficients[homogenize_coefficient]= 1
+            del coefficients[0:homogenize_coefficient+1]
+        else:
+            # if homogenize is negative, we set the coefficient of that term equal to 1,
+            # but don't set all previous terms to 0.  I use this in ansatz 16.31
+            homogenize_coefficient = -homogenize
+            poly_coefficients[homogenize_coefficient]= 1
+            del coefficients[homogenize_coefficient]
+
     poly = sum([poly_coefficients[c]*v for c,v in enumerate(terms)])
     return (tuple(coefficients), poly)
 
@@ -697,7 +705,7 @@ def finish_prep(ansatz):
             maxdeg_v = 1
             maxdeg_ode = 2
             maxdeg_alg = 1
-        elif ansatz == 16.3:
+        elif ansatz == 16.3 or ansatz == 16.31:
             maxdeg_v = 1
             maxdeg_ode = 1
             maxdeg_alg = 2
@@ -734,9 +742,17 @@ def finish_prep(ansatz):
         # diff(g(x1, y1, z1), y1, y1)
 
         Zeta = SR_function('Zeta')
-        (Vvars, V) = trial_polynomial('v', coordinates, roots + (gamma(*coordinates),), maxdeg_v, constant=None)
+        if ansatz == 16.31:
+            # use 'homogenize' to set the coefficient of gamma to 1
+            (Vvars, V) = trial_polynomial('v', coordinates, (gamma(*coordinates),) + roots, maxdeg_v, constant=None, homogenize=0)
+        else:
+            (Vvars, V) = trial_polynomial('v', coordinates, roots + (gamma(*coordinates),), maxdeg_v, constant=None)
         Psi = Zeta(V)
-        (Dvars, D) = trial_polynomial('d', [V], [], maxdeg_ode)
+        if ansatz == 16.31:
+            # use 'homogenize' to set the coeffient of v in the ODE's second order coefficient to 1
+            (Dvars, D) = trial_polynomial('d', [V], [], maxdeg_ode, homogenize=-1)
+        else:
+            (Dvars, D) = trial_polynomial('d', [V], [], maxdeg_ode)
         (Mvars, M) = trial_polynomial('m', [V], [], maxdeg_ode)
         (Nvars, N) = trial_polynomial('n', [V], [], maxdeg_ode)
 
