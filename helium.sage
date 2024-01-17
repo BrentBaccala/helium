@@ -1689,9 +1689,14 @@ def build_systems():
             # if any polynomial in the working ideal is a factor of this equation, skip the equation, as it's already satisfied
             if not working_ideal.isdisjoint(eqns_RQQ_factors[i]):
                 continue
-            if eqns_RQQ[i].subs(substitutions).is_zero():
+            eqn = eqns_RQQ[i].subs(substitutions)
+            if eqn.is_zero():
                 continue
-            working_ideal.add(eqns_RQQ[i].subs(substitutions))
+            if eqn.is_constant():
+                # adding this equation makes the system inconsistent, so we break out of the loop and pop from tracking info
+                i = 0
+                break
+            working_ideal.add(eqn)
             tracking_info.extend(subroutine_one(working_ideal, substitutions, i))
             if debug_build_systems:
                 for r,a,b in tracking_info:
@@ -1748,6 +1753,7 @@ def subroutine_one(equations, substitutions, equation_number):
     if debug_build_systems:
         assert type(equations) == set
     result = []
+    # recurse, if needed, to factor any equations
     for eq in equations:
         if not is_irreducible(eq):
             for f,m in factor(eq):
@@ -1766,6 +1772,9 @@ def subroutine_one(equations, substitutions, equation_number):
             assert is_irreducible(eq), "point 5"
     for poly in equations:
         # determine if the polynomial has a simple linear term that can be substituted out in the rest of the ideal
+        #
+        # if this subroutine was called from the main routine, we only have to check a single equation
+        # for both factorization (above) and to see if it is has a simple linear term
         subvar = None
         for v in coeff_vars_RQQ:
             if is_linear_in_var(poly, v):
