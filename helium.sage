@@ -1687,6 +1687,19 @@ def is_linear_in_var(poly, v):
 #   - when we get through the entire system, add the system of equations (plus the substitutions) to the output
 #   - pop the last tuple on the list and go back to the top of this loop
 
+def add_system(newsys):
+    global systems
+    systems_to_remove = []
+    for sys in systems:
+        # if an existing sys is a strict subset of newsys, we don't do anything
+        if len(sys) < len(newsys) and all(p in newsys for p in sys):
+            return
+        if len(newsys) < len(sys) and all(p in sys for p in newsys):
+            systems_to_remove.append(sys)
+    for sys in systems_to_remove:
+        systems.remove(sys)
+    systems.add(newsys)
+
 def build_systems():
     global systems
     global working_ideal, substitutions, tracking_info, last_i, i
@@ -1728,7 +1741,7 @@ def build_systems():
             old_working_ideal = working_ideal.copy()
             for k in substitutions:
                 working_ideal.add(k - substitutions[k])
-            systems.add(tuple(sorted(tuple(working_ideal))))
+            add_system(tuple(sorted(tuple(working_ideal))))
             if debug_build_systems:
                 for eq in working_ideal:
                     try:
@@ -1825,15 +1838,3 @@ def subroutine_one(equations, substitutions, equation_number):
         for eq in equations:
             assert is_irreducible(eq), "point 6"
     return [(equations, substitutions, equation_number)]
-
-def remove_redundant_systems():
-    global systems
-    systems_copy = systems.copy()
-    for s in systems_copy:
-        for t in systems_copy:
-            # if s is a strict subset of t, remove t
-            if len(s) < len(t) and all(p in t for p in s):
-                try:
-                    systems.remove(t)
-                except KeyError:
-                    pass
