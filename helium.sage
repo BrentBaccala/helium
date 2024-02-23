@@ -149,6 +149,9 @@ def trial_polynomial(base, coordinates, roots, degree, homogenize=None, constant
     degree is maximum degree of the trial polynomial
     constant=None is optional and drops the constant term (essentially mindeg=1 instead of mindeg=0)
     homogenize=N is unused right now and is intended as a future performance optimization
+
+    The difference between 'coordinates' and 'roots' is that we never use higher powers of roots (>= 2) no matter
+    what 'degree' is.  This assumes that the roots are square roots, of course, a current limitation of the code.
     """
 
     if not constant:
@@ -307,7 +310,7 @@ def finish_prep(ansatz):
         ]
         ODE_vars = ('Chi', 'DChi')
 
-    elif ansatz == 5:
+    elif ansatz == 5 or ansatz == 5.01:
         # A second-order homogeneous ODE: D(V) d^2 Zeta/dV^2 - M(V) dZeta/dV - N(V) Zeta = 0
         # where D(V), M(V), and N(V) are linear polynomials in V, which is itself a linear polynomial
         #
@@ -315,7 +318,11 @@ def finish_prep(ansatz):
         Zeta = SR_function('Zeta')
         (Vvars, V) = trial_polynomial('v', coordinates, roots, 1, constant=None)
         Psi = Zeta(V)
-        (Avars, A) = trial_polynomial('a', [V], [], 1)
+        if ansatz == 5.01:
+            # use 'homogenize' to set the coeffient of v in the ODE's second order coefficient to 1
+            (Avars, A) = trial_polynomial('a', [V], [], 1, homogenize=-1)
+        else:
+            (Avars, A) = trial_polynomial('a', [V], [], 1)
         (Bvars, B) = trial_polynomial('b', [V], [], 1)
         (Cvars, C) = trial_polynomial('c', [V], [], 1)
 
