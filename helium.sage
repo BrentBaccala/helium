@@ -728,7 +728,7 @@ def finish_prep(ansatz):
             maxdeg_v = 1
             maxdeg_ode = 2
             maxdeg_alg = 2
-        elif ansatz == 16.6:
+        elif ansatz == 16.6 or ansatz == 16.61:
             maxdeg_v = 2
             maxdeg_ode = 2
             maxdeg_alg = 2
@@ -749,13 +749,13 @@ def finish_prep(ansatz):
         # diff(g(x1, y1, z1), y1, y1)
 
         Zeta = SR_function('Zeta')
-        if ansatz == 16.31:
+        if ansatz == 16.31 or ansatz == 16.61:
             # use 'homogenize' to set the coefficient of gamma to 1
             (Vvars, V) = trial_polynomial('v', coordinates, (gamma(*coordinates),) + roots, maxdeg_v, constant=None, homogenize=0)
         else:
             (Vvars, V) = trial_polynomial('v', coordinates, roots + (gamma(*coordinates),), maxdeg_v, constant=None)
         Psi = Zeta(V)
-        if ansatz == 16.31:
+        if ansatz == 16.31 or ansatz == 16.61:
             # use 'homogenize' to set the coeffient of v in the ODE's second order coefficient to 1
             (Dvars, D) = trial_polynomial('d', [V], [], maxdeg_ode, homogenize=-1)
         else:
