@@ -311,7 +311,7 @@ def finish_prep(ansatz):
         ODE_vars = ('Chi', 'DChi')
 
     elif ansatz == 5 or ansatz == 5.01:
-        # A second-order homogeneous ODE: D(V) d^2 Zeta/dV^2 - M(V) dZeta/dV - N(V) Zeta = 0
+        # A second-order homogeneous ODE: D(V) d^2 Zeta/dV^2 + M(V) dZeta/dV + N(V) Zeta = 0
         # where D(V), M(V), and N(V) are linear polynomials in V, which is itself a linear polynomial
         #
         # Homogenization forces V and D to be non-zero; V is also forced to be non-constant
@@ -330,7 +330,7 @@ def finish_prep(ansatz):
 
         coeff_vars = (E,) + Vvars + Avars + Bvars + Cvars
 
-        subs = [{DD[0,0](Zeta)(V) : (B * DD[0](Zeta)(V) + C * Zeta(V)) / A},
+        subs = [{DD[0,0](Zeta)(V) : -(B * DD[0](Zeta)(V) + C * Zeta(V)) / A},
                 {Zeta(V) : SR.var('Zeta'), DD[0](Zeta)(V) : SR.var('DZeta')}
         ]
         ODE_vars = ('Zeta', 'DZeta')
