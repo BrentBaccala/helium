@@ -1696,6 +1696,7 @@ def is_linear_in_var(poly, v):
 
 def add_system(newsys):
     global systems
+    #print("adding system")
     systems_to_remove = []
     for sys in systems:
         # if an existing sys is a strict subset of newsys, we don't do anything
@@ -1706,6 +1707,11 @@ def add_system(newsys):
     for sys in systems_to_remove:
         systems.remove(sys)
     systems.add(newsys)
+
+# Should we track equations with linear terms and use them to substitute for variables?
+# Doing so produces simpler systems, but more of them and makes the algorithm run slower.
+
+track_linear_equations = False
 
 def build_systems():
     global systems
@@ -1725,15 +1731,19 @@ def build_systems():
             # if any polynomial in the working ideal is a factor of this equation, skip the equation, as it's already satisfied
             if not working_ideal.isdisjoint(eqns_RQQ_factors[i]):
                 continue
-            eqn = eqns_RQQ[i].subs(substitutions)
-            if eqn.is_zero():
-                continue
-            if eqn.is_constant():
-                # adding this equation makes the system inconsistent, so we break out of the loop and pop from tracking info
-                i = 0
-                break
+            if track_linear_equations:
+                eqn = eqns_RQQ[i].subs(substitutions)
+                if eqn.is_zero():
+                    continue
+                if eqn.is_constant():
+                    # adding this equation makes the system inconsistent, so we break out of the loop and pop from tracking info
+                    i = 0
+                    break
+            else:
+                eqn = eqns_RQQ[i]
             working_ideal.add(eqn)
             tracking_info.extend(subroutine_one(working_ideal, substitutions, i))
+            #print(tracking_info)
             if debug_build_systems:
                 for r,a,b in tracking_info:
                     for eq2 in r:
@@ -1745,9 +1755,10 @@ def build_systems():
         #print('i', i)
         # working_ideal might have factors in it, if we broke out of the loop, but we're about to discard it in that case
         if i == len(eqns_RQQ) - 1:
-            old_working_ideal = working_ideal.copy()
-            for k in substitutions:
-                working_ideal.add(k - substitutions[k])
+            if track_linear_equations:
+                old_working_ideal = working_ideal.copy()
+                for k in substitutions:
+                    working_ideal.add(k - substitutions[k])
             add_system(tuple(sorted(tuple(working_ideal))))
             if debug_build_systems:
                 for eq in working_ideal:
@@ -1806,41 +1817,42 @@ def subroutine_one(equations, substitutions, equation_number):
     if debug_build_systems:
         for eq in equations:
             assert is_irreducible(eq), "point 5"
-    for poly in equations:
-        # determine if the polynomial has a simple linear term that can be substituted out in the rest of the ideal
-        #
-        # if this subroutine was called from the main routine, we only have to check a single equation
-        # for both factorization (above) and to see if it is has a simple linear term
-        subvar = None
-        for v in coeff_vars_RQQ:
-            if is_linear_in_var(poly, v):
-                subvar = v
-                replacement = v - (poly / poly.coefficient(v))
-                newsubs = substitutions.copy()
-                assert subvar not in newsubs
-                newsubs[v] = replacement
-                # we can't do this:
-                #   working_ideal = set(p.subs(substitutions) for p in working_ideal)
-                # because there might be a prior substitution like "v0 -> 0" which can't be applied to the "v0" in working_ideal
-                # but if there's a subsitution like "a -> b", and we add "b -> 0", we want that transformed to "a -> 0"
-                #   in this case, there's "a - b" in the working ideal, which transforms to "a"
-                #   there's a substitution "a -> b" that we want transformed to "a -> 0"
-                #   XXX therefore, we have to apply {subvar: replacement} to pre-existing substitutions
-                newset = set()
-                for poly2 in equations:
-                    if poly2 is not poly:
-                        poly2 = poly2.subs({subvar: replacement})
-                        # if poly2 is zero, just don't add it to the system of equations, as it's satisfied already
-                        # if poly2 is a non-zero constant, then the system has become inconsistent
-                        if poly2.is_zero():
-                            pass
-                        elif poly2.is_constant():
-                            return []
-                        else:
-                            newset.add(poly2)
-                for k in newsubs:
-                    newsubs[k] = newsubs[k].subs({subvar: replacement})
-                return subroutine_one(newset, newsubs, equation_number)
+    if track_linear_equations:
+        for poly in equations:
+            # determine if the polynomial has a simple linear term that can be substituted out in the rest of the ideal
+            #
+            # if this subroutine was called from the main routine, we only have to check a single equation
+            # for both factorization (above) and to see if it is has a simple linear term
+            subvar = None
+            for v in coeff_vars_RQQ:
+                if is_linear_in_var(poly, v):
+                    subvar = v
+                    replacement = v - (poly / poly.coefficient(v))
+                    newsubs = substitutions.copy()
+                    assert subvar not in newsubs
+                    newsubs[v] = replacement
+                    # we can't do this:
+                    #   working_ideal = set(p.subs(substitutions) for p in working_ideal)
+                    # because there might be a prior substitution like "v0 -> 0" which can't be applied to the "v0" in working_ideal
+                    # but if there's a subsitution like "a -> b", and we add "b -> 0", we want that transformed to "a -> 0"
+                    #   in this case, there's "a - b" in the working ideal, which transforms to "a"
+                    #   there's a substitution "a -> b" that we want transformed to "a -> 0"
+                    #   XXX therefore, we have to apply {subvar: replacement} to pre-existing substitutions
+                    newset = set()
+                    for poly2 in equations:
+                        if poly2 is not poly:
+                            poly2 = poly2.subs({subvar: replacement})
+                            # if poly2 is zero, just don't add it to the system of equations, as it's satisfied already
+                            # if poly2 is a non-zero constant, then the system has become inconsistent
+                            if poly2.is_zero():
+                                pass
+                            elif poly2.is_constant():
+                                return []
+                            else:
+                                newset.add(poly2)
+                    for k in newsubs:
+                        newsubs[k] = newsubs[k].subs({subvar: replacement})
+                    return subroutine_one(newset, newsubs, equation_number)
     if debug_build_systems:
         for eq in equations:
             assert is_irreducible(eq), "point 6"
