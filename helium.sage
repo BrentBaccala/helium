@@ -1725,9 +1725,7 @@ def build_systems():
             # if any polynomial in the working ideal is a factor of this equation, skip the equation, as it's already satisfied
             if not working_ideal.isdisjoint(eqns_RQQ_factors[i]):
                 continue
-            eqn = eqns_RQQ[i]
-            working_ideal.add(eqn)
-            tracking_info.extend(subroutine_one(working_ideal, i, start_point, end_point))
+            tracking_info.extend(subroutine_one(eqns_RQQ_factors[i], working_ideal, i, start_point, end_point))
             #print(tracking_info)
             if debug_build_systems:
                 for r,a,b in tracking_info:
@@ -1768,34 +1766,21 @@ def build_systems():
 #   - if we got past the last step, we now have a set of irreducibles, so
 #     return a single item list containing the input system and the input subsitutions
 
-def subroutine_one(equations, equation_number, start_point, end_point):
+def subroutine_one(factors, equations, equation_number, start_point, end_point):
     #print('subroutine_one', equations, equation_number)
     if debug_build_systems:
         assert type(equations) == set
     result = []
     # recurse, if needed, to factor any equations
-    for eq in equations:
-        if not is_irreducible(eq):
-            factors = factor(eq)
-            for i,(f,m) in enumerate(factors):
-                newset = equations.copy()
-                newset.remove(eq)
-                newset.add(f)
-                new_start_point = start_point + (len(factors) - i - 1)*(end_point - start_point)/len(factors)
-                new_end_point = start_point + (len(factors) - i)*(end_point - start_point)/len(factors)
-                #print('start/end_point', start_point, end_point)
-                #print('new start/end_point', new_start_point, new_end_point)
-                result.extend(subroutine_one(newset, equation_number, new_start_point, new_end_point))
-            if debug_build_systems:
-                for r,a,b in result:
-                    for eq2 in r:
-                        assert is_irreducible(eq2), "point 4"
-            return result
-    # all equations are now irreducible
-    if debug_build_systems:
-        for eq in equations:
-            assert is_irreducible(eq), "point 5"
-    return [(equations, equation_number, start_point, end_point)]
+    for i,f in enumerate(factors):
+        newset = equations.copy()
+        newset.add(f)
+        new_start_point = start_point + (len(factors) - i - 1)*(end_point - start_point)/len(factors)
+        new_end_point = start_point + (len(factors) - i)*(end_point - start_point)/len(factors)
+        #print('start/end_point', start_point, end_point)
+        #print('new start/end_point', new_start_point, new_end_point)
+        result.append((newset, equation_number, new_start_point, new_end_point))
+    return result
 
 # Once we've built all of the systems, then we do this:
 #
