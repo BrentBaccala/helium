@@ -1759,19 +1759,15 @@ def build_systems():
             return
 
 # Call subroutine one:
-#   - input is a set of equations (to be satisfied) and an equation number for labeling purposes
-#   - IF WE'RE BEING CALLED FROM THE MAIN ALGORITHM, ONLY ONE EQUATION MIGHT FACTOR
-#   - for each equation that factors, loop over the factors and recurse on subroutine one on each one,
-#     returning the union of all the resulting lists
-#   - if we got past the last step, we now have a set of irreducibles, so
-#     return a single item list containing the input system and the input subsitutions
+#   - input is a list, a set of equations (to be satisfied) and an equation number for labeling purposes
+#   - the first input is a list of factors, one of which has to be added to the set
+#   - loop over the factors and add each one to the set, returning the union of all the resulting sets
 
 def subroutine_one(factors, equations, equation_number, start_point, end_point):
     #print('subroutine_one', equations, equation_number)
     if debug_build_systems:
         assert type(equations) == set
     result = []
-    # recurse, if needed, to factor any equations
     for i,f in enumerate(factors):
         newset = equations.copy()
         newset.add(f)
