@@ -1679,19 +1679,15 @@ def is_linear_in_var(poly, v):
 
 # Algorithm:
 #   - run through the system of equations from beginning to end
-#   - we're tracking a system of equations and a substitution dictionary, both initially empty
+#   - we're tracking a system of equations, initially empty
 #   - for each equation, either its already satisfied, or we need to change something to satisfy it
 #   - to check if the equation is satisfied, look first to see if any of its factors are in the system of equations
-#     (if so it's satisfied), then apply the substitution dictionary to each of its factors to see if any of them are zero
 #     (if so it's satisfied)
-#   - the equation might still factor further after making the substitutions, just note that right now
 #   - if the equation is satisfied, skip to the next one
-#   - if the equation is not satisfied, we need to change something
-#   - if we need to change something, add the substituted equation to the system and call subroutine one;
-#     it returns a list of tuples
-#   - each tuple is a system of equations, a substitution dictionary, and the number of the equation we're working on
+#   - if the equation is not satisfied, call subroutine one; it returns a list of tuples
+#   - each tuple is a system of equations and the number of the equation we're working on
 #   - for each tuple in the list, continue the main loop starting with the next equation
-#   - when we get through the entire system, add the system of equations (plus the substitutions) to the output
+#   - when we get through the entire system, add the system of equations to the output
 #   - pop the last tuple on the list and go back to the top of this loop
 
 def add_system(newsys):
@@ -1708,17 +1704,11 @@ def add_system(newsys):
         systems.remove(sys)
     systems.add(newsys)
 
-# Should we track equations with linear terms and use them to substitute for variables?
-# Doing so produces simpler systems, but more of them and makes the algorithm run slower.
-
-track_linear_equations = False
-
 def build_systems():
     global systems
-    global working_ideal, substitutions, tracking_info, last_i, i
+    global working_ideal, tracking_info, last_i, i
     systems = set()
     working_ideal = set()
-    substitutions = dict()
     tracking_info = list()
     last_i = -1
     start_point = float(0.0)
@@ -1735,18 +1725,9 @@ def build_systems():
             # if any polynomial in the working ideal is a factor of this equation, skip the equation, as it's already satisfied
             if not working_ideal.isdisjoint(eqns_RQQ_factors[i]):
                 continue
-            if track_linear_equations:
-                eqn = eqns_RQQ[i].subs(substitutions)
-                if eqn.is_zero():
-                    continue
-                if eqn.is_constant():
-                    # adding this equation makes the system inconsistent, so we break out of the loop and pop from tracking info
-                    i = 0
-                    break
-            else:
-                eqn = eqns_RQQ[i]
+            eqn = eqns_RQQ[i]
             working_ideal.add(eqn)
-            tracking_info.extend(subroutine_one(working_ideal, substitutions, i, start_point, end_point))
+            tracking_info.extend(subroutine_one(working_ideal, i, start_point, end_point))
             #print(tracking_info)
             if debug_build_systems:
                 for r,a,b in tracking_info:
@@ -1759,10 +1740,6 @@ def build_systems():
         #print('i', i)
         # working_ideal might have factors in it, if we broke out of the loop, but we're about to discard it in that case
         if i == len(eqns_RQQ) - 1:
-            if track_linear_equations:
-                old_working_ideal = working_ideal.copy()
-                for k in substitutions:
-                    working_ideal.add(k - substitutions[k])
             add_system(tuple(sorted(tuple(working_ideal))))
             #pb.show(int(end_point))
             total_progress += end_point - start_point
@@ -1776,7 +1753,7 @@ def build_systems():
                         print(working_ideal)
                         raise
         try:
-            working_ideal, substitutions, last_i, start_point, end_point = tracking_info.pop()
+            working_ideal, last_i, start_point, end_point = tracking_info.pop()
             if debug_build_systems:
                 for eq in working_ideal:
                     assert is_irreducible(eq), "point 3"
@@ -1784,26 +1761,15 @@ def build_systems():
             return
 
 # Call subroutine one:
-#   - input is a set of equations (to be satisfied) and a set of substitutions (and an equation number for labeling purposes)
-#         the substitutions have already been applied, but the equations might factor, and so might the substitutions
-#         the equations corresponding to the subsitutitons are not in the set of equations
+#   - input is a set of equations (to be satisfied) and an equation number for labeling purposes
 #   - IF WE'RE BEING CALLED FROM THE MAIN ALGORITHM, ONLY ONE EQUATION MIGHT FACTOR
-#   - IF WE'RE BEING CALLED FROM THE NEXT-TO-LAST STEP IN SUBROUTINE ONE, NEED TO CHECK ALL EQS FOR FACTORIZATION
 #   - for each equation that factors, loop over the factors and recurse on subroutine one on each one,
 #     returning the union of all the resulting lists
-#   - if we got past the last step, we now have a set of irreducibles
-#   - for each irreducible, check to see if it has a simple linear term
-#   - if so, use that simple linear term to generate a new substitution
-#       - remove the equation with the simple linear term from the system of equations, and add the new substitution
-#         (don't add the irreducible with the simple linear term to the system of equations)
-#       - apply the new substitution (and the new substitution only) to the system of equations, and to the subsitutions
-#       - remove any equations that now map to zero
-#       - call subroutine one on the new system (old system with subsitutions done) and new substitutions
-#         and return the resulting list (the recursive call will check other equations for simple linear terms)
-#   - otherwise, return a single item list containing the input system and the input subsitutions
+#   - if we got past the last step, we now have a set of irreducibles, so
+#     return a single item list containing the input system and the input subsitutions
 
-def subroutine_one(equations, substitutions, equation_number, start_point, end_point):
-    #print('subroutine_one', equations, substitutions, equation_number)
+def subroutine_one(equations, equation_number, start_point, end_point):
+    #print('subroutine_one', equations, equation_number)
     if debug_build_systems:
         assert type(equations) == set
     result = []
@@ -1819,7 +1785,7 @@ def subroutine_one(equations, substitutions, equation_number, start_point, end_p
                 new_end_point = start_point + (len(factors) - i)*(end_point - start_point)/len(factors)
                 #print('start/end_point', start_point, end_point)
                 #print('new start/end_point', new_start_point, new_end_point)
-                result.extend(subroutine_one(newset, substitutions, equation_number, new_start_point, new_end_point))
+                result.extend(subroutine_one(newset, equation_number, new_start_point, new_end_point))
             if debug_build_systems:
                 for r,a,b in result:
                     for eq2 in r:
@@ -1829,46 +1795,7 @@ def subroutine_one(equations, substitutions, equation_number, start_point, end_p
     if debug_build_systems:
         for eq in equations:
             assert is_irreducible(eq), "point 5"
-    if track_linear_equations:
-        for poly in equations:
-            # determine if the polynomial has a simple linear term that can be substituted out in the rest of the ideal
-            #
-            # if this subroutine was called from the main routine, we only have to check a single equation
-            # for both factorization (above) and to see if it is has a simple linear term
-            subvar = None
-            for v in coeff_vars_RQQ:
-                if is_linear_in_var(poly, v):
-                    subvar = v
-                    replacement = v - (poly / poly.coefficient(v))
-                    newsubs = substitutions.copy()
-                    assert subvar not in newsubs
-                    newsubs[v] = replacement
-                    # we can't do this:
-                    #   working_ideal = set(p.subs(substitutions) for p in working_ideal)
-                    # because there might be a prior substitution like "v0 -> 0" which can't be applied to the "v0" in working_ideal
-                    # but if there's a subsitution like "a -> b", and we add "b -> 0", we want that transformed to "a -> 0"
-                    #   in this case, there's "a - b" in the working ideal, which transforms to "a"
-                    #   there's a substitution "a -> b" that we want transformed to "a -> 0"
-                    #   XXX therefore, we have to apply {subvar: replacement} to pre-existing substitutions
-                    newset = set()
-                    for poly2 in equations:
-                        if poly2 is not poly:
-                            poly2 = poly2.subs({subvar: replacement})
-                            # if poly2 is zero, just don't add it to the system of equations, as it's satisfied already
-                            # if poly2 is a non-zero constant, then the system has become inconsistent
-                            if poly2.is_zero():
-                                pass
-                            elif poly2.is_constant():
-                                return []
-                            else:
-                                newset.add(poly2)
-                    for k in newsubs:
-                        newsubs[k] = newsubs[k].subs({subvar: replacement})
-                    return subroutine_one(newset, newsubs, equation_number, start_point, end_point)
-    if debug_build_systems:
-        for eq in equations:
-            assert is_irreducible(eq), "point 6"
-    return [(equations, substitutions, equation_number, start_point, end_point)]
+    return [(equations, equation_number, start_point, end_point)]
 
 # Once we've built all of the systems, then we do this:
 #
