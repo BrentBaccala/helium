@@ -1721,6 +1721,9 @@ def build_systems():
     substitutions = dict()
     tracking_info = list()
     last_i = -1
+    start_point = float(0.0)
+    end_point = float(100.0)
+    #pb = ProgressBar(label='build_systems ', expected_size=int(end_point))
     while True:
         # put this here in case we've just popped from tracking_info and last_i = len(eqns_RQQ)-1
         # In that case, we don't have anything to do in the next for loop (all of the equations are accounted for),
@@ -1742,7 +1745,7 @@ def build_systems():
             else:
                 eqn = eqns_RQQ[i]
             working_ideal.add(eqn)
-            tracking_info.extend(subroutine_one(working_ideal, substitutions, i))
+            tracking_info.extend(subroutine_one(working_ideal, substitutions, i, start_point, end_point))
             #print(tracking_info)
             if debug_build_systems:
                 for r,a,b in tracking_info:
@@ -1760,6 +1763,8 @@ def build_systems():
                 for k in substitutions:
                     working_ideal.add(k - substitutions[k])
             add_system(tuple(sorted(tuple(working_ideal))))
+            #pb.show(int(end_point))
+            print('progress', start_point, end_point)
             if debug_build_systems:
                 for eq in working_ideal:
                     try:
@@ -1769,7 +1774,7 @@ def build_systems():
                         print(working_ideal)
                         raise
         try:
-            working_ideal, substitutions, last_i = tracking_info.pop()
+            working_ideal, substitutions, last_i, start_point, end_point = tracking_info.pop()
             if debug_build_systems:
                 for eq in working_ideal:
                     assert is_irreducible(eq), "point 3"
@@ -1795,7 +1800,7 @@ def build_systems():
 #         and return the resulting list (the recursive call will check other equations for simple linear terms)
 #   - otherwise, return a single item list containing the input system and the input subsitutions
 
-def subroutine_one(equations, substitutions, equation_number):
+def subroutine_one(equations, substitutions, equation_number, start_point, end_point):
     #print('subroutine_one', equations, substitutions, equation_number)
     if debug_build_systems:
         assert type(equations) == set
@@ -1803,11 +1808,16 @@ def subroutine_one(equations, substitutions, equation_number):
     # recurse, if needed, to factor any equations
     for eq in equations:
         if not is_irreducible(eq):
-            for f,m in factor(eq):
+            factors = factor(eq)
+            for i,(f,m) in enumerate(factors):
                 newset = equations.copy()
                 newset.remove(eq)
                 newset.add(f)
-                result.extend(subroutine_one(newset, substitutions, equation_number))
+                new_start_point = start_point + (len(factors) - i - 1)*(end_point - start_point)/len(factors)
+                new_end_point = start_point + (len(factors) - i)*(end_point - start_point)/len(factors)
+                #print('start/end_point', start_point, end_point)
+                #print('new start/end_point', new_start_point, new_end_point)
+                result.extend(subroutine_one(newset, substitutions, equation_number, new_start_point, new_end_point))
             if debug_build_systems:
                 for r,a,b in result:
                     for eq2 in r:
@@ -1852,11 +1862,11 @@ def subroutine_one(equations, substitutions, equation_number):
                                 newset.add(poly2)
                     for k in newsubs:
                         newsubs[k] = newsubs[k].subs({subvar: replacement})
-                    return subroutine_one(newset, newsubs, equation_number)
+                    return subroutine_one(newset, newsubs, equation_number, start_point, end_point)
     if debug_build_systems:
         for eq in equations:
             assert is_irreducible(eq), "point 6"
-    return [(equations, substitutions, equation_number)]
+    return [(equations, substitutions, equation_number, start_point, end_point)]
 
 # Once we've built all of the systems, then we do this:
 #
