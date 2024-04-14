@@ -1723,6 +1723,7 @@ def build_systems():
     last_i = -1
     start_point = float(0.0)
     end_point = float(100.0)
+    total_progress = float(0.0)
     #pb = ProgressBar(label='build_systems ', expected_size=int(end_point))
     while True:
         # put this here in case we've just popped from tracking_info and last_i = len(eqns_RQQ)-1
@@ -1764,7 +1765,8 @@ def build_systems():
                     working_ideal.add(k - substitutions[k])
             add_system(tuple(sorted(tuple(working_ideal))))
             #pb.show(int(end_point))
-            print('progress', start_point, end_point)
+            total_progress += end_point - start_point
+            print('progress', total_progress, 'len(systems)', len(systems))
             if debug_build_systems:
                 for eq in working_ideal:
                     try:
