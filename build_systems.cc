@@ -275,11 +275,10 @@ void task(void)
   BacktrackPoint extra_work;
 
   while (true) {
-    /* OK for single threaded use */
     get_next_work_from_queue:
-    if (backtrack_queue.empty()) return;
 
-    backtrack_queue.waitAndPop(current_work);
+    /* waitAndPop returns true if we've got work; false if all the work is done */
+    if (! backtrack_queue.waitAndPop(current_work)) return;
 
     /* I put this here because while the work was on the queue, we could have added new finished bitstrings */
     if (finished_bitstrings.contain_a_subset_of(current_work.bitstring)) continue;
@@ -342,6 +341,7 @@ int main(int argc, char ** argv)
   BacktrackPoint initial_work;
   initial_work.next_polynomial = 0;
   backtrack_queue.push(initial_work);
+  backtrack_queue.set_num_workers(1);
 
   task();
   // std::cerr << "\n";

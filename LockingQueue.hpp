@@ -1,6 +1,13 @@
 
 /* GitHub Gist from https://gist.github.com/thelinked/6997598 */
 
+/* Brent Baccala added the set_num_workers() method.  If the queue is empty, and the
+ * number of threads waiting equals the value passed to set_num_workers(), then
+ * all the calls to waitAndPop return false.  For their normal behavior, they return true.
+ *
+ * The idea is to detect when the queue is empty and all the workers are waiting on it.
+ */
+
 #pragma once
 #include <queue>
 #include <mutex>
@@ -10,6 +17,11 @@ template<typename T>
 class LockingQueue
 {
 public:
+    void set_num_workers(int num_workers)
+    {
+        total_workers = num_workers;
+    }
+
     void push(T const& _data)
     {
         {
@@ -38,34 +50,38 @@ public:
         return true;
     }
 
-    void waitAndPop(T& _value)
+    bool waitAndPop(T& _value)
     {
         std::unique_lock<std::mutex> lock(guard);
+
+	waiting_workers ++;
+
+	if ((waiting_workers == total_workers) && queue.empty())
+        {
+	    /* We've exhausted all the work in the queue and all the workers are idle.  We're done. */
+	    signal.notify_all();
+	    return false;
+        }
+
         while (queue.empty())
         {
             signal.wait(lock);
+	    if ((waiting_workers == total_workers) && queue.empty()) {
+	      return false;
+	    }
         }
+
+	waiting_workers --;
 
         _value = queue.front();
         queue.pop();
-    }
-
-    bool tryWaitAndPop(T& _value, int _milli)
-    {
-        std::unique_lock<std::mutex> lock(guard);
-        while (queue.empty())
-        {
-            signal.wait_for(lock, std::chrono::milliseconds(_milli));
-            return false;
-        }
-
-        _value = queue.front();
-        queue.pop();
-        return true;
+	return true;
     }
 
 private:
     std::queue<T> queue;
     mutable std::mutex guard;
     std::condition_variable signal;
+    int total_workers;
+    int waiting_workers;
 };
