@@ -78,8 +78,7 @@
  *
  * POLYNOMIAL BIT STRINGS:
  *    - polys[i] are the complete bit strings for the i'th polynomial
- *    - first_bit[i] is the first one bit in the i'th polynomial
- *    - remaining_bits[i] is a vector of bit strings, one bit strings for each remaining bit split out
+ *    - expanded_polys[i] is a vector of bit strings, one vector for each polynomial, each bit string with a single bit set
  *
  * FINISHED BIT STRINGS:
  *    - linked list of bit strings
@@ -226,8 +225,6 @@ struct BacktrackPoint
 };
 
 std::vector<BitString> polys;
-std::vector<BitString> first_bit;
-std::vector<std::vector<BitString>> remaining_bits;
 std::vector<std::vector<BitString>> expanded_polys;
 
 LockingQueue<BacktrackPoint> backtrack_queue;
@@ -276,8 +273,11 @@ FinishedBitStrings finished_bitstrings;
 
 void task(void)
 {
+  /* "next work" is what this thread will do after "current work".  "extra work" has to be
+   * pushed on the queue for later processing, either by this thread or by another.
+   */
   BacktrackPoint current_work;
-  BacktrackPoint new_work;
+  BitString next_work_bitstring;
   BacktrackPoint extra_work;
 
   while (true) {
@@ -287,22 +287,22 @@ void task(void)
     if (! backtrack_queue.waitAndPop(current_work)) return;
 
     /* I put this here because while the work was on the queue, we could have added new finished bitstrings */
+    /* There's probably a race condition here, as a new finished bitstring could appear at any time! */
     if (finished_bitstrings.contain_a_subset_of(current_work.bitstring)) continue;
 
     while (current_work.next_polynomial < polys.size()) {
       /* If there's any overlap here, the polynomial is already satisfied, move on */
       // std::cerr << "working on " << current_work.bitstring << "\n";
       if (! (current_work.bitstring & polys[current_work.next_polynomial])) {
-	bool have_new_work = false;
+	bool have_next_work = false;
 	/* Extend backtrack queue if there's more than one factor(bit) in the polynomial */
 	for (BitString next_bit: expanded_polys[current_work.next_polynomial]) {
 	  // std::cerr << "adding " << next_bit << "\n";
-	  if (! have_new_work) {
-	    new_work.bitstring = current_work.bitstring | next_bit;
-	    new_work.next_polynomial = current_work.next_polynomial + 1;
+	  if (! have_next_work) {
+	    next_work_bitstring = current_work.bitstring | next_bit;
 	    /* Check first if this is a superset of an existing bit string; skip it if it is */
-	    if (finished_bitstrings.contain_a_subset_of(new_work.bitstring)) continue;
-	    have_new_work = true;
+	    if (finished_bitstrings.contain_a_subset_of(next_work_bitstring)) continue;
+	    have_next_work = true;
 	  } else {
 	    extra_work.bitstring = current_work.bitstring | next_bit;
 	    extra_work.next_polynomial = current_work.next_polynomial + 1;
@@ -311,10 +311,10 @@ void task(void)
 	    backtrack_queue.push(extra_work);
 	  }
 	}
-	if (! have_new_work) {
+	if (! have_next_work) {
 	  goto get_next_work_from_queue;
 	}
-	current_work.bitstring = new_work.bitstring;
+	current_work.bitstring = next_work_bitstring;
       }
       current_work.next_polynomial ++;
     }
