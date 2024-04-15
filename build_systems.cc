@@ -117,7 +117,7 @@
 class BitString
 {
 public:
-  typedef unsigned int data_type;
+  typedef unsigned char data_type;
   std::vector<data_type> bitstring;
   typedef std::vector<data_type>::size_type size_type;
   unsigned int len;
@@ -151,9 +151,9 @@ public:
   {
     BitString *rv = new BitString(std::max(len, rhs.len));
     for (size_type i=0; i<std::max(bitstring.size(), rhs.bitstring.size()); i++) {
-      if (i < bitstring.size() - 1) {
+      if (i >= bitstring.size()) {
 	rv->bitstring[i] = rhs.bitstring[i];
-      } else if (i < rhs.bitstring.size() - 1) {
+      } else if (i >= rhs.bitstring.size()) {
 	rv->bitstring[i] = bitstring[i];
       } else {
 	rv->bitstring[i] = bitstring[i] | rhs.bitstring[i];
@@ -214,8 +214,11 @@ std::ostream& operator<<(std::ostream& stream, BitString bs)
 {
   for (int i=0; i < bs.bitstring.size(); i++) {
     auto str = std::bitset<sizeof(BitString::data_type)*8>(bs.bitstring[i]).to_string();
-    //stream << std::bitset<sizeof(data_type)*8>(bs.bitstring[i]).to_string();
-    stream << str.substr(str.length() - bs.len, bs.len);
+    if (i < bs.bitstring.size() - 1) {
+      stream << str;
+    } else {
+      stream << str.substr(str.length() + i*8*sizeof(BitString::data_type) - bs.len, bs.len - i*8*sizeof(BitString::data_type));
+    }
   }
   return stream;
 }
