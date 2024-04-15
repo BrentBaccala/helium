@@ -113,15 +113,17 @@ class BitString
 {
 public:
   std::vector<unsigned int> bitstring;
+  unsigned int len;
 
   BitString() {}
-  BitString(std::vector<unsigned int>::size_type count) : bitstring(count) {}
+  BitString(unsigned int l) : bitstring((l+8*sizeof(unsigned int)-1)/(8*sizeof(unsigned int))), len(l) {}
   BitString(std::string str)
   {
-    bitstring.resize((8*(str.length()+sizeof(unsigned int))-1)/(8*sizeof(unsigned int)));
-    for (int i=0; i < str.length(); i++) {
+    len = str.length();
+    bitstring.resize((len+8*sizeof(unsigned int)-1)/(8*sizeof(unsigned int)));
+    for (int i=0; i < len; i++) {
       int val = (str[i] == '0' ? 0 : 1);
-      int j = str.length() - i - 1;
+      int j = len - i - 1;
       int index = j/(8*sizeof(unsigned int));
       int offset = j - index*8*sizeof(unsigned int);
       bitstring[index] |= val << offset;
@@ -132,7 +134,7 @@ public:
 
   BitString operator&(const BitString& rhs) const
   {
-    BitString *rv = new BitString(bitstring.size());
+    BitString *rv = new BitString(len);
     for (unsigned int i=0; i<bitstring.size(); i++) {
       rv->bitstring[i] = bitstring[i] & rhs.bitstring[i];
     }
@@ -140,9 +142,8 @@ public:
   }
   BitString operator|(const BitString& rhs) const
   {
-    size_t size = std::max(bitstring.size(), rhs.bitstring.size());
-    BitString *rv = new BitString(size);
-    for (unsigned int i=0; i<size; i++) {
+    BitString *rv = new BitString(std::max(len, rhs.len));
+    for (unsigned int i=0; i<std::max(bitstring.size(), rhs.bitstring.size()); i++) {
       if (i < bitstring.size() - 1) {
 	rv->bitstring[i] = rhs.bitstring[i];
       } else if (i < rhs.bitstring.size() - 1) {
@@ -170,11 +171,13 @@ public:
   bool is_superset_of(const BitString& rhs) const
   {
     for (unsigned int i=0; i<bitstring.size(); i++) {
+      // std::cerr << "superset test " << bitstring[i] << " " << rhs.bitstring[i] << "\n";
       if ((bitstring[i] & rhs.bitstring[i]) != rhs.bitstring[i]) {
+	//std::cerr << " bitstring[i] & rhs.bitstring[i] " << (bitstring[i] & rhs.bitstring[i]) << " result " << ((bitstring[i] & rhs.bitstring[i]) != rhs.bitstring[i]) << "\n";
 	return false;
       }
     }
-    // std::cout << *this << " is superset of " << rhs << "\n";
+    // std::cerr << *this << " is superset of " << rhs << "\n";
     return true;
   }
   operator bool() const
@@ -188,6 +191,7 @@ public:
   {
     BitString result;
     result.bitstring.resize(bitstring.size());
+    result.len = len;
     for (unsigned int i=0; i<bitstring.size(); i++) {
       unsigned int rightmost_set_bit = bitstring[i] & (-bitstring[i]);
       if (rightmost_set_bit) {
@@ -202,7 +206,9 @@ public:
 std::ostream& operator<<(std::ostream& stream, BitString bs)
 {
   for (int i=0; i < bs.bitstring.size(); i++) {
-    stream << std::bitset<sizeof(unsigned int)*8>(bs.bitstring[i]).to_string();
+    auto str = std::bitset<sizeof(unsigned int)*8>(bs.bitstring[i]).to_string();
+    //stream << std::bitset<sizeof(unsigned int)*8>(bs.bitstring[i]).to_string();
+    stream << str.substr(str.length() - bs.len, bs.len);
   }
   return stream;
 }
@@ -252,7 +258,7 @@ public:
   {
     std::unique_lock<std::shared_mutex> lock(mutex);
 
-    // std::cout << "add " << bitstring << "\n";
+    // std::cerr << "add " << bitstring << "\n";
     /* remove any supersets */
     std::erase_if(finished_bitstrings, [&](const BitString& fbs) { return fbs.is_superset_of(bitstring); });
 
@@ -275,12 +281,17 @@ void task(void)
 
     backtrack_queue.waitAndPop(current_work);
 
+    /* I put this here because while the work was on the queue, we could have added new finished bitstrings */
+    if (finished_bitstrings.contain_a_subset_of(current_work.bitstring)) continue;
+
     while (current_work.next_polynomial < polys.size()) {
       /* If there's any overlap here, the polynomial is already satisfied, move on */
+      // std::cerr << "working on " << current_work.bitstring << "\n";
       if (! (current_work.bitstring & polys[current_work.next_polynomial])) {
 	bool have_new_work = false;
 	/* Extend backtrack queue if there's more than one factor(bit) in the polynomial */
 	for (BitString next_bit: expanded_polys[current_work.next_polynomial]) {
+	  // std::cerr << "adding " << next_bit << "\n";
 	  if (! have_new_work) {
 	    new_work.bitstring = current_work.bitstring | next_bit;
 	    new_work.next_polynomial = current_work.next_polynomial + 1;
@@ -325,7 +336,7 @@ int main(int argc, char ** argv)
   }
 
   // for (auto p:polys) {
-  //   std::cout << p << "\n";
+  //   std::cerr << p << "\n";
   // }
 
   BacktrackPoint initial_work;
@@ -333,7 +344,7 @@ int main(int argc, char ** argv)
   backtrack_queue.push(initial_work);
 
   task();
-  // std::cout << "\n";
+  // std::cerr << "\n";
 
   for (auto p:finished_bitstrings.finished_bitstrings) {
     std::cout << p << "\n";

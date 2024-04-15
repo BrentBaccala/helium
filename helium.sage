@@ -1657,10 +1657,24 @@ def find_relation():
 # commented out so it won't run on load, but needs to be done in build_systems():
 
 def init_build_systems():
-    global eqns_RQQ_factors, coeff_vars_RQQ
+    global eqns_RQQ_factors, all_factors
     # eqns_RQQ_factors is a tuples of tuples of factors, with the multiplicities dropped
     eqns_RQQ_factors = tuple(tuple(f for f,m in factor(eqn)) for eqn in eqns_RQQ)
-    coeff_vars_RQQ = tuple(map(RQQ, coeff_vars))
+    all_factors = tuple(set(f for l in eqns_RQQ_factors for f in l))
+
+# code to write and read data in the bitset format used by the build_systems program,
+# which is a C++ version of build_systems() below, optimized for speed
+
+from sage.data_structures.bitset import FrozenBitset
+
+def print_build_systems(file=sys.stdout):
+    for l in eqns_RQQ_factors:
+        print(FrozenBitset(tuple(all_factors.index(f) for f in l), capacity=len(all_factors)), file=file)
+
+def load_systems(fn):
+    with open(fn) as f:
+        s = f.read()
+        return set(tuple(sorted(tuple(all_factors[i] for i in FrozenBitset(bs)))) for bs in s.split())
 
 def is_irreducible(eq):
     factors = factor(eq)
