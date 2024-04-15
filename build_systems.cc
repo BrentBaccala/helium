@@ -117,21 +117,22 @@
 class BitString
 {
 public:
-  std::vector<unsigned int> bitstring;
-  typedef std::vector<unsigned int>::size_type size_type;
+  typedef unsigned int data_type;
+  std::vector<data_type> bitstring;
+  typedef std::vector<data_type>::size_type size_type;
   unsigned int len;
 
   BitString() {}
-  BitString(unsigned int l) : bitstring((l+8*sizeof(unsigned int)-1)/(8*sizeof(unsigned int))), len(l) {}
+  BitString(unsigned int l) : bitstring((l+8*sizeof(data_type)-1)/(8*sizeof(data_type))), len(l) {}
   BitString(std::string str)
   {
     len = str.length();
-    bitstring.resize((len+8*sizeof(unsigned int)-1)/(8*sizeof(unsigned int)));
+    bitstring.resize((len+8*sizeof(data_type)-1)/(8*sizeof(data_type)));
     for (int i=0; i < len; i++) {
       int val = (str[i] == '0' ? 0 : 1);
       int j = len - i - 1;
-      int index = j/(8*sizeof(unsigned int));
-      int offset = j - index*8*sizeof(unsigned int);
+      int index = j/(8*sizeof(data_type));
+      int offset = j - index*8*sizeof(data_type);
       bitstring[index] |= val << offset;
     }
   }
@@ -199,7 +200,7 @@ public:
     result.bitstring.resize(bitstring.size());
     result.len = len;
     for (size_type i=0; i<bitstring.size(); i++) {
-      unsigned int rightmost_set_bit = bitstring[i] & (-bitstring[i]);
+      data_type rightmost_set_bit = bitstring[i] & (-bitstring[i]);
       if (rightmost_set_bit) {
 	result.bitstring[i] = rightmost_set_bit;
 	return result;
@@ -212,8 +213,8 @@ public:
 std::ostream& operator<<(std::ostream& stream, BitString bs)
 {
   for (int i=0; i < bs.bitstring.size(); i++) {
-    auto str = std::bitset<sizeof(unsigned int)*8>(bs.bitstring[i]).to_string();
-    //stream << std::bitset<sizeof(unsigned int)*8>(bs.bitstring[i]).to_string();
+    auto str = std::bitset<sizeof(BitString::data_type)*8>(bs.bitstring[i]).to_string();
+    //stream << std::bitset<sizeof(data_type)*8>(bs.bitstring[i]).to_string();
     stream << str.substr(str.length() - bs.len, bs.len);
   }
   return stream;
