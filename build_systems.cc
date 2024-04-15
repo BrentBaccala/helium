@@ -270,6 +270,7 @@ void task(void)
 
   while (true) {
     /* OK for single threaded use */
+    get_next_work_from_queue:
     if (backtrack_queue.empty()) return;
 
     backtrack_queue.waitAndPop(current_work);
@@ -294,11 +295,10 @@ void task(void)
 	    backtrack_queue.push(extra_work);
 	  }
 	}
-	current_work.bitstring = new_work.bitstring;
 	if (! have_new_work) {
-	  std::cout << "NOT YET IMPLEMENTED\n";
-	  /* terminate the loop and pull the next thing from the queue without adding to finished_bitstrings */
+	  goto get_next_work_from_queue;
 	}
+	current_work.bitstring = new_work.bitstring;
       }
       current_work.next_polynomial ++;
     }
@@ -324,16 +324,16 @@ int main(int argc, char ** argv)
     } while (bs);
   }
 
-  for (auto p:polys) {
-    std::cout << p << "\n";
-  }
+  // for (auto p:polys) {
+  //   std::cout << p << "\n";
+  // }
 
   BacktrackPoint initial_work;
   initial_work.next_polynomial = 0;
   backtrack_queue.push(initial_work);
 
   task();
-  std::cout << "\n";
+  // std::cout << "\n";
 
   for (auto p:finished_bitstrings.finished_bitstrings) {
     std::cout << p << "\n";
