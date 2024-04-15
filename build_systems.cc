@@ -100,27 +100,112 @@
  *      an empty queue, in which case we're done, the threads exit, and we join them
  */
 
+#include <iostream>
+#include <bitset>
 #include <vector>
 #include <mutex>
 #include <shared_mutex>
 #include "LockingQueue.hpp"
 
-unsigned int bitstring_len = 0;
+// unsigned int bitstring_len = 0;
 
 class BitString
 {
 public:
+  std::vector<unsigned int> bitstring;
+
+  BitString() {}
+  BitString(std::vector<unsigned int>::size_type count) : bitstring(count) {}
+  BitString(std::string str)
+  {
+    bitstring.resize((8*(str.length()+sizeof(unsigned int))-1)/(8*sizeof(unsigned int)));
+    for (int i=0; i < str.length(); i++) {
+      int val = (str[i] == '0' ? 0 : 1);
+      int j = str.length() - i - 1;
+      int index = j/(8*sizeof(unsigned int));
+      int offset = j - index*8*sizeof(unsigned int);
+      bitstring[index] |= val << offset;
+    }
+  }
+
+  friend std::ostream& operator<<(std::ostream& stream, BitString bs);
+
   BitString operator&(const BitString& rhs) const
-  {}
+  {
+    BitString *rv = new BitString(bitstring.size());
+    for (unsigned int i=0; i<bitstring.size(); i++) {
+      rv->bitstring[i] = bitstring[i] & rhs.bitstring[i];
+    }
+    return *rv;
+  }
   BitString operator|(const BitString& rhs) const
-  {}
+  {
+    size_t size = std::max(bitstring.size(), rhs.bitstring.size());
+    BitString *rv = new BitString(size);
+    for (unsigned int i=0; i<size; i++) {
+      if (i < bitstring.size() - 1) {
+	rv->bitstring[i] = rhs.bitstring[i];
+      } else if (i < rhs.bitstring.size() - 1) {
+	rv->bitstring[i] = bitstring[i];
+      } else {
+	rv->bitstring[i] = bitstring[i] | rhs.bitstring[i];
+      }
+    }
+    return *rv;
+  }
   BitString operator|=(const BitString& rhs)
-  {}
+  {
+    for (unsigned int i=0; i<bitstring.size(); i++) {
+      bitstring[i] |= rhs.bitstring[i];
+    }
+    return *this;
+  }
+  BitString operator^=(const BitString& rhs)
+  {
+    for (unsigned int i=0; i<bitstring.size(); i++) {
+      bitstring[i] ^= rhs.bitstring[i];
+    }
+    return *this;
+  }
   bool is_superset_of(const BitString& rhs) const
-  {}
+  {
+    for (unsigned int i=0; i<bitstring.size(); i++) {
+      if ((bitstring[i] & rhs.bitstring[i]) != rhs.bitstring[i]) {
+	return false;
+      }
+    }
+    // std::cout << *this << " is superset of " << rhs << "\n";
+    return true;
+  }
   operator bool() const
-  {}
+  {
+    for (const auto i: bitstring) {
+      if (i) return true;
+    }
+    return false;
+  }
+  BitString rightmost_set_bit(void) const
+  {
+    BitString result;
+    result.bitstring.resize(bitstring.size());
+    for (unsigned int i=0; i<bitstring.size(); i++) {
+      unsigned int rightmost_set_bit = bitstring[i] & (-bitstring[i]);
+      if (rightmost_set_bit) {
+	result.bitstring[i] = rightmost_set_bit;
+	return result;
+      }
+    }
+    return result;
+  }
 };
+
+std::ostream& operator<<(std::ostream& stream, BitString bs)
+{
+  for (int i=0; i < bs.bitstring.size(); i++) {
+    stream << std::bitset<sizeof(unsigned int)*8>(bs.bitstring[i]).to_string();
+  }
+  return stream;
+}
 
 struct BacktrackPoint
 {
@@ -131,6 +216,7 @@ struct BacktrackPoint
 std::vector<BitString> polys;
 std::vector<BitString> first_bit;
 std::vector<std::vector<BitString>> remaining_bits;
+std::vector<std::vector<BitString>> expanded_polys;
 
 LockingQueue<BacktrackPoint> backtrack_queue;
 
@@ -166,6 +252,7 @@ public:
   {
     std::unique_lock<std::shared_mutex> lock(mutex);
 
+    // std::cout << "add " << bitstring << "\n";
     /* remove any supersets */
     std::erase_if(finished_bitstrings, [&](const BitString& fbs) { return fbs.is_superset_of(bitstring); });
 
@@ -178,27 +265,42 @@ FinishedBitStrings finished_bitstrings;
 void task(void)
 {
   BacktrackPoint current_work;
+  BacktrackPoint new_work;
+  BacktrackPoint extra_work;
 
   while (true) {
+    /* OK for single threaded use */
+    if (backtrack_queue.empty()) return;
+
     backtrack_queue.waitAndPop(current_work);
 
     while (current_work.next_polynomial < polys.size()) {
       /* If there's any overlap here, the polynomial is already satisfied, move on */
       if (! (current_work.bitstring & polys[current_work.next_polynomial])) {
+	bool have_new_work = false;
 	/* Extend backtrack queue if there's more than one factor(bit) in the polynomial */
-	for (BitString next_bit: remaining_bits[current_work.next_polynomial]) {
-	  BacktrackPoint new_work;
-	  new_work.bitstring = current_work.bitstring | next_bit;
-	  new_work.next_polynomial = current_work.next_polynomial + 1;
-	  /* Check first if this is a superset of an existing bit string */
-	  backtrack_queue.push(new_work);
+	for (BitString next_bit: expanded_polys[current_work.next_polynomial]) {
+	  if (! have_new_work) {
+	    new_work.bitstring = current_work.bitstring | next_bit;
+	    new_work.next_polynomial = current_work.next_polynomial + 1;
+	    /* Check first if this is a superset of an existing bit string; skip it if it is */
+	    if (finished_bitstrings.contain_a_subset_of(new_work.bitstring)) continue;
+	    have_new_work = true;
+	  } else {
+	    extra_work.bitstring = current_work.bitstring | next_bit;
+	    extra_work.next_polynomial = current_work.next_polynomial + 1;
+	    /* Check first if this is a superset of an existing bit string; skip it if it is */
+	    if (finished_bitstrings.contain_a_subset_of(extra_work.bitstring)) continue;
+	    backtrack_queue.push(extra_work);
+	  }
 	}
-	/* Check first if this is a superset of an existing bit string */
-	current_work.bitstring |= first_bit[current_work.next_polynomial];
-	current_work.next_polynomial ++;
-
-	if (finished_bitstrings.contain_a_subset_of(current_work.bitstring)) {}
+	current_work.bitstring = new_work.bitstring;
+	if (! have_new_work) {
+	  std::cout << "NOT YET IMPLEMENTED\n";
+	  /* terminate the loop and pull the next thing from the queue without adding to finished_bitstrings */
+	}
       }
+      current_work.next_polynomial ++;
     }
 
     finished_bitstrings.add(current_work.bitstring);
@@ -207,4 +309,33 @@ void task(void)
 
 int main(int argc, char ** argv)
 {
+  // int nthreads = std::stoi(argv[1]);
+
+  std::string bitstring;
+  while (std::getline(std::cin, bitstring)) {
+    polys.emplace_back(bitstring);
+    expanded_polys.emplace_back();
+    BitString bs(bitstring);
+    BitString rmsb;
+    do {
+      rmsb = bs.rightmost_set_bit();
+      expanded_polys.back().emplace_back(rmsb);
+      bs ^= rmsb;
+    } while (bs);
+  }
+
+  for (auto p:polys) {
+    std::cout << p << "\n";
+  }
+
+  BacktrackPoint initial_work;
+  initial_work.next_polynomial = 0;
+  backtrack_queue.push(initial_work);
+
+  task();
+  std::cout << "\n";
+
+  for (auto p:finished_bitstrings.finished_bitstrings) {
+    std::cout << p << "\n";
+  }
 }
