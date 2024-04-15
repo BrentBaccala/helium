@@ -1,7 +1,9 @@
 /*
  * build_systems - optimized version of build_systems() from Sage/Python helium.sage
  *
- * BUILD: g++ -std=c++2a -o build_systems build_systems.cc
+ * BUILD: g++ -std=c++2a -o build_systems build_systems.cc -lpthread
+ *
+ * USAGE: ./build_systems NUM_THREADS < input-bit-strings > output-bit-strings
  *
  * GOAL: Given a set of polynomials (that form an ideal), we want to factor them all and
  * form a set of ideals, all formed from irreducible polynomials.
@@ -11,8 +13,11 @@
  * INPUT: a list of bit strings.  Each input bit string corresponds to a polynomial, and each
  * bit corresponds to a factor.
  *
- * OUTPUT: a list of bit strings.  Each output bit strings corresponds to an ideal,
+ * OUTPUT: a list of bit strings.  Each output bit string corresponds to an ideal,
  * and the 1 bits are the factors in that ideal.
+ *
+ * See the print_build_systems() and load_systems() routines in helium.sage for generating
+ * the input strings to this program, and parsing the output strings.
  *
  * All of the bit strings are of the same length (the number of factors).  We store
  * them in arrays of unsigned int (or some integer type specified as a typedef).
@@ -103,6 +108,7 @@
 #include <iostream>
 #include <bitset>
 #include <vector>
+#include <thread>
 #include <mutex>
 #include <shared_mutex>
 #include "LockingQueue.hpp"
@@ -319,7 +325,11 @@ void task(void)
 
 int main(int argc, char ** argv)
 {
-  // int nthreads = std::stoi(argv[1]);
+  int nthreads = 1;
+
+  if (argc > 1) {
+    nthreads = std::stoi(argv[1]);
+  }
 
   std::string bitstring;
   while (std::getline(std::cin, bitstring)) {
@@ -334,17 +344,20 @@ int main(int argc, char ** argv)
     } while (bs);
   }
 
-  // for (auto p:polys) {
-  //   std::cerr << p << "\n";
-  // }
-
   BacktrackPoint initial_work;
   initial_work.next_polynomial = 0;
   backtrack_queue.push(initial_work);
-  backtrack_queue.set_num_workers(1);
+  backtrack_queue.set_num_workers(nthreads);
 
-  task();
-  // std::cerr << "\n";
+  std::vector<std::thread> threads;
+
+  for (int i=0; i < nthreads; i++) {
+    threads.emplace_back(task);
+  }
+
+  for (int i=0; i < nthreads; i++) {
+    threads[i].join();
+  }
 
   for (auto p:finished_bitstrings.finished_bitstrings) {
     std::cout << p << "\n";
