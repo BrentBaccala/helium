@@ -1,6 +1,8 @@
 /*
  * build_systems - optimized version of build_systems() from Sage/Python helium.sage
  *
+ * BUILD: g++ -std=c++2a -o build_systems build_systems.cc
+ *
  * GOAL: Given a set of polynomials (that form an ideal), we want to factor them all and
  * form a set of ideals, all formed from irreducible polynomials.
  *
@@ -69,6 +71,11 @@
  * just because we started with those with single factors?  This sorting should
  * be done in the pre-processing step; not going to bother with it in this code.
  *
+ * POLYNOMIAL BIT STRINGS:
+ *    - polys[i] are the complete bit strings for the i'th polynomial
+ *    - first_bit[i] is the first one bit in the i'th polynomial
+ *    - remaining_bits[i] is a vector of bit strings, one bit strings for each remaining bit split out
+ *
  * FINISHED BIT STRINGS:
  *    - linked list of bit strings
  *    - allow multiple readers if there's no writer, because we're constantly checking
@@ -93,3 +100,111 @@
  *      an empty queue, in which case we're done, the threads exit, and we join them
  */
 
+#include <vector>
+#include <mutex>
+#include <shared_mutex>
+#include "LockingQueue.hpp"
+
+unsigned int bitstring_len = 0;
+
+class BitString
+{
+public:
+  BitString operator&(const BitString& rhs) const
+  {}
+  BitString operator|(const BitString& rhs) const
+  {}
+  BitString operator|=(const BitString& rhs)
+  {}
+  bool is_superset_of(const BitString& rhs) const
+  {}
+  operator bool() const
+  {}
+};
+
+struct BacktrackPoint
+{
+  BitString bitstring;
+  unsigned int next_polynomial;
+};
+
+std::vector<BitString> polys;
+std::vector<BitString> first_bit;
+std::vector<std::vector<BitString>> remaining_bits;
+
+LockingQueue<BacktrackPoint> backtrack_queue;
+
+class FinishedBitStrings
+{
+public:
+  std::vector<BitString> finished_bitstrings;
+  std::shared_mutex mutex;
+
+  bool contain_a_superset_of(const BitString& bitstring)
+  {
+    std::shared_lock<std::shared_mutex> lock(mutex);
+
+    for (const BitString& fbs: finished_bitstrings) {
+      if (fbs.is_superset_of(bitstring))
+	return true;
+    }
+    return false;
+  }
+
+  bool contain_a_subset_of(const BitString& bitstring)
+  {
+    std::shared_lock<std::shared_mutex> lock(mutex);
+
+    for (const BitString& fbs: finished_bitstrings) {
+      if (bitstring.is_superset_of(fbs))
+	return true;
+    }
+    return false;
+  }
+
+  void add(const BitString &bitstring)
+  {
+    std::unique_lock<std::shared_mutex> lock(mutex);
+
+    /* remove any supersets */
+    std::erase_if(finished_bitstrings, [&](const BitString& fbs) { return fbs.is_superset_of(bitstring); });
+
+    finished_bitstrings.push_back(bitstring);
+  }
+};
+
+FinishedBitStrings finished_bitstrings;
+
+void task(void)
+{
+  BacktrackPoint current_work;
+
+  while (true) {
+    backtrack_queue.waitAndPop(current_work);
+
+    while (current_work.next_polynomial < polys.size()) {
+      /* If there's any overlap here, the polynomial is already satisfied, move on */
+      if (! (current_work.bitstring & polys[current_work.next_polynomial])) {
+	/* Extend backtrack queue if there's more than one factor(bit) in the polynomial */
+	for (BitString next_bit: remaining_bits[current_work.next_polynomial]) {
+	  BacktrackPoint new_work;
+	  new_work.bitstring = current_work.bitstring | next_bit;
+	  new_work.next_polynomial = current_work.next_polynomial + 1;
+	  /* Check first if this is a superset of an existing bit string */
+	  backtrack_queue.push(new_work);
+	}
+	/* Check first if this is a superset of an existing bit string */
+	current_work.bitstring |= first_bit[current_work.next_polynomial];
+	current_work.next_polynomial ++;
+
+	if (finished_bitstrings.contain_a_subset_of(current_work.bitstring)) {}
+      }
+    }
+
+    finished_bitstrings.add(current_work.bitstring);
+  }
+}
+
+int main(int argc, char ** argv)
+{
+}
