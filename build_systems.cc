@@ -118,6 +118,7 @@ class BitString
 {
 public:
   std::vector<unsigned int> bitstring;
+  typedef std::vector<unsigned int>::size_type size_type;
   unsigned int len;
 
   BitString() {}
@@ -140,7 +141,7 @@ public:
   BitString operator&(const BitString& rhs) const
   {
     BitString *rv = new BitString(len);
-    for (unsigned int i=0; i<bitstring.size(); i++) {
+    for (size_type i=0; i<bitstring.size(); i++) {
       rv->bitstring[i] = bitstring[i] & rhs.bitstring[i];
     }
     return *rv;
@@ -148,7 +149,7 @@ public:
   BitString operator|(const BitString& rhs) const
   {
     BitString *rv = new BitString(std::max(len, rhs.len));
-    for (unsigned int i=0; i<std::max(bitstring.size(), rhs.bitstring.size()); i++) {
+    for (size_type i=0; i<std::max(bitstring.size(), rhs.bitstring.size()); i++) {
       if (i < bitstring.size() - 1) {
 	rv->bitstring[i] = rhs.bitstring[i];
       } else if (i < rhs.bitstring.size() - 1) {
@@ -161,21 +162,21 @@ public:
   }
   BitString operator|=(const BitString& rhs)
   {
-    for (unsigned int i=0; i<bitstring.size(); i++) {
+    for (size_type i=0; i<bitstring.size(); i++) {
       bitstring[i] |= rhs.bitstring[i];
     }
     return *this;
   }
   BitString operator^=(const BitString& rhs)
   {
-    for (unsigned int i=0; i<bitstring.size(); i++) {
+    for (size_type i=0; i<bitstring.size(); i++) {
       bitstring[i] ^= rhs.bitstring[i];
     }
     return *this;
   }
   bool is_superset_of(const BitString& rhs) const
   {
-    for (unsigned int i=0; i<bitstring.size(); i++) {
+    for (size_type i=0; i<bitstring.size(); i++) {
       // std::cerr << "superset test " << bitstring[i] << " " << rhs.bitstring[i] << "\n";
       if ((bitstring[i] & rhs.bitstring[i]) != rhs.bitstring[i]) {
 	//std::cerr << " bitstring[i] & rhs.bitstring[i] " << (bitstring[i] & rhs.bitstring[i]) << " result " << ((bitstring[i] & rhs.bitstring[i]) != rhs.bitstring[i]) << "\n";
@@ -197,7 +198,7 @@ public:
     BitString result;
     result.bitstring.resize(bitstring.size());
     result.len = len;
-    for (unsigned int i=0; i<bitstring.size(); i++) {
+    for (size_type i=0; i<bitstring.size(); i++) {
       unsigned int rightmost_set_bit = bitstring[i] & (-bitstring[i]);
       if (rightmost_set_bit) {
 	result.bitstring[i] = rightmost_set_bit;
@@ -260,6 +261,12 @@ public:
   void add(const BitString &bitstring)
   {
     std::unique_lock<std::shared_mutex> lock(mutex);
+
+    /* A final extra check for subsets, to avoid problems from the race condition mentioned below */
+    for (const BitString& fbs: finished_bitstrings) {
+      if (bitstring.is_superset_of(fbs))
+	return;
+    }
 
     // std::cerr << "add " << bitstring << "\n";
     /* remove any supersets */
