@@ -1668,7 +1668,7 @@ def init_build_systems():
 from sage.data_structures.bitset import FrozenBitset
 
 def print_build_systems(file=sys.stdout):
-    for l in eqns_RQQ_factors:
+    for l in sorted(eqns_RQQ_factors, key=lambda x:len(x)):
         print(FrozenBitset(tuple(all_factors.index(f) for f in l), capacity=len(all_factors)), file=file)
 
 def load_systems(fn):
