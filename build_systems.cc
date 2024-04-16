@@ -139,6 +139,8 @@ public:
 
   friend std::ostream& operator<<(std::ostream& stream, BitString bs);
 
+  /* I don't want to copy return values, and operator& is only used in a boolean context. */
+#if 0
   BitString operator&(const BitString& rhs) const
   {
     BitString *rv = new BitString(len);
@@ -147,6 +149,19 @@ public:
     }
     return *rv;
   }
+#else
+  bool operator&(const BitString& rhs) const
+  {
+    for (size_type i=0; i<bitstring.size(); i++) {
+      if (bitstring[i] & rhs.bitstring[i])
+	return true;
+    }
+    return false;
+  }
+#endif
+
+  /* I don't want to copy return values, so use logical_or_assign instead. */
+#if 0
   BitString operator|(const BitString& rhs) const
   {
     BitString *rv = new BitString(std::max(len, rhs.len));
@@ -161,6 +176,25 @@ public:
     }
     return *rv;
   }
+#else
+  BitString operator|(const BitString& rhs) const = delete;
+#endif
+
+  void logical_or_assign(BitString& lhs, const BitString& rhs) const
+  {
+    lhs.bitstring.resize(std::max(bitstring.size(), rhs.bitstring.size()));
+    lhs.len = std::max(len, rhs.len);
+    for (size_type i=0; i<std::max(bitstring.size(), rhs.bitstring.size()); i++) {
+      if (i >= bitstring.size()) {
+	lhs.bitstring[i] = rhs.bitstring[i];
+      } else if (i >= rhs.bitstring.size()) {
+	lhs.bitstring[i] = bitstring[i];
+      } else {
+	lhs.bitstring[i] = bitstring[i] | rhs.bitstring[i];
+      }
+    }
+  }
+
   BitString operator|=(const BitString& rhs)
   {
     for (size_type i=0; i<bitstring.size(); i++) {
@@ -168,6 +202,7 @@ public:
     }
     return *this;
   }
+
   BitString operator^=(const BitString& rhs)
   {
     for (size_type i=0; i<bitstring.size(); i++) {
@@ -175,6 +210,7 @@ public:
     }
     return *this;
   }
+
   bool is_superset_of(const BitString& rhs) const
   {
     for (size_type i=0; i<bitstring.size(); i++) {
@@ -196,6 +232,7 @@ public:
   }
   BitString rightmost_set_bit(void) const
   {
+    /* The return value has to be copied, but this routine is only called during initialization. */
     BitString result;
     result.bitstring.resize(bitstring.size());
     result.len = len;
@@ -310,12 +347,16 @@ void task(void)
 	for (BitString next_bit: expanded_polys[current_work.next_polynomial]) {
 	  // std::cerr << "adding " << next_bit << "\n";
 	  if (! have_next_work) {
-	    next_work_bitstring = current_work.bitstring | next_bit;
+	    /* Like this, but avoids a copy */
+	    /* next_work_bitstring = current_work.bitstring | next_bit; */
+	    current_work.bitstring.logical_or_assign(next_work_bitstring, next_bit);
 	    /* Check first if this is a superset of an existing bit string; skip it if it is */
 	    if (finished_bitstrings.contain_a_subset_of(next_work_bitstring)) continue;
 	    have_next_work = true;
 	  } else {
-	    extra_work.bitstring = current_work.bitstring | next_bit;
+	    /* Like this, but avoids a copy */
+	    /* extra_work.bitstring = current_work.bitstring | next_bit; */
+	    current_work.bitstring.logical_or_assign(extra_work.bitstring, next_bit);
 	    extra_work.next_polynomial = current_work.next_polynomial + 1;
 	    /* Check first if this is a superset of an existing bit string; skip it if it is */
 	    if (finished_bitstrings.contain_a_subset_of(extra_work.bitstring)) continue;
