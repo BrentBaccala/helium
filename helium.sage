@@ -1674,7 +1674,12 @@ def print_build_systems(file=sys.stdout):
 def load_systems(fn):
     with open(fn) as f:
         s = f.read()
-        return set(tuple(sorted(tuple(all_factors[i] for i in FrozenBitset(bs)))) for bs in s.split())
+        # The sort can be really slow, though I want it there to verify that systems is the same as created
+        #    using the Python code below (the call to add_system() in build_systems() sorts working_ideal first)
+        # I also changed the set to a tuple because I want to index it, so I can process one ideal at a time,
+        #    and I want it in the same order that it came in from the 'cout' file
+        #return set(tuple(sorted(tuple(all_factors[i] for i in FrozenBitset(bs)))) for bs in s.split())
+        return tuple(tuple(all_factors[i] for i in FrozenBitset(bs)) for bs in s.split())
 
 def is_irreducible(eq):
     factors = factor(eq)
