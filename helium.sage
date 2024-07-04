@@ -982,7 +982,8 @@ def create_polynomial_rings(alg_exts):
 
     # These are the rings used for the system of equations in the coefficients
     RQQ = PolynomialRing(QQ, names=coeff_vars)
-    RZZflint = PolynomialRing(ZZ, names=coeff_vars, implementation='FLINT')
+    if Rflint:
+        RZZflint = PolynomialRing(ZZ, names=coeff_vars, implementation='FLINT')
     R32003 = PolynomialRing(GF(32003), names=coeff_vars)
 
 # we need to add gamma to this to make ansatz 11 (algebraic extension) work
