@@ -1818,3 +1818,13 @@ def consolidate_ideals(list_of_ideals):
         consolidated_ideals = [I for I in consolidated_ideals if not ideal < I]
         consolidated_ideals.append(ideal)
     return consolidated_ideals
+
+#
+# Helper functions for the "Pseudo-Solution of Hydrogen" paper
+#
+
+def latex_array(eqns):
+    print("\\begin{array}{r}")
+    for eqn in eqns:
+        print(latex(eqn) + "\\\\")
+    print("\\end{array}\n")
