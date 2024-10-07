@@ -1048,13 +1048,17 @@ def convertRing_to_reduceRing(element):
 
 def reduce_mod_ideal(element, I=None):
     if I:
-        # This is slower if convertRing is FLINT and reduceRing is Singular; it does the reduction in Singular:
-        #    return convertRing_to_reduceRing(element).mod(I)
         # This way does the reduction in FLINT:
-        # if type(reduceRing) == sage.rings.polynomial.multi_polynomial_flint.MPolynomialRing_flint:
-        for p in I.groebner_basis():
-            element %= convertRing(str(p))
-        return convertRing_to_reduceRing(element)
+        # (it doesn't work in Singular, the % in Sage's Singular code is Singular's "division", which is not reduction (I'm not sure what it is)
+        if 'multi_polynomial_flint' in dir(sage.rings.polynomial) \
+           and type(reduceRing) == sage.rings.polynomial.multi_polynomial_flint.MPolynomialRing_flint:
+            for p in I.groebner_basis():
+                element %= convertRing(str(p))
+            return convertRing_to_reduceRing(element)
+        # This is slower if convertRing is FLINT and reduceRing is Singular; it does the reduction in Singular:
+        if type(reduceRing) == sage.rings.polynomial.multi_polynomial_libsingular.MPolynomialRing_libsingular:
+            return convertRing_to_reduceRing(element).mod(I)
+        raise "No reduction algorithm defined for reduceRing"
     else:
         return convertRing_to_reduceRing(element)
 
