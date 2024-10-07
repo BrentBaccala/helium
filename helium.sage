@@ -139,7 +139,7 @@ def powerset(iterable):
     s = list(iterable)
     return chain.from_iterable(combinations(s, r) for r in range(len(s)+1))
 
-def trial_polynomial(base, coordinates, roots, degree, homogenize=None, constant=True):
+def trial_polynomial(base, coordinates, roots, degree, homogenize=None, constant=True, first_index=0):
     """trial_polynomial(base, coordinates, roots, degree, homogenize=None, constant=True)
     Form a trial polynomial in the Symbolic Ring
 
@@ -160,9 +160,9 @@ def trial_polynomial(base, coordinates, roots, degree, homogenize=None, constant
         mindegree = 0
     terms = []
     for deg in range(mindegree, degree+1):
-        terms += list(map(mul, (x for x in combinations_with_replacement(roots + coordinates, deg) if all(x.count(r) < 2 for r in roots))))
+        terms += list(map(mul, (x for x in combinations_with_replacement(coordinates + roots, deg) if all(x.count(r) < 2 for r in roots))))
 
-    coefficients = [var(base+str(c)) for c in range(len(terms))]
+    coefficients = [var(base+str(c)) for c in range(first_index, first_index + len(terms))]
     poly_coefficients = list(coefficients)
     if homogenize != None:
         # homogenize: use 1 as the coefficient of the homogenize'th term
@@ -316,7 +316,7 @@ def finish_prep(ansatz):
         #
         # Homogenization forces V and D to be non-zero; V is also forced to be non-constant
         Zeta = SR_function('Zeta')
-        (Vvars, V) = trial_polynomial('v', coordinates, roots, 1, constant=None)
+        (Vvars, V) = trial_polynomial('v', coordinates, roots, 1, constant=None, first_index=1)
         Psi = Zeta(V)
         if ansatz == 5.01:
             # use 'homogenize' to set the coeffient of v in the ODE's second order coefficient to 1
@@ -798,6 +798,7 @@ def finish_prep(ansatz):
 
 def prep_hydrogen(ansatz=1):
     global H, coordinates, roots
+    global r
 
     if ansatz < 0:
 
@@ -809,15 +810,14 @@ def prep_hydrogen(ansatz=1):
             return - 1/2 * (1/r^2 * diff(r^2 * diff(Psi,r), r)) - (1/r)*Psi
 
     else:
-        var('x1,y1,z1')
-        coordinates = (x1,y1,z1)
+        var('x,y,z')
+        coordinates = (x,y,z)
 
-        global r1
-        r1 = sqrt(x1^2+y1^2+z1^2)
-        roots = (r1,)
+        r = sqrt(x^2+y^2+z^2)
+        roots = (r,)
 
         def H(Psi):
-            return - 1/2 * Del(Psi,[x1,y1,z1]) - (1/r1)*Psi
+            return - 1/2 * Del(Psi,[x,y,z]) - (1/r)*Psi
 
     finish_prep(ansatz=abs(ansatz))
 
