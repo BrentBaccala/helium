@@ -1818,3 +1818,59 @@ def consolidate_ideals(list_of_ideals):
         consolidated_ideals = [I for I in consolidated_ideals if not ideal < I]
         consolidated_ideals.append(ideal)
     return consolidated_ideals
+
+# The "simplifyIdeal" procedure in Singular's primdec.lib (primary decomposition library) checks
+# for equations with simple variable substitutions, but doesn't get all linear relations.
+# It's used as a preprocessing step before starting into something like the GTZ algorithm
+# to compute a primary decomposition.  Let's do that step here, but also check for the
+# more complicated linear relations.
+#
+# It finds things like v+p()=0, where p() doesn't involve v, but I also want to get
+# q()v+p()=0, which can be split into two systems, one where q and p are both zero,
+# and the other where v=-p/q.
+
+def simplifyIdeal(I):
+    # I should be a list or a tuple, not an ideal
+    for v in I[0].parent().gens():
+        for p in I:
+            if p == 0:
+                pass
+            elif p == v:
+                print(v, "=", 0)
+                I = tuple(map(lambda p: p.subs({v: 0}), I))
+            elif p.degree(v) == 1:
+                q,r = p.quo_rem(v)
+                if r == 0:
+                    print("reducible polynomial detected")
+                elif q.is_constant() and r.number_of_terms() == 1:
+                    # v=qv+r; replace v with -r/q
+                    print(v, "=", -r/q)
+                    start_time = time.time()
+                    I = tuple(map(lambda p: p.subs({v: -r/q}), I))
+                    execution_time = time.time() - start_time
+                    print(f'subs done in {execution_time} seconds')
+                    break
+    return I
+
+def simplifyIdeal2(I):
+    # I should be a list or a tuple, not an ideal
+    for v in I[0].parent().gens():
+        q_candidate = None
+        r_candidate = None
+        for p in I:
+            if p.degree(v) == 1:
+                q,r = p.quo_rem(v)
+                if r == 0:
+                    print("reducible polynomial detected")
+                elif not q_candidate or q.number_of_terms() < q_candidate.number_of_terms() or \
+                        (q.number_of_terms() == q_candidate.number_of_terms() and r.number_of_terms() < r_candidate.number_of_terms()):
+                    q_candidate = q
+                    r_candidate = r
+        if q_candidate:
+            # v=qv+r; replace v with -r/q
+            print(v, "=", -r_candidate/q_candidate)
+            start_time = time.time()
+            I = tuple(map(lambda p: p.subs({v: -r_candidate/q_candidate}).numerator(), I))
+            execution_time = time.time() - start_time
+            print(f'subs done in {execution_time} seconds')
+    return I
