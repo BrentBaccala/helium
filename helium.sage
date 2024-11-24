@@ -93,6 +93,8 @@ import numpy as np
 
 import scipy.optimize
 
+import subprocess
+
 import threading
 
 from sage.symbolic.operators import add_vararg, mul_vararg
@@ -1681,6 +1683,23 @@ def load_systems(fn):
         #    and I want it in the same order that it came in from the 'cout' file
         #return set(tuple(sorted(tuple(all_factors[i] for i in FrozenBitset(bs)))) for bs in s.split())
         return tuple(tuple(all_factors[i] for i in FrozenBitset(bs)) for bs in s.split())
+
+# consolidated version of the above subroutines that takes a tuple of equations (generators of an ideal)
+# and returns a tuple of tuples of equations, a factorization of the input ideal.
+
+def dropZeros(eqns):
+    return tuple(e for e in eqns if e != 0)
+
+def simplifyIdeal3(eqns):
+    eqns_factors = tuple(tuple(f for f,m in factor(eqn)) for eqn in eqns)
+    all_factors = tuple(set(f for l in eqns_factors for f in l))
+    # 10 is the number of threads to use
+    with subprocess.Popen(['./build_systems', '10'], stdin=subprocess.PIPE, stdout=subprocess.PIPE) as proc:
+        for l in sorted(eqns_factors, key=lambda x:len(x)):
+            proc.stdin.write(str(FrozenBitset(tuple(all_factors.index(f) for f in l), capacity=len(all_factors))).encode())
+            proc.stdin.write(b'\n')
+        proc.stdin.close()
+        return tuple(tuple(all_factors[i] for i in FrozenBitset(bs.decode().strip())) for bs in proc.stdout)
 
 def is_irreducible(eq):
     factors = factor(eq)
