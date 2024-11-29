@@ -1690,6 +1690,22 @@ def load_systems(fn):
 def dropZeros(eqns):
     return tuple(e for e in eqns if e != 0)
 
+# parallelized Singular polynomial factorization
+
+import concurrent.futures
+
+def factor_eqn(eqn):
+    return eqn.factor()
+
+def factor_eqns(eqns):
+    with concurrent.futures.ProcessPoolExecutor(max_workers=None) as executor:
+        # "factor" itself is cached; we can't use a functools._lru_cache_wrapper here, so use the underlying sage.arith.misc.factor
+        # actually, don't do this - this is some kind of generic factorization
+        # futures = [executor.submit(sage.arith.misc.factor, eqn) for eqn in eqns]
+        futures = [executor.submit(factor_eqn, eqn) for eqn in eqns]
+        concurrent.futures.wait(futures)
+    return tuple(tuple(f for f,m in future.result()) for future in futures)
+
 def simplifyIdeal3(eqns):
     eqns_factors = tuple(tuple(f for f,m in factor(eqn)) for eqn in eqns)
     all_factors = tuple(set(f for l in eqns_factors for f in l))
