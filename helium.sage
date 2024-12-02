@@ -141,7 +141,7 @@ def powerset(iterable):
     s = list(iterable)
     return chain.from_iterable(combinations(s, r) for r in range(len(s)+1))
 
-def trial_polynomial(base, coordinates, roots, degree, homogenize=None, constant=True):
+def trial_polynomial(base, coordinates, roots, degree, homogenize=None, constant=True, first_index=0):
     """trial_polynomial(base, coordinates, roots, degree, homogenize=None, constant=True)
     Form a trial polynomial in the Symbolic Ring
 
@@ -162,9 +162,9 @@ def trial_polynomial(base, coordinates, roots, degree, homogenize=None, constant
         mindegree = 0
     terms = []
     for deg in range(mindegree, degree+1):
-        terms += list(map(mul, (x for x in combinations_with_replacement(roots + coordinates, deg) if all(x.count(r) < 2 for r in roots))))
+        terms += list(map(mul, (x for x in combinations_with_replacement(coordinates + roots, deg) if all(x.count(r) < 2 for r in roots))))
 
-    coefficients = [var(base+str(c)) for c in range(len(terms))]
+    coefficients = [var(base+str(c)) for c in range(first_index, first_index + len(terms))]
     poly_coefficients = list(coefficients)
     if homogenize != None:
         # homogenize: use 1 as the coefficient of the homogenize'th term
@@ -318,7 +318,7 @@ def finish_prep(ansatz):
         #
         # Homogenization forces V and D to be non-zero; V is also forced to be non-constant
         Zeta = SR_function('Zeta')
-        (Vvars, V) = trial_polynomial('v', coordinates, roots, 1, constant=None)
+        (Vvars, V) = trial_polynomial('v', coordinates, roots, 1, constant=None, first_index=1)
         Psi = Zeta(V)
         if ansatz == 5.01:
             # use 'homogenize' to set the coeffient of v in the ODE's second order coefficient to 1
@@ -800,6 +800,7 @@ def finish_prep(ansatz):
 
 def prep_hydrogen(ansatz=1):
     global H, coordinates, roots
+    global r
 
     if ansatz < 0:
 
@@ -811,15 +812,14 @@ def prep_hydrogen(ansatz=1):
             return - 1/2 * (1/r^2 * diff(r^2 * diff(Psi,r), r)) - (1/r)*Psi
 
     else:
-        var('x1,y1,z1')
-        coordinates = (x1,y1,z1)
+        var('x,y,z')
+        coordinates = (x,y,z)
 
-        global r1
-        r1 = sqrt(x1^2+y1^2+z1^2)
-        roots = (r1,)
+        r = sqrt(x^2+y^2+z^2)
+        roots = (r,)
 
         def H(Psi):
-            return - 1/2 * Del(Psi,[x1,y1,z1]) - (1/r1)*Psi
+            return - 1/2 * Del(Psi,[x,y,z]) - (1/r)*Psi
 
     finish_prep(ansatz=abs(ansatz))
 
@@ -1050,13 +1050,17 @@ def convertRing_to_reduceRing(element):
 
 def reduce_mod_ideal(element, I=None):
     if I:
-        # This is slower if convertRing is FLINT and reduceRing is Singular; it does the reduction in Singular:
-        #    return convertRing_to_reduceRing(element).mod(I)
         # This way does the reduction in FLINT:
-        # if type(reduceRing) == sage.rings.polynomial.multi_polynomial_flint.MPolynomialRing_flint:
-        for p in I.groebner_basis():
-            element %= convertRing(str(p))
-        return convertRing_to_reduceRing(element)
+        # (it doesn't work in Singular, the % in Sage's Singular code is Singular's "division", which is not reduction (I'm not sure what it is)
+        if 'multi_polynomial_flint' in dir(sage.rings.polynomial) \
+           and type(reduceRing) == sage.rings.polynomial.multi_polynomial_flint.MPolynomialRing_flint:
+            for p in I.groebner_basis():
+                element %= convertRing(str(p))
+            return convertRing_to_reduceRing(element)
+        # This is slower if convertRing is FLINT and reduceRing is Singular; it does the reduction in Singular:
+        if type(reduceRing) == sage.rings.polynomial.multi_polynomial_libsingular.MPolynomialRing_libsingular:
+            return convertRing_to_reduceRing(element).mod(I)
+        raise "No reduction algorithm defined for reduceRing"
     else:
         return convertRing_to_reduceRing(element)
 
@@ -1091,7 +1095,8 @@ last_time = 0
 # We're going from reduceRing to whatever ring is specified, or reduceRing (if not specified)
 
 def build_system_of_equations(ring=None):
-    result = dict()
+    global system_of_like_terms
+    system_of_like_terms = dict()
     # for speed, build this tuple here instead of letting the subs method do it in monomial.subs
     # if my custom __evaluate function is available, use it, it's yet faster
     if '__evaluate' in dir(eq_a_reduceRing_n):
@@ -1114,13 +1119,13 @@ def build_system_of_equations(ring=None):
         else:
             # this cast needs to be here because otherwise the division (even though it's exact) takes us to the fraction field
             coeff_part = reduceRing(monomial / non_coeff_part)
-        if (non_coeff_part) in result:
-            result[non_coeff_part] += coeff * coeff_part
+        if (non_coeff_part) in system_of_like_terms:
+            system_of_like_terms[non_coeff_part] += coeff * coeff_part
         else:
-            result[non_coeff_part] = coeff * coeff_part
+            system_of_like_terms[non_coeff_part] = coeff * coeff_part
     pb.show(i+1)
     pb.done()
-    return tuple(set(result.values()))
+    return tuple(set(system_of_like_terms.values()))
 
 def create_eqns_RQQ():
     global eqns_RQQ, jac_eqns_RQQ
@@ -1144,7 +1149,7 @@ def init():
         reductionIdeal = None
     timefunc(reduce_numerator, reductionIdeal)
     # We don't use the denominator for anything, currently
-    # timefunc(reduce_denominator, reductionIdeal)
+    timefunc(reduce_denominator, reductionIdeal)
     timefunc(create_eqns_RQQ)
     timefunc(create_jac_eqns_RQQ)
     timefunc(create_eqns_R32003)
@@ -1859,6 +1864,16 @@ def consolidate_ideals(list_of_ideals):
         consolidated_ideals = [I for I in consolidated_ideals if not ideal < I]
         consolidated_ideals.append(ideal)
     return consolidated_ideals
+
+#
+# Helper functions for the "Pseudo-Solution of Hydrogen" paper
+#
+
+def latex_array(eqns):
+    print("\\begin{array}{r}")
+    for eqn in eqns:
+        print(latex(eqn) + "\\\\")
+    print("\\end{array}\n")
 
 # The "simplifyIdeal" procedure in Singular's primdec.lib (primary decomposition library) checks
 # for equations with simple variable substitutions, but doesn't get all linear relations.
