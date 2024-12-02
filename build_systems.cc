@@ -1,7 +1,7 @@
 /*
  * build_systems - optimized version of build_systems() from Sage/Python helium.sage
  *
- * BUILD: g++ -std=c++2a -o build_systems build_systems.cc -lpthread
+ * BUILD: g++ -std=c++2a -march=native -O3 -o build_systems build_systems.cc -lpthread
  *
  * USAGE: ./build_systems NUM_THREADS < input-bit-strings > output-bit-strings
  *

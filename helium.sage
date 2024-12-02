@@ -93,6 +93,8 @@ import numpy as np
 
 import scipy.optimize
 
+import subprocess
+
 import threading
 
 from sage.symbolic.operators import add_vararg, mul_vararg
@@ -1686,6 +1688,23 @@ def load_systems(fn):
         #return set(tuple(sorted(tuple(all_factors[i] for i in FrozenBitset(bs)))) for bs in s.split())
         return tuple(tuple(all_factors[i] for i in FrozenBitset(bs)) for bs in s.split())
 
+# consolidated version of the above subroutines that takes a tuple of equations (generators of an ideal)
+# and returns a tuple of tuples of equations, a factorization of the input ideal.
+
+def dropZeros(eqns):
+    return tuple(e for e in eqns if e != 0)
+
+def simplifyIdeal3(eqns):
+    eqns_factors = tuple(tuple(f for f,m in factor(eqn)) for eqn in eqns)
+    all_factors = tuple(set(f for l in eqns_factors for f in l))
+    # 10 is the number of threads to use
+    with subprocess.Popen(['./build_systems', '10'], stdin=subprocess.PIPE, stdout=subprocess.PIPE) as proc:
+        for l in sorted(eqns_factors, key=lambda x:len(x)):
+            proc.stdin.write(str(FrozenBitset(tuple(all_factors.index(f) for f in l), capacity=len(all_factors))).encode())
+            proc.stdin.write(b'\n')
+        proc.stdin.close()
+        return tuple(tuple(all_factors[i] for i in FrozenBitset(bs.decode().strip())) for bs in proc.stdout)
+
 def is_irreducible(eq):
     factors = factor(eq)
     return len(factors) == 1 and not any(m > 1 for f,m in factors)
@@ -1832,3 +1851,59 @@ def latex_array(eqns):
     for eqn in eqns:
         print(latex(eqn) + "\\\\")
     print("\\end{array}\n")
+
+# The "simplifyIdeal" procedure in Singular's primdec.lib (primary decomposition library) checks
+# for equations with simple variable substitutions, but doesn't get all linear relations.
+# It's used as a preprocessing step before starting into something like the GTZ algorithm
+# to compute a primary decomposition.  Let's do that step here, but also check for the
+# more complicated linear relations.
+#
+# It finds things like v+p()=0, where p() doesn't involve v, but I also want to get
+# q()v+p()=0, which can be split into two systems, one where q and p are both zero,
+# and the other where v=-p/q.
+
+def simplifyIdeal(I):
+    # I should be a list or a tuple, not an ideal
+    for v in I[0].parent().gens():
+        for p in I:
+            if p == 0:
+                pass
+            elif p == v:
+                print(v, "=", 0)
+                I = tuple(map(lambda p: p.subs({v: 0}), I))
+            elif p.degree(v) == 1:
+                q,r = p.quo_rem(v)
+                if r == 0:
+                    print("reducible polynomial detected")
+                elif q.is_constant() and r.number_of_terms() == 1:
+                    # v=qv+r; replace v with -r/q
+                    print(v, "=", -r/q)
+                    start_time = time.time()
+                    I = tuple(map(lambda p: p.subs({v: -r/q}), I))
+                    execution_time = time.time() - start_time
+                    print(f'subs done in {execution_time} seconds')
+                    break
+    return I
+
+def simplifyIdeal2(I):
+    # I should be a list or a tuple, not an ideal
+    for v in I[0].parent().gens():
+        q_candidate = None
+        r_candidate = None
+        for p in I:
+            if p.degree(v) == 1:
+                q,r = p.quo_rem(v)
+                if r == 0:
+                    print("reducible polynomial detected")
+                elif not q_candidate or q.number_of_terms() < q_candidate.number_of_terms() or \
+                        (q.number_of_terms() == q_candidate.number_of_terms() and r.number_of_terms() < r_candidate.number_of_terms()):
+                    q_candidate = q
+                    r_candidate = r
+        if q_candidate:
+            # v=qv+r; replace v with -r/q
+            print(v, "=", -r_candidate/q_candidate)
+            start_time = time.time()
+            I = tuple(map(lambda p: p.subs({v: -r_candidate/q_candidate}).numerator(), I))
+            execution_time = time.time() - start_time
+            print(f'subs done in {execution_time} seconds')
+    return I
