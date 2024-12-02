@@ -1095,7 +1095,8 @@ last_time = 0
 # We're going from reduceRing to whatever ring is specified, or reduceRing (if not specified)
 
 def build_system_of_equations(ring=None):
-    result = dict()
+    global system_of_like_terms
+    system_of_like_terms = dict()
     # for speed, build this tuple here instead of letting the subs method do it in monomial.subs
     # if my custom __evaluate function is available, use it, it's yet faster
     if '__evaluate' in dir(eq_a_reduceRing_n):
@@ -1118,13 +1119,13 @@ def build_system_of_equations(ring=None):
         else:
             # this cast needs to be here because otherwise the division (even though it's exact) takes us to the fraction field
             coeff_part = reduceRing(monomial / non_coeff_part)
-        if (non_coeff_part) in result:
-            result[non_coeff_part] += coeff * coeff_part
+        if (non_coeff_part) in system_of_like_terms:
+            system_of_like_terms[non_coeff_part] += coeff * coeff_part
         else:
-            result[non_coeff_part] = coeff * coeff_part
+            system_of_like_terms[non_coeff_part] = coeff * coeff_part
     pb.show(i+1)
     pb.done()
-    return tuple(set(result.values()))
+    return tuple(set(system_of_like_terms.values()))
 
 def create_eqns_RQQ():
     global eqns_RQQ, jac_eqns_RQQ
@@ -1148,7 +1149,7 @@ def init():
         reductionIdeal = None
     timefunc(reduce_numerator, reductionIdeal)
     # We don't use the denominator for anything, currently
-    # timefunc(reduce_denominator, reductionIdeal)
+    timefunc(reduce_denominator, reductionIdeal)
     timefunc(create_eqns_RQQ)
     timefunc(create_jac_eqns_RQQ)
     timefunc(create_eqns_R32003)
