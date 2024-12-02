@@ -1698,12 +1698,18 @@ def factor_eqn(eqn):
     return eqn.factor()
 
 def factor_eqns(eqns):
-    with concurrent.futures.ProcessPoolExecutor(max_workers=None) as executor:
+    with concurrent.futures.ProcessPoolExecutor(max_workers=12) as executor:
         # "factor" itself is cached; we can't use a functools._lru_cache_wrapper here, so use the underlying sage.arith.misc.factor
         # actually, don't do this - this is some kind of generic factorization
         # futures = [executor.submit(sage.arith.misc.factor, eqn) for eqn in eqns]
         futures = [executor.submit(factor_eqn, eqn) for eqn in eqns]
-        concurrent.futures.wait(futures)
+        pb = ProgressBar(label='factor equations', expected_size=len(eqns))
+        num_completed = 0
+        while num_completed < len(eqns):
+            concurrent.futures.wait(futures, timeout=10)
+            num_completed = tuple(future.done() for future in futures).count(True)
+            pb.show(num_completed)
+    pb.done()
     return tuple(tuple(f for f,m in future.result()) for future in futures)
 
 def simplifyIdeal3(eqns):
