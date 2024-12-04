@@ -1718,7 +1718,9 @@ def factor_eqns(eqns):
     return tuple(tuple(f for f,m in future.result()) for future in futures)
 
 def simplifyIdeal3(eqns):
-    eqns_factors = tuple(tuple(f for f,m in factor(eqn)) for eqn in eqns)
+    # This is the non-parallel version; use the parallel version (next line)
+    # eqns_factors = tuple(tuple(f for f,m in factor(eqn)) for eqn in eqns)
+    eqns_factors = factor_eqns(eqns)
     all_factors = tuple(set(f for l in eqns_factors for f in l))
     # 10 is the number of threads to use
     with subprocess.Popen(['./build_systems', '10'], stdin=subprocess.PIPE, stdout=subprocess.PIPE) as proc:
