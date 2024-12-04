@@ -1695,6 +1695,9 @@ def load_systems(fn):
 def dropZeros(eqns):
     return tuple(e for e in eqns if e != 0)
 
+def normalize(eqns):
+    return tuple(e/e.lc() for e in eqns)
+
 # parallelized Singular polynomial factorization
 
 import concurrent.futures
