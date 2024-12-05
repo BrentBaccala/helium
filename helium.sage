@@ -1892,26 +1892,39 @@ def latex_array(eqns):
 
 def simplifyIdeal(I):
     # I should be a list or a tuple, not an ideal
+    # returns a pair: a list of equations and a list of substitutions
+    # The substitutions are equations with a simple linear term that were eliminated from the first list of equations
+    try:
+        from sage.libs.singular.function_factory import ff
+        singularSimplifyIdeal = ff.primdec__lib.simplifyIdealBWB
+        return singularSimplifyIdeal(ideal(I))
+    except NameError:
+        print("Singular simplifyIdealBWB not available; falling back on slow Python version")
+    simplifications = []
     for v in I[0].parent().gens():
         for p in I:
             if p == 0:
                 pass
-            elif p == v:
-                print(v, "=", 0)
+            elif p/p.lc() == v:
+                #print(v, "=", 0)
                 I = tuple(map(lambda p: p.subs({v: 0}), I))
+                simplifications.append(v)
             elif p.degree(v) == 1:
                 q,r = p.quo_rem(v)
                 if r == 0:
-                    print("reducible polynomial detected")
+                    # We should pick this up case with another run through simplifyIdeal3
+                    # print("reducible polynomial detected")
+                    pass
                 elif q.is_constant() and r.number_of_terms() == 1:
-                    # v=qv+r; replace v with -r/q
-                    print(v, "=", -r/q)
-                    start_time = time.time()
+                    # polynomial is qv+r; qv+r=0; replace v with -r/q
+                    #print(v, "=", -r/q)
+                    #start_time = time.time()
                     I = tuple(map(lambda p: p.subs({v: -r/q}), I))
-                    execution_time = time.time() - start_time
-                    print(f'subs done in {execution_time} seconds')
+                    #execution_time = time.time() - start_time
+                    #print(f'subs done in {execution_time} seconds')
+                    simplifications.append(q*v+r)
                     break
-    return I
+    return I,simplifications
 
 def simplifyIdeal2(I):
     # I should be a list or a tuple, not an ideal
@@ -1935,3 +1948,21 @@ def simplifyIdeal2(I):
             execution_time = time.time() - start_time
             print(f'subs done in {execution_time} seconds')
     return I
+
+def simplifyIdeal4(eqns, simplifications=[], depth=1):
+    #print('simplifyIdeal4:', eqns, simplifications)
+    eqns,s = simplifyIdeal(eqns)
+    #print('simplifyIdeal:', eqns,s)
+    #simplifications.extend(normalize(s))
+    simplifications = simplifications + list(normalize(s))
+    eqns = normalize(dropZeros(eqns))
+    if len(eqns) == 0:
+        return [([], simplifications)]
+    if any(eqn == 1 for eqn in eqns):
+        return []
+    list_of_systems = simplifyIdeal3(eqns)
+    if len(list_of_systems) == 1:
+        return [(eqns, simplifications)]
+    else:
+        print('recursing on', len(list_of_systems), 'systems; depth', depth)
+        return [l for sys in list_of_systems for l in simplifyIdeal4(sys, simplifications, depth+1)]
