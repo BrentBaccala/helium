@@ -1705,7 +1705,7 @@ import concurrent.futures
 def factor_eqn(eqn):
     return eqn.factor()
 
-def factor_eqns(eqns):
+def parallel_factor_eqns(eqns):
     with concurrent.futures.ProcessPoolExecutor(max_workers=12) as executor:
         # "factor" itself is cached; we can't use a functools._lru_cache_wrapper here, so use the underlying sage.arith.misc.factor
         # actually, don't do this - this is some kind of generic factorization
@@ -1720,13 +1720,15 @@ def factor_eqns(eqns):
     pb.done()
     return tuple(tuple(f for f,m in future.result()) for future in futures)
 
-def simplifyIdeal3(eqns):
-    # This is the non-parallel version; use the parallel version (next line)
-    # eqns_factors = tuple(tuple(f for f,m in factor(eqn)) for eqn in eqns)
-    eqns_factors = factor_eqns(eqns)
+def simplifyIdeal3(eqns, parallel=True):
+    if not parallel:
+        eqns_factors = tuple(tuple(f for f,m in factor(eqn)) for eqn in eqns)
+        num_threads = 1
+    else:
+        eqns_factors = parallel_factor_eqns(eqns)
+        num_threads = 12
     all_factors = tuple(set(f for l in eqns_factors for f in l))
-    # 10 is the number of threads to use
-    with subprocess.Popen(['./build_systems', '10'], stdin=subprocess.PIPE, stdout=subprocess.PIPE) as proc:
+    with subprocess.Popen(['./build_systems', str(num_threads)], stdin=subprocess.PIPE, stdout=subprocess.PIPE) as proc:
         for l in sorted(eqns_factors, key=lambda x:len(x)):
             proc.stdin.write(str(FrozenBitset(tuple(all_factors.index(f) for f in l), capacity=len(all_factors))).encode())
             proc.stdin.write(b'\n')
@@ -1949,6 +1951,10 @@ def simplifyIdeal2(I):
             print(f'subs done in {execution_time} seconds')
     return I
 
+# this is done to avoid serialization delay in the parallel code below
+def simplifyIdeal5(i, simplifications, depth):
+    return simplifyIdeal4(simplifyIdeal4_list_of_systems[i], simplifications, depth)
+
 def simplifyIdeal4(eqns, simplifications=[], depth=1):
     #print('simplifyIdeal4:', eqns, simplifications)
     eqns,s = simplifyIdeal(eqns)
@@ -1960,9 +1966,25 @@ def simplifyIdeal4(eqns, simplifications=[], depth=1):
         return [([], simplifications)]
     if any(eqn == 1 for eqn in eqns):
         return []
-    list_of_systems = simplifyIdeal3(eqns)
+    list_of_systems = simplifyIdeal3(eqns, parallel=(depth == 1))
     if len(list_of_systems) == 1:
         return [(eqns, simplifications)]
     else:
-        print('recursing on', len(list_of_systems), 'systems; depth', depth)
-        return [l for sys in list_of_systems for l in simplifyIdeal4(sys, simplifications, depth+1)]
+        #print('recursing on', len(list_of_systems), 'systems; depth', depth)
+        if depth == 1:
+            num_of_systems = len(list_of_systems)
+            pb = ProgressBar(label='simplify equations', expected_size=num_of_systems)
+            # Use a global variable to avoid serialization delay in relaying the polynomials to worker subprocesses
+            global simplifyIdeal4_list_of_systems
+            simplifyIdeal4_list_of_systems = list_of_systems
+            with concurrent.futures.ProcessPoolExecutor(max_workers=12) as executor:
+                futures = [executor.submit(simplifyIdeal5, i, simplifications, depth+1) for i in range(num_of_systems)]
+                num_completed = 0
+                while num_completed < num_of_systems:
+                    concurrent.futures.wait(futures, timeout=1)
+                    num_completed = tuple(future.done() for future in futures).count(True)
+                    pb.show(num_completed)
+            pb.done()
+            return [l for future in futures for l in future.result()]
+        else:
+            return [l for sys in list_of_systems for l in simplifyIdeal4(sys, simplifications, depth+1)]
