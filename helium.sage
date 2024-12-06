@@ -1991,15 +1991,26 @@ def simplifyIdeal4(eqns, simplifications=[], depth=1):
 
 
 def process_pair(i):
+    # The pair is a pair of sets of polynomials.  The first one (might be empty) is relatively complex
+    # (all irreducible, no linear terms) while the second one is simpler (all linear terms).  We only need to run
+    # the GTZ algorithm on the first one, since once we have a solution to the first system, the solution
+    # to the second system is obvious.
     pair = result[i]
     try:
-        return ideal(tuple(pair[0]) + tuple(pair[1])).minimal_associated_primes(algorithm=['GTZ', 'gtz', 'noFacstd'])
+        if len(pair[0]) > 0:
+            minimal_primes = ideal(pair[0]).minimal_associated_primes(algorithm=['GTZ', 'gtz', 'noFacstd'])
+            return [tuple(I.gens()) + tuple(pair[1]) for I in minimal_primes]
+        else:
+            return [pair[1]]
     except RuntimeError:
         print('RuntimeError in result', i)
         return []
 
-def process_pairs(start, end):
-    results = [process_pair(i) for i in range(start,end)]
+def process_pairs(start, end, degree=None):
+    if degree is None:
+        results = [process_pair(i) for i in range(start,end)]
+    else:
+        results = [process_pair(i) for i in range(start,end) if max(map(lambda p: p.degree(), result[i][0]), default=0) == degree]
     return [i for r in results for i in r]
 
 def process_result(result):
@@ -2012,13 +2023,13 @@ def process_result(result):
    pb.done()
    return retval
 
-def parallel_process_result(result):
+def parallel_process_result(result, degree=None):
     num_results = len(result)
     num_slices = 10000
     retval = []
     pb = ProgressBar(label='GTZ', expected_size=num_slices)
     with concurrent.futures.ProcessPoolExecutor(max_workers=12) as executor:
-        futures = [executor.submit(process_pairs, int((num_results*i)/num_slices), int((num_results*(i+1))/num_slices)) for i in range(num_slices)]
+        futures = [executor.submit(process_pairs, int((num_results*i)/num_slices), int((num_results*(i+1))/num_slices), degree=degree) for i in range(num_slices)]
         num_completed = 0
         while num_completed < num_slices:
             concurrent.futures.wait(futures, timeout=1)
