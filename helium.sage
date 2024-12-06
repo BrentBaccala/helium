@@ -1988,3 +1988,41 @@ def simplifyIdeal4(eqns, simplifications=[], depth=1):
             return [l for future in futures for l in future.result()]
         else:
             return [l for sys in list_of_systems for l in simplifyIdeal4(sys, simplifications, depth+1)]
+
+
+def process_pair(i):
+    pair = result[i]
+    try:
+        return ideal(tuple(pair[0]) + tuple(pair[1])).minimal_associated_primes(algorithm=['GTZ', 'gtz', 'noFacstd'])
+    except RuntimeError:
+        print('RuntimeError in result', i)
+        return []
+
+def process_pairs(start, end):
+    results = [process_pair(i) for i in range(start,end)]
+    return [i for r in results for i in r]
+
+def process_result(result):
+   num_results = len(result)
+   retval = []
+   pb = ProgressBar(label='GTZ', expected_size=num_results)
+   for i in range(num_results):
+       retval.append(process_pair(i))
+       pb.show(i)
+   pb.done()
+   return retval
+
+def parallel_process_result(result):
+    num_results = len(result)
+    num_slices = 10000
+    retval = []
+    pb = ProgressBar(label='GTZ', expected_size=num_slices)
+    with concurrent.futures.ProcessPoolExecutor(max_workers=12) as executor:
+        futures = [executor.submit(process_pairs, int((num_results*i)/num_slices), int((num_results*(i+1))/num_slices)) for i in range(num_slices)]
+        num_completed = 0
+        while num_completed < num_slices:
+            concurrent.futures.wait(futures, timeout=1)
+            num_completed = tuple(future.done() for future in futures).count(True)
+            pb.show(num_completed)
+    pb.done()
+    return [l for future in futures for l in future.result()]
