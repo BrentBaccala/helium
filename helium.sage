@@ -1966,6 +1966,36 @@ def simplifyIdeal2(I):
             print(f'subs done in {execution_time} seconds')
     return I
 
+# We use simple simplifications (factoring polynomials and substituting for linear variables) to split a big
+# system of polynomial equations into subsystems, each of which are then pickled and stored into a SQL
+# database.  Then we'll come back and simplify each subsystem using Singular's GTZ algorithm.
+
+sql_schema='''
+CREATE TYPE status AS ENUM ('queued', 'running', 'finished', 'failed');
+
+CREATE TABLE systems (
+      system BYTEA,               -- a pickle of a tuple pair of tuples of polynomials; the first complex, the second simple
+      md5 UUID,
+      simplified_system BYTEA,
+      current_status status,
+      degree INTEGER,
+      cpu_time INTERVAL,
+      memory_utilization INTEGER
+);
+
+CREATE TABLE globals (
+     identifier VARCHAR,
+     pickle BYTEA
+);
+'''
+
+# To keep the size of our pickled objects down, we don't pickle the ring that the polynomials come from.
+
+def save_ring(id, ring):
+    with conn.cursor() as cursor:
+        cursor.execute("INSERT INTO globals (identifier, pickle) VALUES (%s, %s);", (id, pickle.dumps(ring)))
+    conn.commit()
+
 def persistent_id(obj):
     if obj is RQQ:
         return 'A'
@@ -1984,7 +2014,12 @@ def pickleWithoutRing(val):
         deg = max(p.degree() for p in val[0])
     return (src.getvalue(), int(deg))
 
-# this is done to avoid serialization delay in the parallel code below
+# Forking after simplifyIdeal4_list_of_systems has been created and passing "i" (instead of passing one of the systems)
+# is done to avoid serialization delay in the parallel code.  For the same reason, we put the results into a SQL
+# database here instead of returning them across the fork and then putting them in the database.  Returning the
+# values this way also drops them from RAM, which keeps the memory footprint under control, rather than storing
+# everything in RAM until the futures in simplifyIdeal4 complete.
+
 def simplifyIdeal5(i, simplifications, depth):
     retval = simplifyIdeal4(simplifyIdeal4_list_of_systems[i], simplifications, depth)
     if conn:
