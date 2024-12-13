@@ -2037,3 +2037,23 @@ def parallel_process_result(result, degree=None):
             pb.show(num_completed)
     pb.done()
     return [l for future in futures for l in future.result()]
+
+def simplifyIdeal6(I):
+    # I should be a list or a tuple of polynomials, not an ideal
+    # returns a list of equations after substituting zero for any variables that appear alone in the system
+    try:
+        from sage.libs.singular.function_factory import ff
+        singularSimplifyIdeal = ff.primdec__lib.simplifyIdealBWB
+        return singularSimplifyIdeal(ideal(I))
+    except NameError:
+        print("Singular simplifyIdealBWB not available; falling back on slow Python version")
+    simplifications = []
+    for v in I[0].parent().gens():
+        for p in I:
+            if p == 0:
+                pass
+            elif p/p.lc() == v:
+                #print(v, "=", 0)
+                I = tuple(map(lambda p: p.subs({v: 0}), I))
+                simplifications.append(v)
+    return simplifications + [p for p in I if p != 0]
