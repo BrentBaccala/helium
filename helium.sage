@@ -97,6 +97,9 @@ import subprocess
 
 import threading
 
+import pickle
+import io
+
 from sage.symbolic.operators import add_vararg, mul_vararg
 
 from sage.rings.polynomial.polydict import ETuple
@@ -129,6 +132,18 @@ except ModuleNotFoundError:
             pass
         def done(self):
             pass
+
+postgresDB = "helium-16.6"
+
+conn = None
+try:
+    import psycopg2
+    try:
+        conn = psycopg2.connect(database=postgresDB)
+    except psycopg2.OperationalError as ex:
+        print('SQL OperationalError during connection attempt; no SQL database support')
+except ModuleNotFoundError:
+    print("psycopg2 package not available; no SQL database support")
 
 # from python docs
 def flatten(listOfLists):
@@ -1951,9 +1966,53 @@ def simplifyIdeal2(I):
             print(f'subs done in {execution_time} seconds')
     return I
 
+def persistent_id(obj):
+    if obj is RQQ:
+        return 'A'
+    else:
+        return None
+
+# This is pretty much how the dumps code works, except that it tries first to use an optimized version from _pickle
+def pickleWithoutRing(val):
+    src = io.BytesIO()
+    p = pickle.Pickler(src)
+    p.persistent_id = persistent_id
+    p.dump(val)
+    if val[0] == []:
+        deg = 1
+    else:
+        deg = max(p.degree() for p in val[0])
+    return (src.getvalue(), int(deg))
+
 # this is done to avoid serialization delay in the parallel code below
 def simplifyIdeal5(i, simplifications, depth):
-    return simplifyIdeal4(simplifyIdeal4_list_of_systems[i], simplifications, depth)
+    retval = simplifyIdeal4(simplifyIdeal4_list_of_systems[i], simplifications, depth)
+    if conn:
+        conn2 = psycopg2.connect(database=postgresDB)
+        with conn2.cursor() as cursor:
+            cursor.executemany("INSERT INTO systems (system, degree, current_status) VALUES (%s, %s, 'queued');", (pickleWithoutRing(rv) for rv in retval))
+        conn2.commit()
+        conn2.close()
+        return []
+    else:
+        return retval
+
+def persistent_load(id):
+    if id == 'A':
+        return RQQ
+    else:
+        raise pickle.UnpicklingError("Invalid persistent id")
+
+def loadSystems():
+    conn2 = psycopg2.connect(database=postgresDB)
+    with conn2.cursor() as cursor:
+        cursor.execute("SELECT system FROM systems;")
+        for pickled_system in cursor:
+            dst = io.BytesIO(pickled_system[0])
+            up = pickle.Unpickler(dst)
+            up.persistent_load = persistent_load
+            print(up.load())
+    conn2.close()
 
 def simplifyIdeal4(eqns, simplifications=[], depth=1):
     #print('simplifyIdeal4:', eqns, simplifications)
