@@ -1990,6 +1990,9 @@ CREATE TABLE globals (
      identifier VARCHAR,
      pickle BYTEA
 );
+
+CREATE INDEX system_index ON systems USING HASH (system);
+CREATE INDEX md5_index ON systems USING HASH (md5);
 '''
 
 # To keep the size of our pickled objects down, we don't pickle the ring that the polynomials come from.
@@ -2159,12 +2162,28 @@ def md5_everything():
     while True:
         with conn.cursor() as cursor:
             with conn.cursor() as cursor2:
-                cursor.execute("SELECT system FROM systems WHERE md5 IS null LIMIT 10")
+                cursor.execute("SELECT DISTINCT system FROM systems WHERE md5 IS null LIMIT 10")
                 if cursor.rowcount == 0:
                     break
                 for system in cursor:
                     hash = str(uuid.UUID(bytes=hashlib.md5(system[0]).digest()))
                     cursor2.execute("UPDATE systems SET md5 = %s WHERE system = %s;", (hash, system[0]))
+        print('one md5 block done')
+        conn.commit()
+
+def concurrent_md5_everything():
+    # futures can't share the original connection
+    conn = psycopg2.connect(database=postgresDB, host='192.168.2.201', user='baccala', password='BVC161zULQ')
+    while True:
+        with conn.cursor() as cursor:
+            with conn.cursor() as cursor2:
+                cursor.execute("SELECT DISTINCT system FROM systems WHERE md5 IS null LIMIT 10")
+                if cursor.rowcount == 0:
+                    break
+                for system in cursor:
+                    hash = str(uuid.UUID(bytes=hashlib.md5(system[0]).digest()))
+                    cursor2.execute("UPDATE systems SET md5 = %s WHERE system = %s;", (hash, system[0]))
+        print('one md5 block done')
         conn.commit()
 
 def md5_test():
