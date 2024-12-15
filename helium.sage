@@ -1973,28 +1973,29 @@ def simplifyIdeal2(I):
 # We use simple simplifications (factoring polynomials and substituting for linear variables) to split a big
 # system of polynomial equations into subsystems, each of which are then pickled and stored into a SQL
 # database.  Then we'll come back and simplify each subsystem using Singular's GTZ algorithm.
+#
+# Each system is separated into two subsets - complex polynomials (no linear terms) and simple polynomials (a linear term in each).
+# This is done to simplify the GTZ calculations, which only need to be done on the complex set, as
+# once you know the solutions to the complex set, the solutions to the linear set can be easily calculated.
 
 sql_schema='''
 CREATE TYPE status AS ENUM ('queued', 'running', 'finished', 'failed');
 
 CREATE TABLE systems (
       system BYTEA,               -- a pickle of a tuple pair of tuples of polynomials; the first complex, the second simple
-      md5 UUID UNIQUE,
-      simplified_system BYTEA,
+      md5 UUID UNIQUE,            -- the MD5 hash of the system pickle
+      simplified_system BYTEA,    -- initially NULL; ultimately a pickle of a tuple of tuples of simplified systems
       current_status status,
-      degree INTEGER,
+      degree INTEGER,             -- the maximum degree of the polynomials in the system
       cpu_time INTERVAL,
       memory_utilization INTEGER,
-      num INTEGER
+      num INTEGER                 -- the number of identical systems that have been found
 );
 
 CREATE TABLE globals (
      identifier VARCHAR,
      pickle BYTEA
 );
-
-CREATE INDEX system_index ON systems USING HASH (system);
-CREATE INDEX md5_index ON systems USING HASH (md5);
 '''
 
 # To keep the size of our pickled objects down, we don't pickle the ring that the polynomials come from.
