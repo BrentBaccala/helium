@@ -100,6 +100,9 @@ import threading
 import pickle
 import io
 
+import hashlib
+import uuid
+
 from sage.symbolic.operators import add_vararg, mul_vararg
 
 from sage.rings.polynomial.polydict import ETuple
@@ -2151,3 +2154,21 @@ def simplifyIdeal6(I):
                 I = tuple(map(lambda p: p.subs({v: 0}), I))
                 simplifications.append(v)
     return simplifications + [p for p in I if p != 0]
+
+def md5_everything():
+    while True:
+        with conn.cursor() as cursor:
+            with conn.cursor() as cursor2:
+                cursor.execute("SELECT system FROM systems WHERE md5 IS null LIMIT 10")
+                if cursor.rowcount == 0:
+                    break
+                for system in cursor:
+                    hash = str(uuid.UUID(bytes=hashlib.md5(system[0]).digest()))
+                    cursor2.execute("UPDATE systems SET md5 = %s WHERE system = %s;", (hash, system[0]))
+        conn.commit()
+
+def md5_test():
+    with conn.cursor() as cursor:
+        cursor.execute("SELECT md5 FROM systems LIMIT 1;")
+        for system in cursor:
+            return system[0]
