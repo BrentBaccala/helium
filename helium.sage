@@ -136,6 +136,7 @@ except ModuleNotFoundError:
         def done(self):
             pass
 
+#postgresDB = "hydrogen-5"
 postgresDB = "helium-16.6"
 
 conn = None
@@ -1944,7 +1945,7 @@ def simplifyIdeal(I):
                     #print(f'subs done in {execution_time} seconds')
                     simplifications.append(q*v+r)
                     break
-    return I,simplifications
+    return I,tuple(simplifications)
 
 def simplifyIdeal2(I):
     # I should be a list or a tuple, not an ideal
@@ -1983,7 +1984,8 @@ CREATE TABLE systems (
       current_status status,
       degree INTEGER,
       cpu_time INTERVAL,
-      memory_utilization INTEGER
+      memory_utilization INTEGER,
+      num INTEGER
 );
 
 CREATE TABLE globals (
@@ -2014,7 +2016,7 @@ def pickleWithoutRing(val):
     p = pickle.Pickler(src)
     p.persistent_id = persistent_id
     p.dump(val)
-    if val[0] == []:
+    if val[0] == tuple():
         deg = 1
     else:
         deg = max(p.degree() for p in val[0])
@@ -2027,11 +2029,23 @@ def pickleWithoutRing(val):
 # everything in RAM until the futures in simplifyIdeal4 complete.
 
 def simplifyIdeal5(i, simplifications, depth):
+    if conn:
+        conn.close()
     retval = simplifyIdeal4(simplifyIdeal4_list_of_systems[i], simplifications, depth)
     if conn:
+        retval_unique = set(retval)
+        retval_unique_pickles_with_degrees_and_counts = tuple(pickleWithoutRing(rv) + (retval.count(rv),) for rv in retval_unique)
+        retval_hashes = {str(uuid.UUID(bytes=hashlib.md5(p[0]).digest())):p for p in retval_unique_pickles_with_degrees_and_counts}
         conn2 = psycopg2.connect(database=postgresDB)
         with conn2.cursor() as cursor:
-            cursor.executemany("INSERT INTO systems (system, degree, current_status) VALUES (%s, %s, 'queued');", (pickleWithoutRing(rv) for rv in retval))
+            for h,p in retval_hashes.items():
+                # XXX race condition here if another process is updating the identical hash
+                num = retval
+                cursor.execute("SELECT num FROM systems WHERE md5 = %s", (h,))
+                if cursor.rowcount == 0:
+                    cursor.execute("INSERT INTO systems (md5, system, degree, num, current_status) VALUES (%s, %s, %s, %s, 'queued');", (h, p[0], p[1], p[2]))
+                else:
+                    cursor.execute("UPDATE systems SET num = %s WHERE md5 = %s", (cursor.fetchone()[0] + p[2], h))
         conn2.commit()
         conn2.close()
         return []
@@ -2055,15 +2069,15 @@ def loadSystems():
             print(up.load())
     conn2.close()
 
-def simplifyIdeal4(eqns, simplifications=[], depth=1):
+def simplifyIdeal4(eqns, simplifications=tuple(), depth=1):
     #print('simplifyIdeal4:', eqns, simplifications)
     eqns,s = simplifyIdeal(eqns)
     #print('simplifyIdeal:', eqns,s)
     #simplifications.extend(normalize(s))
-    simplifications = simplifications + list(normalize(s))
+    simplifications = simplifications + normalize(s)
     eqns = normalize(dropZeros(eqns))
     if len(eqns) == 0:
-        return [([], simplifications)]
+        return [(tuple(), simplifications)]
     if any(eqn == 1 for eqn in eqns):
         return []
     list_of_systems = simplifyIdeal3(eqns, parallel=(depth == 1))
