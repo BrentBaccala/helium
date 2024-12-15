@@ -139,11 +139,18 @@ except ModuleNotFoundError:
 #postgresDB = "hydrogen-5"
 postgresDB = "helium-16.6"
 
+postgres_connection_parameters = {
+    'database': postgresDB,
+    'host':     '192.168.2.201',
+    'user':     'baccala',
+    'password': 'BVC161zULQ'
+}
+
 conn = None
 try:
     import psycopg2
     try:
-        conn = psycopg2.connect(database=postgresDB)
+        conn = psycopg2.connect(**postgres_connection_parameters)
     except psycopg2.OperationalError as ex:
         print('SQL OperationalError during connection attempt; no SQL database support')
 except ModuleNotFoundError:
@@ -2037,7 +2044,7 @@ def simplifyIdeal5(i, simplifications, depth):
         retval_unique = set(retval)
         retval_unique_pickles_with_degrees_and_counts = tuple(pickleWithoutRing(rv) + (retval.count(rv),) for rv in retval_unique)
         retval_hashes = {str(uuid.UUID(bytes=hashlib.md5(p[0]).digest())):p for p in retval_unique_pickles_with_degrees_and_counts}
-        conn2 = psycopg2.connect(database=postgresDB)
+        conn2 = psycopg2.connect(**postgres_connection_parameters)
         with conn2.cursor() as cursor:
             for h,p in retval_hashes.items():
                 cursor.execute("INSERT INTO systems (md5, system, degree, num, current_status) VALUES (%s, %s, %s, 0, 'queued') ON CONFLICT DO NOTHING",
@@ -2056,7 +2063,7 @@ def persistent_load(id):
         raise pickle.UnpicklingError("Invalid persistent id")
 
 def loadSystems():
-    conn2 = psycopg2.connect(database=postgresDB)
+    conn2 = psycopg2.connect(**postgres_connection_parameters)
     with conn2.cursor() as cursor:
         cursor.execute("SELECT system FROM systems;")
         for pickled_system in cursor:
@@ -2184,7 +2191,7 @@ def md5_everything():
 
 def concurrent_md5_everything():
     # futures can't share the original connection
-    conn = psycopg2.connect(database=postgresDB, host='192.168.2.201', user='baccala', password='BVC161zULQ')
+    conn = psycopg2.connect(**postgres_connection_parameters)
     while True:
         with conn.cursor() as cursor:
             with conn.cursor() as cursor2:
