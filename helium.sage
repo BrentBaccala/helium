@@ -1979,7 +1979,7 @@ CREATE TYPE status AS ENUM ('queued', 'running', 'finished', 'failed');
 
 CREATE TABLE systems (
       system BYTEA,               -- a pickle of a tuple pair of tuples of polynomials; the first complex, the second simple
-      md5 UUID,
+      md5 UUID UNIQUE,
       simplified_system BYTEA,
       current_status status,
       degree INTEGER,
@@ -2039,13 +2039,9 @@ def simplifyIdeal5(i, simplifications, depth):
         conn2 = psycopg2.connect(database=postgresDB)
         with conn2.cursor() as cursor:
             for h,p in retval_hashes.items():
-                # XXX race condition here if another process is updating the identical hash
-                num = retval
-                cursor.execute("SELECT num FROM systems WHERE md5 = %s", (h,))
-                if cursor.rowcount == 0:
-                    cursor.execute("INSERT INTO systems (md5, system, degree, num, current_status) VALUES (%s, %s, %s, %s, 'queued');", (h, p[0], p[1], p[2]))
-                else:
-                    cursor.execute("UPDATE systems SET num = %s WHERE md5 = %s", (cursor.fetchone()[0] + p[2], h))
+                cursor.execute("INSERT INTO systems (md5, system, degree, num, current_status) VALUES (%s, %s, %s, 0, 'queued') ON CONFLICT DO NOTHING",
+                               (h, p[0], p[1]))
+                cursor.execute("UPDATE systems SET num = num + %s WHERE md5 = %s", (p[2], h))
         conn2.commit()
         conn2.close()
         return []
