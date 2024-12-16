@@ -100,6 +100,10 @@ import threading
 import pickle
 import io
 
+import os
+import psutil
+import datetime
+
 import hashlib
 import uuid
 
@@ -1995,7 +1999,8 @@ CREATE TABLE systems (
       current_status status,
       degree INTEGER,             -- the maximum degree of the polynomials in the system
       cpu_time INTERVAL,
-      memory_utilization INTEGER,
+      memory_utilization BIGINT,
+      pid INTEGER,
       num INTEGER                 -- the number of identical systems that have been found
 );
 
@@ -2007,14 +2012,32 @@ CREATE TABLE globals (
 
 # To keep the size of our pickled objects down, we don't pickle the ring that the polynomials come from.
 
+persistent_data = {}
+persistent_data_inverse = {}
+
 def save_ring(id, ring):
     with conn.cursor() as cursor:
         cursor.execute("INSERT INTO globals (identifier, pickle) VALUES (%s, %s);", (id, pickle.dumps(ring)))
     conn.commit()
 
+def load_globals():
+    with conn.cursor() as cursor:
+        cursor.execute("SELECT identifier, pickle FROM globals")
+        for id, p in cursor:
+            obj = pickle.loads(p)
+            persistent_data[id] = obj
+            persistent_data_inverse[obj] = id
+
+load_globals()
+
 def persistent_id(obj):
-    if obj is RQQ:
-        return 'A'
+    if isinstance(obj, sage.rings.ring.Ring):
+        if obj not in persistent_data_inverse:
+            id = str(len(persistent_data))
+            save_ring(id, obj)
+            persistent_data[id] = obj
+            persistent_data_inverse[obj] = id
+        return persistent_data_inverse[obj]
     else:
         return None
 
@@ -2030,6 +2053,31 @@ def pickleWithoutRing(val):
         deg = max(p.degree() for p in val[0])
     return (src.getvalue(), int(deg))
 
+def pickleWithoutRing2(val):
+    src = io.BytesIO()
+    p = pickle.Pickler(src)
+    p.persistent_id = persistent_id
+    p.dump(val)
+    return src.getvalue()
+
+def persistent_load(id):
+    if id not in persistent_data:
+        with conn.cursor() as cursor:
+            cursor.execute("SELECT pickle FROM globals WHERE identifier = %s", (id,))
+            if cursor.rowcount == 0:
+                raise pickle.UnpicklingError("Invalid persistent id")
+            else:
+                obj = pickle.loads(cursor.fetchone()[0])
+                persistent_data[id] = obj
+                persistent_data_inverse[obj] = id
+    return persistent_data[id]
+
+def unpickle(p):
+    dst = io.BytesIO(p)
+    up = pickle.Unpickler(dst)
+    up.persistent_load = persistent_load
+    return up.load()
+
 # Forking after simplifyIdeal4_list_of_systems has been created and passing "i" (instead of passing one of the systems)
 # is done to avoid serialization delay in the parallel code.  For the same reason, we put the results into a SQL
 # database here instead of returning them across the fork and then putting them in the database.  Returning the
@@ -2037,30 +2085,24 @@ def pickleWithoutRing(val):
 # everything in RAM until the futures in simplifyIdeal4 complete.
 
 def simplifyIdeal5(i, simplifications, depth):
+    global conn
     if conn:
         conn.close()
+        conn = psycopg2.connect(**postgres_connection_parameters)
     retval = simplifyIdeal4(simplifyIdeal4_list_of_systems[i], simplifications, depth)
     if conn:
         retval_unique = set(retval)
         retval_unique_pickles_with_degrees_and_counts = tuple(pickleWithoutRing(rv) + (retval.count(rv),) for rv in retval_unique)
         retval_hashes = {str(uuid.UUID(bytes=hashlib.md5(p[0]).digest())):p for p in retval_unique_pickles_with_degrees_and_counts}
-        conn2 = psycopg2.connect(**postgres_connection_parameters)
-        with conn2.cursor() as cursor:
+        with conn.cursor() as cursor:
             for h,p in retval_hashes.items():
                 cursor.execute("INSERT INTO systems (md5, system, degree, num, current_status) VALUES (%s, %s, %s, 0, 'queued') ON CONFLICT DO NOTHING",
                                (h, p[0], p[1]))
                 cursor.execute("UPDATE systems SET num = num + %s WHERE md5 = %s", (p[2], h))
-        conn2.commit()
-        conn2.close()
+        conn.commit()
         return []
     else:
         return retval
-
-def persistent_load(id):
-    if id == 'A':
-        return RQQ
-    else:
-        raise pickle.UnpicklingError("Invalid persistent id")
 
 def loadSystems():
     conn2 = psycopg2.connect(**postgres_connection_parameters)
@@ -2159,12 +2201,15 @@ def parallel_process_result(result, degree=None):
 def simplifyIdeal6(I):
     # I should be a list or a tuple of polynomials, not an ideal
     # returns a list of equations after substituting zero for any variables that appear alone in the system
-    try:
-        from sage.libs.singular.function_factory import ff
-        singularSimplifyIdeal = ff.primdec__lib.simplifyIdealBWB
-        return singularSimplifyIdeal(ideal(I))
-    except NameError:
-        print("Singular simplifyIdealBWB not available; falling back on slow Python version")
+    #
+    # Maybe we could use the Singular version, but it's return convention is different
+    #
+    # try:
+    #     from sage.libs.singular.function_factory import ff
+    #     singularSimplifyIdeal = ff.primdec__lib.simplifyIdealBWB
+    #     return singularSimplifyIdeal(ideal(I))
+    # except NameError:
+    #     print("Singular simplifyIdealBWB not available; falling back on slow Python version")
     simplifications = []
     for v in I[0].parent().gens():
         for p in I:
@@ -2209,3 +2254,39 @@ def md5_test():
         cursor.execute("SELECT md5 FROM systems LIMIT 1;")
         for system in cursor:
             return system[0]
+
+def concurrent_GTZ_everything():
+    # futures can't share the original connection
+    conn = psycopg2.connect(**postgres_connection_parameters)
+    while True:
+        with conn.cursor() as cursor:
+            cursor.execute("""UPDATE systems
+                              SET current_status = 'running', pid = %s
+                              WHERE md5 = ( SELECT md5 FROM systems WHERE current_status = 'queued' ORDER BY degree LIMIT 1 )
+                              RETURNING md5, system""", (os.getpid(),) )
+            conn.commit()
+            if cursor.rowcount == 0:
+                break
+            md5, pickled_system = cursor.fetchone()
+            start_time = time.time()
+            system, simplifications = unpickle(pickled_system)
+            if len(system) == 0:
+                subsystems = tuple(simplifyIdeal6(simplifications))
+            else:
+                minimal_primes = ideal(system).minimal_associated_primes(algorithm=['GTZ', 'gtz', 'noFacstd'])
+                subsystems = tuple(simplifyIdeal6(mp.gens() + simplifications) for mp in minimal_primes)
+            memory_utilization = psutil.Process(os.getpid()).memory_info().rss
+            cpu_time = datetime.timedelta(seconds = time.time() - start_time)
+            cursor.execute("""UPDATE systems
+                              SET simplified_system = %s,
+                                  current_status = 'finished',
+                                  cpu_time = %s,
+                                  memory_utilization = %s
+                              WHERE md5 = %s""", (pickleWithoutRing2(subsystems), cpu_time, memory_utilization, md5))
+            conn.commit()
+
+def list_simplified_systems():
+    with conn.cursor() as cursor:
+        cursor.execute("SELECT simplified_system FROM systems WHERE current_status = 'finished'")
+        for sys in cursor:
+            print(unpickle(sys[0]))
