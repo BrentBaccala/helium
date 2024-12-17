@@ -2285,6 +2285,12 @@ def concurrent_GTZ_everything():
                               WHERE md5 = %s""", (pickleWithoutRing2(subsystems), cpu_time, memory_utilization, md5))
             conn.commit()
 
+def list_systems():
+    with conn.cursor() as cursor:
+        cursor.execute("SELECT system FROM systems WHERE current_status = 'finished'")
+        for sys in cursor:
+            print(unpickle(sys[0]))
+
 def list_simplified_systems():
     with conn.cursor() as cursor:
         cursor.execute("SELECT simplified_system FROM systems WHERE current_status = 'finished'")
