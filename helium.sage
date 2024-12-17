@@ -1692,14 +1692,6 @@ def find_relation():
 # Currently works, but builds way more systems that are really needed.  871 on hydrogen-5,
 # when we know we'll only get 5 irreducible varieties.
 
-# commented out so it won't run on load, but needs to be done in build_systems():
-
-def init_build_systems():
-    global eqns_RQQ_factors, all_factors
-    # eqns_RQQ_factors is a tuples of tuples of factors, with the multiplicities dropped
-    eqns_RQQ_factors = tuple(tuple(f for f,m in factor(eqn)) for eqn in eqns_RQQ)
-    all_factors = tuple(set(f for l in eqns_RQQ_factors for f in l))
-
 # code to write and read data in the bitset format used by the build_systems program,
 # which is a C++ version of build_systems() below, optimized for speed
 
@@ -1750,7 +1742,7 @@ def parallel_factor_eqns(eqns):
     pb.done()
     return tuple(tuple(f for f,m in future.result()) for future in futures)
 
-def simplifyIdeal3(eqns, parallel=True):
+def optimized_build_systems(eqns, parallel=True):
     if not parallel:
         eqns_factors = tuple(tuple(f for f,m in factor(eqn)) for eqn in eqns)
         num_threads = 1
@@ -1793,8 +1785,7 @@ def is_linear_in_var(poly, v):
 #   - when we get through the entire system, add the system of equations to the output
 #   - pop the last tuple on the list and go back to the top of this loop
 
-def add_system(newsys):
-    global systems
+def add_system(systems, newsys):
     #print("adding system")
     systems_to_remove = []
     for sys in systems:
@@ -1807,9 +1798,9 @@ def add_system(newsys):
         systems.remove(sys)
     systems.add(newsys)
 
-def build_systems():
-    global systems
-    global working_ideal, tracking_info, last_i, i
+def build_systems(eqns = eqns_RQQ):
+    eqns_factors = tuple(tuple(f for f,m in factor(eqn)) for eqn in eqns)
+    all_factors = tuple(set(f for l in eqns_factors for f in l))
     systems = set()
     working_ideal = set()
     tracking_info = list()
@@ -1819,32 +1810,32 @@ def build_systems():
     total_progress = float(0.0)
     #pb = ProgressBar(label='build_systems ', expected_size=int(end_point))
     while True:
-        # put this here in case we've just popped from tracking_info and last_i = len(eqns_RQQ)-1
+        # put this here in case we've just popped from tracking_info and last_i = len(eqns)-1
         # In that case, we don't have anything to do in the next for loop (all of the equations are accounted for),
-        #    but we need to make sure that the "i == len(eqns_RQQ) - 1" test triggers, and the for loop won't
+        #    but we need to make sure that the "i == len(eqns) - 1" test triggers, and the for loop won't
         #    change i at all if the range is empty
         i = last_i
-        for i in range(last_i+1, len(eqns_RQQ)):
+        for i in range(last_i+1, len(eqns)):
             # if any polynomial in the working ideal is a factor of this equation, skip the equation, as it's already satisfied
-            if not working_ideal.isdisjoint(eqns_RQQ_factors[i]):
+            if not working_ideal.isdisjoint(eqns_factors[i]):
                 continue
-            tracking_info.extend(subroutine_one(eqns_RQQ_factors[i], working_ideal, i, start_point, end_point))
+            tracking_info.extend(subroutine_one(eqns_factors[i], working_ideal, i, start_point, end_point))
             #print(tracking_info)
             if debug_build_systems:
                 for r,a,b in tracking_info:
                     for eq2 in r:
                         assert is_irreducible(eq2), "loop 1"
-            if i == len(eqns_RQQ) - 1:
+            if i == len(eqns) - 1:
                 # force it to pop from tracking_info
                 i = 0
             break
         #print('i', i)
         # working_ideal might have factors in it, if we broke out of the loop, but we're about to discard it in that case
-        if i == len(eqns_RQQ) - 1:
-            add_system(tuple(sorted(tuple(working_ideal))))
+        if i == len(eqns) - 1:
+            add_system(systems, tuple(sorted(tuple(working_ideal))))
             #pb.show(int(end_point))
-            total_progress += end_point - start_point
-            print('progress', total_progress, 'len(systems)', len(systems))
+            #total_progress += end_point - start_point
+            #print('progress', total_progress, 'len(systems)', len(systems))
             if debug_build_systems:
                 for eq in working_ideal:
                     try:
@@ -1859,7 +1850,7 @@ def build_systems():
                 for eq in working_ideal:
                     assert is_irreducible(eq), "point 3"
         except IndexError:
-            return
+            return systems
 
 # Call subroutine one:
 #   - input is a list, a set of equations (to be satisfied) and an equation number for labeling purposes
@@ -1944,7 +1935,7 @@ def simplifyIdeal(I):
             elif p.degree(v) == 1:
                 q,r = p.quo_rem(v)
                 if r == 0:
-                    # We should pick this up case with another run through simplifyIdeal3
+                    # We should pick this up case with another run through optimized_build_systems
                     # print("reducible polynomial detected")
                     pass
                 elif q.is_constant() and r.number_of_terms() == 1:
@@ -2126,7 +2117,7 @@ def simplifyIdeal4(eqns, simplifications=tuple(), depth=1):
         return [(tuple(), simplifications)]
     if any(eqn == 1 for eqn in eqns):
         return []
-    list_of_systems = simplifyIdeal3(eqns, parallel=(depth == 1))
+    list_of_systems = optimized_build_systems(eqns, parallel=(depth == 1))
     if len(list_of_systems) == 1:
         return [(eqns, simplifications)]
     else:
