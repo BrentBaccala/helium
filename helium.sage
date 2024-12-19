@@ -1798,7 +1798,7 @@ def add_system(systems, newsys):
         systems.remove(sys)
     systems.add(newsys)
 
-def build_systems(eqns = eqns_RQQ):
+def build_systems(eqns):
     eqns_factors = tuple(tuple(f for f,m in factor(eqn)) for eqn in eqns)
     all_factors = tuple(set(f for l in eqns_factors for f in l))
     systems = set()
@@ -1874,7 +1874,7 @@ def subroutine_one(factors, equations, equation_number, start_point, end_point):
 
 # Once we've built all of the systems, then we do this:
 #
-# consolidate_ideals(reduce(lambda a,b: a.union(b), [set(ideal(s).radical().primary_decomposition()) for s in systems]))
+# consolidate_ideals(reduce(lambda a,b: a.union(b), [set(ideal(s).minimal_associated_primes()) for s in systems]))
 #
 # i.e, compute the radical and primary decomposition of each system, union the results all together,
 # and discard any ideals which are a subset of another ideal
@@ -1883,6 +1883,14 @@ def subroutine_one(factors, equations, equation_number, start_point, end_point):
 # the radical and primary decomposition directly on the original system.  My hope is that this
 # method will be usable for helium-16.6, where the direct approach runs out of memory, though
 # it is slower for hydrogen-5.
+
+# consolidate_ideals(list_of_ideals)
+#
+# For ideals, A < B if A is a subset of B
+#
+# We seek to represent our original ideal as an intersection of prime ideals.
+# If any ideal is a strict subset of another in the set, we
+# can discard the larger of the two without affecting the intersection.
 
 def consolidate_ideals(list_of_ideals):
     consolidated_ideals = []
