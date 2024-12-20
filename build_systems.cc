@@ -271,7 +271,11 @@ std::ostream& operator<<(std::ostream& stream, BitString bs)
     auto str = std::bitset<sizeof(BitString::data_type)*8>(bs.bitstring[i]).to_string();
     if (i == 0) {
       auto bits_in_this_str = bs.len % (8*sizeof(BitString::data_type));
-      stream << str.substr(str.length() - bits_in_this_str, bits_in_this_str);
+      if (bits_in_this_str > 0) {
+	stream << str.substr(str.length() - bits_in_this_str, bits_in_this_str);
+      } else {
+	stream << str;
+      }
     } else {
       stream << str;
     }
