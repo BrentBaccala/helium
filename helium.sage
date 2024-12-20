@@ -2027,7 +2027,8 @@ def load_globals():
             persistent_data[id] = obj
             persistent_data_inverse[obj] = id
 
-load_globals()
+if conn:
+    load_globals()
 
 def persistent_id(obj):
     if isinstance(obj, sage.rings.ring.Ring):
