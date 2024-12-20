@@ -857,7 +857,7 @@ def prep_hydrogen(ansatz=1):
         def H(Psi):
             return - 1/2 * Del(Psi,[x,y,z]) - (1/r)*Psi
 
-    postgres_connection_parameters['database'] = 'hydrogen-' + str(ansatz)
+    postgres_connection_parameters['database'] = 'hydrogen-' + str(abs(ansatz))
     postgres_connect()
 
     finish_prep(ansatz=abs(ansatz))
@@ -899,7 +899,7 @@ def prep_helium(ansatz=6):
         def H(Psi):
             return - 1/2 * Del(Psi,[x1,y1,z1]) - 1/2 * Del(Psi,[x2,y2,z2]) - (2/r1)*Psi - (2/r2)*Psi + (1/r12)*Psi
 
-    postgres_connection_parameters['database'] = 'helium-' + str(ansatz)
+    postgres_connection_parameters['database'] = 'helium-' + str(round(abs(ansatz), 1))
     postgres_connect()
 
     finish_prep(ansatz=abs(ansatz))
