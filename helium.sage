@@ -140,25 +140,29 @@ except ModuleNotFoundError:
         def done(self):
             pass
 
-#postgresDB = "hydrogen-5"
-postgresDB = "helium-16.6"
-
 postgres_connection_parameters = {
-    'database': postgresDB,
     'host':     '192.168.2.201',
     'user':     'baccala',
     'password': 'BVC161zULQ'
 }
 
-conn = None
 try:
     import psycopg2
+except ModuleNotFoundError:
+    print("psycopg2 package not available; no SQL database support")
+
+def postgres_connect():
     try:
+        global conn
         conn = psycopg2.connect(**postgres_connection_parameters)
     except psycopg2.OperationalError as ex:
         print('SQL OperationalError during connection attempt; no SQL database support')
-except ModuleNotFoundError:
-    print("psycopg2 package not available; no SQL database support")
+    except NameError as ex:
+        if ex.name == 'psycopg2':
+            # if we couldn't load psycopg2, we already printed a warning
+            pass
+        else:
+            raise
 
 # from python docs
 def flatten(listOfLists):
@@ -851,6 +855,9 @@ def prep_hydrogen(ansatz=1):
         def H(Psi):
             return - 1/2 * Del(Psi,[x,y,z]) - (1/r)*Psi
 
+    postgres_connection_parameters['database'] = 'hydrogen-' + str(ansatz)
+    postgres_connect()
+
     finish_prep(ansatz=abs(ansatz))
 
 def prep_helium(ansatz=6):
@@ -889,6 +896,9 @@ def prep_helium(ansatz=6):
 
         def H(Psi):
             return - 1/2 * Del(Psi,[x1,y1,z1]) - 1/2 * Del(Psi,[x2,y2,z2]) - (2/r1)*Psi - (2/r2)*Psi + (1/r12)*Psi
+
+    postgres_connection_parameters['database'] = 'helium-' + str(ansatz)
+    postgres_connect()
 
     finish_prep(ansatz=abs(ansatz))
 
