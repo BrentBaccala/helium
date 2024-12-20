@@ -123,17 +123,22 @@ public:
   typedef std::vector<data_type>::size_type size_type;
   unsigned int len;
 
-  BitString() {}
+  /* Bitstrings are represented MSB on the left, with the initial data_type in bitstring
+   * using only as many bits as needed (LSBs) and the remaining data_type's fully populated.
+   */
+
+  BitString() {len = 0;}
   BitString(unsigned int l) : bitstring((l+8*sizeof(data_type)-1)/(8*sizeof(data_type))), len(l) {}
   BitString(std::string str)
   {
     len = str.length();
-    bitstring.resize((len+8*sizeof(data_type)-1)/(8*sizeof(data_type)));
+    auto bitstring_size = (len+8*sizeof(data_type)-1)/(8*sizeof(data_type));
+    bitstring.resize(bitstring_size);
     for (int i=0; i < len; i++) {
       int val = (str[i] == '0' ? 0 : 1);
       int j = len - i - 1;
-      int index = j/(8*sizeof(data_type));
-      int offset = j - index*8*sizeof(data_type);
+      int index = bitstring_size - j/(8*sizeof(data_type)) - 1;
+      int offset = j%(8*sizeof(data_type));
       bitstring[index] |= val << offset;
     }
   }
@@ -264,10 +269,11 @@ std::ostream& operator<<(std::ostream& stream, BitString bs)
 {
   for (int i=0; i < bs.bitstring.size(); i++) {
     auto str = std::bitset<sizeof(BitString::data_type)*8>(bs.bitstring[i]).to_string();
-    if (i < bs.bitstring.size() - 1) {
-      stream << str;
+    if (i == 0) {
+      auto bits_in_this_str = bs.len % (8*sizeof(BitString::data_type));
+      stream << str.substr(str.length() - bits_in_this_str, bits_in_this_str);
     } else {
-      stream << str.substr(str.length() + i*8*sizeof(BitString::data_type) - bs.len, bs.len - i*8*sizeof(BitString::data_type));
+      stream << str;
     }
   }
   return stream;
