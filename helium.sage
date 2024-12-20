@@ -107,6 +107,8 @@ import datetime
 import hashlib
 import uuid
 
+import traceback
+
 from sage.symbolic.operators import add_vararg, mul_vararg
 
 from sage.rings.polynomial.polydict import ETuple
@@ -2137,6 +2139,10 @@ def load_systems():
     conn2.close()
     return retval
 
+def done_callback(future):
+    if future.exception():
+        print(*traceback.format_exception(future.exception()))
+
 def simplifyIdeal4(eqns, simplifications=tuple(), depth=1):
     #print('simplifyIdeal4:', eqns, simplifications)
     eqns,s = simplifyIdeal(eqns)
@@ -2161,6 +2167,8 @@ def simplifyIdeal4(eqns, simplifications=tuple(), depth=1):
             simplifyIdeal4_list_of_systems = list_of_systems
             with concurrent.futures.ProcessPoolExecutor(max_workers=12) as executor:
                 futures = [executor.submit(simplifyIdeal5, i, simplifications, depth+1) for i in range(num_of_systems)]
+                for future in futures:
+                    future.add_done_callback(done_callback)
                 num_completed = 0
                 while num_completed < num_of_systems:
                     concurrent.futures.wait(futures, timeout=1)
