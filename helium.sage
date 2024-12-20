@@ -2013,40 +2013,50 @@ CREATE TABLE systems (
       num INTEGER                 -- the number of identical systems that have been found
 );
 
-CREATE TABLE globals (
-     identifier VARCHAR,
-     pickle BYTEA
+CREATE TABLE globals (            -- this table contains the pickled rings, to keep down the size of the pickled polynomials
+     identifier INTEGER GENERATED ALWAYS AS IDENTITY,
+     pickle BYTEA UNIQUE
 );
 '''
+
+def delete_database():
+    with conn.cursor() as cursor:
+        cursor.execute("DROP OWNED BY current_user")
+    conn.commit()
+
+def create_database():
+    with conn.cursor() as cursor:
+        cursor.execute(sql_schema)
+    conn.commit()
 
 # To keep the size of our pickled objects down, we don't pickle the ring that the polynomials come from.
 
 persistent_data = {}
 persistent_data_inverse = {}
 
-def save_ring(id, ring):
+def save_global(obj):
+    p = pickle.dumps(obj)
     with conn.cursor() as cursor:
-        cursor.execute("INSERT INTO globals (identifier, pickle) VALUES (%s, %s);", (id, pickle.dumps(ring)))
+        cursor.execute("INSERT INTO globals (pickle) VALUES (%s) ON CONFLICT DO NOTHING", (p,))
     conn.commit()
+    with conn.cursor() as cursor:
+        cursor.execute("SELECT identifier FROM globals WHERE pickle = %s", (p,))
+        id = cursor.fetchone()[0]
+        persistent_data[str(id)] = obj
+        persistent_data_inverse[obj] = str(id)
 
 def load_globals():
     with conn.cursor() as cursor:
         cursor.execute("SELECT identifier, pickle FROM globals")
         for id, p in cursor:
             obj = pickle.loads(p)
-            persistent_data[id] = obj
-            persistent_data_inverse[obj] = id
-
-if conn:
-    load_globals()
+            persistent_data[str(id)] = obj
+            persistent_data_inverse[obj] = str(id)
 
 def persistent_id(obj):
     if isinstance(obj, sage.rings.ring.Ring):
         if obj not in persistent_data_inverse:
-            id = str(len(persistent_data))
-            save_ring(id, obj)
-            persistent_data[id] = obj
-            persistent_data_inverse[obj] = id
+            save_global(obj)
         return persistent_data_inverse[obj]
     else:
         return None
@@ -2073,7 +2083,7 @@ def pickleWithoutRing2(val):
 def persistent_load(id):
     if id not in persistent_data:
         with conn.cursor() as cursor:
-            cursor.execute("SELECT pickle FROM globals WHERE identifier = %s", (id,))
+            cursor.execute("SELECT pickle FROM globals WHERE identifier = %s", (int(id),))
             if cursor.rowcount == 0:
                 raise pickle.UnpicklingError("Invalid persistent id")
             else:
