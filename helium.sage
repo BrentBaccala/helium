@@ -1711,7 +1711,7 @@ def print_build_systems(file=sys.stdout):
     for l in sorted(eqns_RQQ_factors, key=lambda x:len(x)):
         print(FrozenBitset(tuple(all_factors.index(f) for f in l), capacity=len(all_factors)), file=file)
 
-def load_systems(fn):
+def load_build_systems_output(fn):
     with open(fn) as f:
         s = f.read()
         # The sort can be really slow, though I want it there to verify that systems is the same as created
@@ -2293,7 +2293,7 @@ def concurrent_GTZ_everything():
             start_time = time.time()
             system, simplifications = unpickle(pickled_system)
             if len(system) == 0:
-                subsystems = tuple(simplifyIdeal6(simplifications))
+                subsystems = tuple((simplifyIdeal6(simplifications), ))
             else:
                 minimal_primes = ideal(system).minimal_associated_primes(algorithm=['GTZ', 'gtz', 'noFacstd'])
                 subsystems = tuple(simplifyIdeal6(mp.gens() + simplifications) for mp in minimal_primes)
