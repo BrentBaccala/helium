@@ -1488,7 +1488,7 @@ CREATE TABLE systems (
       num INTEGER                 -- the number of identical systems that have been found
 );
 
-CREATE TABLE systems1 (
+CREATE TABLE stage1 (
       system BYTEA,               -- a pickle of a tuple pair of tuples of polynomials; the first complex, the second simple
       current_status status,
       cpu_time INTERVAL,          -- I'm actually using this for wall time
@@ -1668,7 +1668,7 @@ def simplifyIdeal4(eqns, simplifications=tuple(), depth=1):
             return [l for sys in list_of_systems for l in simplifyIdeal4(sys, simplifications, depth+1)]
 
 
-def initial_SQL_splitting(eqns):
+def SQL_stage1(eqns):
     save_global(eqns[0].parent())
     eqns_factors = parallel_factor_eqns(eqns)
     num_threads = 12
@@ -1683,16 +1683,16 @@ def initial_SQL_splitting(eqns):
         with conn.cursor() as cursor:
             for bs in proc.stdout:
                 t = tuple(all_factors[i] for i in FrozenBitset(bs.decode().strip()))
-                cursor.execute("INSERT INTO systems1 (system, current_status) VALUES (%s, 'queued')", (persistent_pickle(t),))
+                cursor.execute("INSERT INTO stage1 (system, current_status) VALUES (%s, 'queued')", (persistent_pickle(t),))
         conn.commit()
 
 def simplify_one_system():
     with conn.cursor() as cursor:
-        cursor.execute("""UPDATE systems1
+        cursor.execute("""UPDATE stage1
                           SET current_status = 'running', pid = %s, node = %s
                           WHERE system = (
                               SELECT system
-                              FROM systems1
+                              FROM stage1
                               WHERE current_status = 'queued'
                               LIMIT 1
                               )
@@ -1705,7 +1705,7 @@ def simplify_one_system():
             simplifyIdeal4(system)
             memory_utilization = psutil.Process(os.getpid()).memory_info().rss
             cpu_time = datetime.timedelta(seconds = time.time() - start_time)
-            cursor.execute("""UPDATE systems1
+            cursor.execute("""UPDATE stage1
                               SET current_status = 'finished',
                                   cpu_time = %s,
                                   memory_utilization = %s
