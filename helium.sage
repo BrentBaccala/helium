@@ -85,6 +85,8 @@ import os
 import psutil
 import datetime
 
+import typing
+
 import hashlib
 import uuid
 
@@ -1488,8 +1490,12 @@ CREATE TABLE systems (
 
 CREATE TABLE globals (            -- this table contains the pickled rings, to keep down the size of the pickled polynomials
      identifier INTEGER GENERATED ALWAYS AS IDENTITY,
-     pickle BYTEA UNIQUE
+     pickle BYTEA
 );
+
+-- Making "pickle" unique causes the resulting index to exceed a PostgreSQL limit, so we make the md5 hash unique instead.
+
+CREATE UNIQUE INDEX ON globals(md5(pickle));
 '''
 
 def delete_database():
@@ -1508,7 +1514,7 @@ persistent_data = {}
 persistent_data_inverse = {}
 
 def save_global(obj):
-    p = pickle.dumps(obj)
+    p = persistent_pickle(obj)
     with conn.cursor() as cursor:
         cursor.execute("INSERT INTO globals (pickle) VALUES (%s) ON CONFLICT DO NOTHING", (p,))
     conn.commit()
@@ -1527,12 +1533,14 @@ def load_globals():
             persistent_data_inverse[obj] = str(id)
 
 def persistent_id(obj):
-    if isinstance(obj, sage.rings.ring.Ring):
-        if obj not in persistent_data_inverse:
-            save_global(obj)
-        return persistent_data_inverse[obj]
-    else:
-        return None
+    # It's hard to tell if an arbitrary Python object is hashable
+    # See https://stackoverflow.com/a/3460725/1493790
+    try:
+        if obj in persistent_data_inverse:
+            return persistent_data_inverse[obj]
+    except Exception:
+        pass
+    return None
 
 # This is pretty much how the dumps code works, except that it tries first to use an optimized version from _pickle
 def pickleWithoutRing(val):
@@ -1546,7 +1554,7 @@ def pickleWithoutRing(val):
         deg = max(p.degree() for p in val[0])
     return (src.getvalue(), int(deg))
 
-def pickleWithoutRing2(val):
+def persistent_pickle(val):
     src = io.BytesIO()
     p = pickle.Pickler(src)
     p.persistent_id = persistent_id
@@ -1560,7 +1568,7 @@ def persistent_load(id):
             if cursor.rowcount == 0:
                 raise pickle.UnpicklingError("Invalid persistent id")
             else:
-                obj = pickle.loads(cursor.fetchone()[0])
+                obj = unpickle(cursor.fetchone()[0])
                 persistent_data[id] = obj
                 persistent_data_inverse[obj] = id
     return persistent_data[id]
@@ -1783,7 +1791,7 @@ def concurrent_GTZ_everything():
                                   current_status = 'finished',
                                   cpu_time = %s,
                                   memory_utilization = %s
-                              WHERE md5 = %s""", (pickleWithoutRing2(subsystems), cpu_time, memory_utilization, md5))
+                              WHERE md5 = %s""", (persistent_pickle(subsystems), cpu_time, memory_utilization, md5))
             conn.commit()
 
 def list_systems():
