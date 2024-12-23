@@ -1488,6 +1488,15 @@ CREATE TABLE systems (
       num INTEGER                 -- the number of identical systems that have been found
 );
 
+CREATE TABLE systems1 (
+      system BYTEA,               -- a pickle of a tuple pair of tuples of polynomials; the first complex, the second simple
+      current_status status,
+      cpu_time INTERVAL,          -- I'm actually using this for wall time
+      memory_utilization BIGINT,
+      node VARCHAR,
+      pid INTEGER
+);
+
 CREATE TABLE globals (            -- this table contains the pickled rings, to keep down the size of the pickled polynomials
      identifier INTEGER GENERATED ALWAYS AS IDENTITY,
      pickle BYTEA
@@ -1658,6 +1667,50 @@ def simplifyIdeal4(eqns, simplifications=tuple(), depth=1):
         else:
             return [l for sys in list_of_systems for l in simplifyIdeal4(sys, simplifications, depth+1)]
 
+
+def initial_SQL_splitting(eqns):
+    save_global(eqns[0].parent())
+    eqns_factors = parallel_factor_eqns(eqns)
+    num_threads = 12
+    all_factors = tuple(set(f for l in eqns_factors for f in l))
+    for f in all_factors:
+        save_global(f)
+    with subprocess.Popen(['./build_systems', str(num_threads)], stdin=subprocess.PIPE, stdout=subprocess.PIPE) as proc:
+        for l in sorted(eqns_factors, key=lambda x:len(x)):
+            proc.stdin.write(str(FrozenBitset(tuple(all_factors.index(f) for f in l), capacity=len(all_factors))).encode())
+            proc.stdin.write(b'\n')
+        proc.stdin.close()
+        with conn.cursor() as cursor:
+            for bs in proc.stdout:
+                t = tuple(all_factors[i] for i in FrozenBitset(bs.decode().strip()))
+                cursor.execute("INSERT INTO systems1 (system, current_status) VALUES (%s, 'queued')", (persistent_pickle(t),))
+        conn.commit()
+
+def simplify_one_system():
+    with conn.cursor() as cursor:
+        cursor.execute("""UPDATE systems1
+                          SET current_status = 'running', pid = %s, node = %s
+                          WHERE system = (
+                              SELECT system
+                              FROM systems1
+                              WHERE current_status = 'queued'
+                              LIMIT 1
+                              )
+                          RETURNING system""", (os.getpid(), os.uname()[1]) )
+        conn.commit()
+        if cursor.rowcount != 0:
+            pickled_system = cursor.fetchone()[0]
+            start_time = time.time()
+            system = unpickle(pickled_system)
+            simplifyIdeal4(system)
+            memory_utilization = psutil.Process(os.getpid()).memory_info().rss
+            cpu_time = datetime.timedelta(seconds = time.time() - start_time)
+            cursor.execute("""UPDATE systems1
+                              SET current_status = 'finished',
+                                  cpu_time = %s,
+                                  memory_utilization = %s
+                              WHERE system = %s""", (cpu_time, memory_utilization, pickled_system))
+            conn.commit()
 
 def process_pair(i):
     # The pair is a pair of sets of polynomials.  The first one (might be empty) is relatively complex
