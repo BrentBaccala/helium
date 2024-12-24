@@ -1474,7 +1474,7 @@ def simplifyIdeal2(I):
 # once you know the solutions to the complex set, the solutions to the linear set can be easily calculated.
 
 sql_schema='''
-CREATE TYPE status AS ENUM ('queued', 'running', 'finished', 'failed');
+CREATE TYPE status AS ENUM ('queued', 'running', 'finished', 'interrupted', 'failed');
 
 CREATE TABLE systems (
       system BYTEA,               -- a pickle of a tuple pair of tuples of polynomials; the first complex, the second simple
