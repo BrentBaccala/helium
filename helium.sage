@@ -1554,12 +1554,11 @@ def load_globals():
 
 def persistent_id(obj):
     # It's hard to tell if an arbitrary Python object is hashable
-    # See https://stackoverflow.com/a/3460725/1493790
-    try:
+    #    See https://stackoverflow.com/a/3460725/1493790
+    # The stackoverflow suggestion (try/except) is quite slow
+    if isinstance(obj, sage.rings.ring.Ring) or isinstance(obj, sage.rings.polynomial.multi_polynomial.MPolynomial):
         if obj in persistent_data_inverse:
             return persistent_data_inverse[obj]
-    except Exception:
-        pass
     return None
 
 # This is pretty much how the dumps code works, except that it tries first to use an optimized version from _pickle
