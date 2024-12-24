@@ -473,4 +473,6 @@ int main(int argc, char ** argv)
   for (auto p:finished_bitstrings.finished_bitstrings) {
     std::cout << p << "\n";
   }
+
+  return 0;
 }
