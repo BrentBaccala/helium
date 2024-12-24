@@ -1709,12 +1709,23 @@ def stage2(system, origin):
             proc.stdin.write(str(FrozenBitset(tuple(all_factors.index(f) for f in l), capacity=len(all_factors))).encode())
             proc.stdin.write(b'\n')
         proc.stdin.close()
+        #pickle_time = 0
+        #execute_time = 0
+        #commit_time = 0
         with conn.cursor() as cursor:
             for bs in proc.stdout:
                 t = tuple(all_factors[i] for i in FrozenBitset(bs.decode().strip()))
-                cursor.execute("INSERT INTO stage2 (system, origin, current_status) VALUES (%s, %s, 'queued')",
-                               (persistent_pickle((t,simplifications)), origin))
+                #time1 = time.time()
+                system = persistent_pickle((t,simplifications))
+                #time2 = time.time()
+                #pickle_time += time2 - time1
+                cursor.execute("INSERT INTO stage2 (system, origin, current_status) VALUES (%s, %s, 'queued')", (system, origin))
+                #time3 = time.time()
+                #execute_time += time3 - time2
                 conn.commit()
+                #time4 = time.time()
+                #commit_time += time4 - time3
+                #print('pickle', pickle_time, 'execute', execute_time, 'commit', commit_time)
 
 def SQL_stage2():
     with conn.cursor() as cursor:
