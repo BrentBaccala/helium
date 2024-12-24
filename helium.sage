@@ -1224,6 +1224,7 @@ def parallel_factor_eqns(eqns):
             num_completed = tuple(future.done() for future in futures).count(True)
             pb.show(num_completed)
     pb.done()
+    print()
     return tuple(tuple(f for f,m in future.result()) for future in futures)
 
 def optimized_build_systems(eqns, parallel=True):
@@ -1677,9 +1678,27 @@ def simplifyIdeal4(eqns, simplifications=tuple(), depth=1):
         else:
             return [l for sys in list_of_systems for l in simplifyIdeal4(sys, simplifications, depth+1)]
 
+def process_pool_initializer():
+    # futures can't share the original SQL connection, so create a new one
+    # We DON'T want to close the existing connection, since it's still being used by the parent process
+    global conn
+    conn = psycopg2.connect(**postgres_connection_parameters)
+
+def dump_bitset_to_SQL(origin, i):
+    global bitsets
+    global all_factors
+    global simplifications
+    t = tuple(all_factors[j] for j in bitsets[i])
+    system = persistent_pickle((t,simplifications))
+    with conn.cursor() as cursor:
+        cursor.execute("INSERT INTO stage2 (system, origin, current_status) VALUES (%s, %s, 'queued')", (system, origin))
+    conn.commit()
+
 def stage2(system, origin):
+    print('simplifyIdeal')
     eqns,s = simplifyIdeal(system)
     # simplifications = simplifications + normalize(s)
+    global simplifications
     simplifications = normalize(s)
     save_global(simplifications)
     eqns = normalize(dropZeros(eqns))
@@ -1697,34 +1716,35 @@ def stage2(system, origin):
     # list_of_systems = optimized_build_systems(eqns, parallel=True)
     eqns_factors = parallel_factor_eqns(eqns)
     num_threads = 12
+    global all_factors
     all_factors = tuple(set(f for l in eqns_factors for f in l))
     pb = ProgressBar(label='saving factors as globals', expected_size=len(all_factors))
     for i,f in enumerate(all_factors):
         save_global(f)
         pb.show(i)
-        pb.done()
-    with subprocess.Popen(['./build_systems', str(num_threads)], stdin=subprocess.PIPE, stdout=subprocess.PIPE) as proc:
+    pb.done()
+    print()
+    with subprocess.Popen(['./build_systems', str(num_threads)], stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE) as proc:
         for l in sorted(eqns_factors, key=lambda x:len(x)):
             proc.stdin.write(str(FrozenBitset(tuple(all_factors.index(f) for f in l), capacity=len(all_factors))).encode())
             proc.stdin.write(b'\n')
         proc.stdin.close()
-        #pickle_time = 0
-        #execute_time = 0
-        #commit_time = 0
-        with conn.cursor() as cursor:
-            for bs in proc.stdout:
-                t = tuple(all_factors[i] for i in FrozenBitset(bs.decode().strip()))
-                #time1 = time.time()
-                system = persistent_pickle((t,simplifications))
-                #time2 = time.time()
-                #pickle_time += time2 - time1
-                cursor.execute("INSERT INTO stage2 (system, origin, current_status) VALUES (%s, %s, 'queued')", (system, origin))
-                #time3 = time.time()
-                #execute_time += time3 - time2
-                conn.commit()
-                #time4 = time.time()
-                #commit_time += time4 - time3
-                #print('pickle', pickle_time, 'execute', execute_time, 'commit', commit_time)
+        global bitsets
+        bitsets = tuple(FrozenBitset(bs.decode().strip()) for bs in proc.stdout)
+    pb = ProgressBar(label='dump to SQL', expected_size=len(bitsets))
+    with concurrent.futures.ProcessPoolExecutor(max_workers=12, initializer=process_pool_initializer) as executor:
+        futures = [executor.submit(dump_bitset_to_SQL, origin, i) for i in range(len(bitsets))]
+        for future in futures:
+            future.add_done_callback(done_callback)
+        num_completed = 0
+        while num_completed < len(bitsets):
+            concurrent.futures.wait(futures, timeout=1)
+            num_completed = tuple(future.done() for future in futures).count(True)
+            pb.show(num_completed)
+    pb.done()
+    print()
+    for future in futures:
+        future.result()
 
 def SQL_stage2():
     with conn.cursor() as cursor:
@@ -1744,6 +1764,7 @@ def SQL_stage2():
                 break
             pickled_system, identifier = cursor.fetchone()
             start_time = time.time()
+            print('Unpickling stage 1 system', identifier)
             system = unpickle(pickled_system)
 
             stage2(system, identifier)
