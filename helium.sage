@@ -1489,6 +1489,18 @@ CREATE TABLE systems (
 );
 
 CREATE TABLE stage1 (
+      identifier INTEGER GENERATED ALWAYS AS IDENTITY,
+      system BYTEA,               -- a pickle of a tuple of polynomials
+      current_status status,
+      cpu_time INTERVAL,          -- I'm actually using this for wall time
+      memory_utilization BIGINT,
+      node VARCHAR,
+      pid INTEGER
+);
+
+CREATE TABLE stage2 (
+      identifier INTEGER GENERATED ALWAYS AS IDENTITY,
+      origin INTEGER,
       system BYTEA,               -- a pickle of a tuple pair of tuples of polynomials; the first complex, the second simple
       current_status status,
       cpu_time INTERVAL,          -- I'm actually using this for wall time
@@ -1498,8 +1510,8 @@ CREATE TABLE stage1 (
 );
 
 CREATE TABLE globals (            -- this table contains the pickled rings, to keep down the size of the pickled polynomials
-     identifier INTEGER GENERATED ALWAYS AS IDENTITY,
-     pickle BYTEA
+      identifier INTEGER GENERATED ALWAYS AS IDENTITY,
+      pickle BYTEA
 );
 
 -- Making "pickle" unique causes the resulting index to exceed a PostgreSQL limit, so we make the md5 hash unique instead.
@@ -1667,6 +1679,74 @@ def simplifyIdeal4(eqns, simplifications=tuple(), depth=1):
         else:
             return [l for sys in list_of_systems for l in simplifyIdeal4(sys, simplifications, depth+1)]
 
+def stage2(system, origin):
+    eqns,s = simplifyIdeal(system)
+    # simplifications = simplifications + normalize(s)
+    simplifications = normalize(s)
+    save_global(simplifications)
+    eqns = normalize(dropZeros(eqns))
+    if len(eqns) == 0:
+        with conn.cursor() as cursor:
+            p = persistent_pickle(simplifications)
+            h = str(uuid.UUID(bytes=hashlib.md5(p).digest()))
+            cursor.execute("INSERT INTO systems (md5, system, degree, num, current_status) VALUES (%s, %s, 1, 0, 'queued') ON CONFLICT DO NOTHING",
+                           (h, p))
+            cursor.execute("UPDATE systems SET num = num + %s WHERE md5 = %s", (p[2], h))
+        conn.commit()
+    if any(eqn == 1 for eqn in eqns):
+        # the system is inconsistent and needs no further processing
+        return
+    # list_of_systems = optimized_build_systems(eqns, parallel=True)
+    eqns_factors = parallel_factor_eqns(eqns)
+    num_threads = 12
+    all_factors = tuple(set(f for l in eqns_factors for f in l))
+    pb = ProgressBar(label='saving factors as globals', expected_size=len(all_factors))
+    for i,f in enumerate(all_factors):
+        save_global(f)
+        pb.show(i)
+        pb.done()
+    with subprocess.Popen(['./build_systems', str(num_threads)], stdin=subprocess.PIPE, stdout=subprocess.PIPE) as proc:
+        for l in sorted(eqns_factors, key=lambda x:len(x)):
+            proc.stdin.write(str(FrozenBitset(tuple(all_factors.index(f) for f in l), capacity=len(all_factors))).encode())
+            proc.stdin.write(b'\n')
+        proc.stdin.close()
+        with conn.cursor() as cursor:
+            for bs in proc.stdout:
+                t = tuple(all_factors[i] for i in FrozenBitset(bs.decode().strip()))
+                cursor.execute("INSERT INTO stage2 (system, origin, current_status) VALUES (%s, %s, 'queued')",
+                               (persistent_pickle((t,simplifications)), origin))
+                conn.commit()
+
+def SQL_stage2():
+    with conn.cursor() as cursor:
+        while True:
+            cursor.execute("""UPDATE stage1
+                              SET current_status = 'running', pid = %s, node = %s
+                              WHERE identifier = (
+                                  SELECT identifier
+                                  FROM stage1
+                                  WHERE current_status = 'queued'
+                                  ORDER BY identifier
+                                  LIMIT 1
+                                  )
+                              RETURNING system, identifier""", (os.getpid(), os.uname()[1]) )
+            conn.commit()
+            if cursor.rowcount == 0:
+                break
+            pickled_system, identifier = cursor.fetchone()
+            start_time = time.time()
+            system = unpickle(pickled_system)
+
+            stage2(system, identifier)
+
+            memory_utilization = psutil.Process(os.getpid()).memory_info().rss
+            cpu_time = datetime.timedelta(seconds = time.time() - start_time)
+            cursor.execute("""UPDATE stage1
+                              SET current_status = 'finished',
+                                  cpu_time = %s,
+                                  memory_utilization = %s
+                              WHERE system = %s""", (cpu_time, memory_utilization, pickled_system))
+            conn.commit()
 
 def SQL_stage1(eqns):
     save_global(eqns[0].parent())
