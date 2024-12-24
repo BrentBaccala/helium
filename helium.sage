@@ -124,7 +124,6 @@ except ModuleNotFoundError:
 postgres_connection_parameters = {
     'host':     '192.168.2.201',
     'user':     'baccala',
-    'password': 'BVC161zULQ'
 }
 
 try:
