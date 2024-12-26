@@ -1477,8 +1477,8 @@ sql_schema='''
 CREATE TYPE status AS ENUM ('queued', 'running', 'finished', 'interrupted', 'failed');
 
 CREATE TABLE systems (
+      identifier INTEGER GENERATED ALWAYS AS IDENTITY,
       system BYTEA,               -- a pickle of a tuple pair of tuples of polynomials; the first complex, the second simple
-      md5 UUID UNIQUE,            -- the MD5 hash of the system pickle
       simplified_system BYTEA,    -- initially NULL; ultimately a pickle of a tuple of tuples of simplified systems
       current_status status,
       degree INTEGER,             -- the maximum degree of the polynomials in the system
@@ -1487,6 +1487,8 @@ CREATE TABLE systems (
       pid INTEGER,
       num INTEGER                 -- the number of identical systems that have been found
 );
+
+CREATE UNIQUE INDEX ON systems(md5(system));
 
 CREATE TABLE stage1 (
       identifier INTEGER GENERATED ALWAYS AS IDENTITY,
@@ -1508,6 +1510,14 @@ CREATE TABLE stage2 (
       node VARCHAR,
       pid INTEGER
 );
+
+CREATE TABLE tracking (
+      origin INTEGER,
+      destination INTEGER,
+      count INTEGER
+);
+
+CREATE UNIQUE INDEX ON tracking(origin, destination);
 
 CREATE TABLE globals (            -- this table contains the pickled rings, to keep down the size of the pickled polynomials
       identifier INTEGER GENERATED ALWAYS AS IDENTITY,
@@ -1781,6 +1791,108 @@ def SQL_stage2():
             # keep our memory down by clearing our cached polynomials
             persistent_data.clear()
             persistent_data_inverse.clear()
+
+
+def insert_into_systems(system, simplifications, origin):
+    for eqn in system:
+        save_global(eqn)
+    for eqn in simplifications:
+        save_global(eqn)
+    p = persistent_pickle((system, simplifications))
+    if len(system) == 0:
+        deg = 1
+    else:
+        deg = max(p.degree() for p in system)
+    with conn.cursor() as cursor:
+        #cursor.execute("INSERT INTO systems (system, degree, num, current_status) VALUES (%s, %s, 0, 'queued') ON CONFLICT DO NOTHING",
+        #               (p, deg))
+        #cursor.execute("SELECT identifier FROM systems WHERE system = %s", (p,))
+        cursor.execute("""INSERT INTO systems (system, degree, num, current_status) VALUES (%s, %s, 1, 'queued')
+                          ON CONFLICT (md5(system)) DO UPDATE SET num = systems.num + 1
+                          RETURNING identifier""",
+                       (p, int(deg)))
+        id = cursor.fetchone()[0]
+        cursor.execute("""INSERT INTO tracking (origin, destination, count) VALUES (%s, %s, 1)
+                          ON CONFLICT (origin, destination) DO UPDATE SET count = tracking.count + 1""",
+                       (origin, id))
+    conn.commit()
+
+def stage3(system, simplifications, origin):
+    eqns,s = simplifyIdeal(system)
+    simplifications = simplifications + normalize(s)
+    eqns = normalize(dropZeros(eqns))
+    if len(eqns) == 0:
+        insert_into_systems(eqns, simplifications, origin)
+        return
+    if any(eqn == 1 for eqn in eqns):
+        # the system is inconsistent and needs no further processing
+        return
+    list_of_systems = optimized_build_systems(eqns, parallel=False)
+    if len(list_of_systems) == 1:
+        insert_into_systems(eqns, simplifications, origin)
+    else:
+        for system in list_of_systems:
+            stage3(system, simplifications, origin)
+
+
+def SQL_stage3_single_thread():
+    with conn.cursor() as cursor:
+        while True:
+            # This post explains the subquery and the use of "FOR UPDATE SKIP LOCKED"
+            # https://dba.stackexchange.com/a/69497
+            cursor.execute("""UPDATE stage2
+                              SET current_status = 'running', pid = %s, node = %s
+                              WHERE identifier = (
+                                  SELECT identifier
+                                  FROM stage2
+                                  WHERE current_status = 'queued'
+                                  ORDER BY identifier
+                                  LIMIT 1
+                                  FOR UPDATE SKIP LOCKED
+                                  )
+                              RETURNING system, identifier""", (os.getpid(), os.uname()[1]) )
+            conn.commit()
+            if cursor.rowcount == 0:
+                break
+            pickled_system, identifier = cursor.fetchone()
+            try:
+                start_time = time.time()
+                print('Unpickling stage 2 system', identifier)
+                system_pair = unpickle(pickled_system)
+
+                stage3(system_pair[0], system_pair[1], identifier)
+
+                memory_utilization = psutil.Process(os.getpid()).memory_info().rss
+                cpu_time = datetime.timedelta(seconds = time.time() - start_time)
+                cursor.execute("""UPDATE stage2
+                                  SET current_status = 'finished',
+                                      cpu_time = %s,
+                                      memory_utilization = %s
+                                  WHERE system = %s""", (cpu_time, memory_utilization, pickled_system))
+                conn.commit()
+            except:
+                conn.rollback()
+                cursor.execute("""UPDATE stage2
+                                  SET current_status = 'interrupted'
+                                  WHERE identifier = %s""", (identifier,))
+                conn.commit()
+                raise
+
+            # keep our memory down by clearing our cached polynomials
+            persistent_data.clear()
+            persistent_data_inverse.clear()
+
+def SQL_stage3(max_workers = 12):
+    with concurrent.futures.ProcessPoolExecutor(max_workers=max_workers, initializer=process_pool_initializer) as executor:
+        futures = [executor.submit(SQL_stage3_single_thread) for _ in range(max_workers)]
+        for future in futures:
+            future.add_done_callback(done_callback)
+        num_completed = 0
+        while num_completed < max_workers:
+            concurrent.futures.wait(futures, timeout=1)
+            num_completed = tuple(future.done() for future in futures).count(True)
+    for future in futures:
+        future.result()
 
 def SQL_stage1(eqns):
     save_global(eqns[0].parent())
