@@ -1778,6 +1778,10 @@ def SQL_stage2():
                               WHERE system = %s""", (cpu_time, memory_utilization, pickled_system))
             conn.commit()
 
+            # keep our memory down by clearing our cached polynomials
+            persistent_data.clear()
+            persistent_data_inverse.clear()
+
 def SQL_stage1(eqns):
     save_global(eqns[0].parent())
     eqns_factors = parallel_factor_eqns(eqns)
