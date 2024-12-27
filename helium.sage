@@ -1864,19 +1864,26 @@ def SQL_stage3_single_thread():
             pickled_system, identifier = cursor.fetchone()
             try:
                 start_time = time.time()
-                print('Unpickling stage 2 system', identifier)
+                print('Starting stage 2 system', identifier)
                 system_pair = unpickle(pickled_system)
+                time2 = time.time()
 
                 stage3(system_pair[0], system_pair[1], identifier)
 
+                time3 = time.time()
                 memory_utilization = psutil.Process(os.getpid()).memory_info().rss
-                cpu_time = datetime.timedelta(seconds = time.time() - start_time)
+                cpu_time = datetime.timedelta(seconds = time3 - start_time)
                 cursor.execute("""UPDATE stage2
                                   SET current_status = 'finished',
                                       cpu_time = %s,
                                       memory_utilization = %s
                                   WHERE system = %s""", (cpu_time, memory_utilization, pickled_system))
                 conn.commit()
+
+                unpickle_time = datetime.timedelta(seconds = time2 - start_time)
+                stage3_time = datetime.timedelta(seconds = time3 - time2)
+                commit_time = datetime.timedelta(seconds = time.time() - time3)
+                print('Finished stage 2 system', identifier, 'unpickle time:', unpickle_time, 'stage3 time:', stage3_time, 'commit time:', commit_time)
             except:
                 conn.rollback()
                 cursor.execute("""UPDATE stage2
