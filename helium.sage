@@ -1650,7 +1650,8 @@ def load_systems():
 
 def done_callback(future):
     if future.exception():
-        print(*traceback.format_exception(future.exception()))
+        # I'm not sure what to do here to get a full traceback printed
+        traceback.print_exception(None, future.exception(), None)
 
 def simplifyIdeal4(eqns, simplifications=tuple(), depth=1):
     #print('simplifyIdeal4:', eqns, simplifications)
