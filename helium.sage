@@ -1794,28 +1794,31 @@ def SQL_stage2():
 
 
 def insert_into_systems(system, simplifications, origin):
-    for eqn in system:
-        save_global(eqn)
-    for eqn in simplifications:
-        save_global(eqn)
+    # improve efficiency: don't dump globals, just encode the polynomials into the "systems" table
+    #for eqn in system:
+    #    save_global(eqn)
+    #for eqn in simplifications:
+    #    save_global(eqn)
     p = persistent_pickle((system, simplifications))
     if len(system) == 0:
         deg = 1
     else:
         deg = max(p.degree() for p in system)
     with conn.cursor() as cursor:
-        #cursor.execute("INSERT INTO systems (system, degree, num, current_status) VALUES (%s, %s, 0, 'queued') ON CONFLICT DO NOTHING",
-        #               (p, deg))
-        #cursor.execute("SELECT identifier FROM systems WHERE system = %s", (p,))
+        # improve efficiency: don't do "tracking"
+        #cursor.execute("""INSERT INTO systems (system, degree, num, current_status) VALUES (%s, %s, 1, 'queued')
+        #                  ON CONFLICT (md5(system)) DO UPDATE SET num = systems.num + 1
+        #                  RETURNING identifier""",
+        #               (p, int(deg)))
+        #id = cursor.fetchone()[0]
+        #cursor.execute("""INSERT INTO tracking (origin, destination, count) VALUES (%s, %s, 1)
+        #                  ON CONFLICT (origin, destination) DO UPDATE SET count = tracking.count + 1""",
+        #               (origin, id))
         cursor.execute("""INSERT INTO systems (system, degree, num, current_status) VALUES (%s, %s, 1, 'queued')
-                          ON CONFLICT (md5(system)) DO UPDATE SET num = systems.num + 1
-                          RETURNING identifier""",
+                          ON CONFLICT (md5(system)) DO UPDATE SET num = systems.num + 1""",
                        (p, int(deg)))
-        id = cursor.fetchone()[0]
-        cursor.execute("""INSERT INTO tracking (origin, destination, count) VALUES (%s, %s, 1)
-                          ON CONFLICT (origin, destination) DO UPDATE SET count = tracking.count + 1""",
-                       (origin, id))
-    conn.commit()
+    # improve efficiency: don't commit until we're all done this stage2 system (the commit is in SQL_stage3_single_thread)
+    #conn.commit()
 
 def stage3(system, simplifications, origin):
     eqns,s = simplifyIdeal(system)
