@@ -1527,6 +1527,8 @@ CREATE TABLE globals (            -- this table contains the pickled rings, to k
 -- Making "pickle" unique causes the resulting index to exceed a PostgreSQL limit, so we make the md5 hash unique instead.
 
 CREATE UNIQUE INDEX ON globals(md5(pickle));
+
+CREATE INDEX ON globals(identifier);
 '''
 
 def delete_database():
@@ -1545,15 +1547,18 @@ persistent_data = {}
 persistent_data_inverse = {}
 
 def save_global(obj):
+    if obj in persistent_data_inverse:
+        return
     p = persistent_pickle(obj)
-    with conn.cursor() as cursor:
-        cursor.execute("INSERT INTO globals (pickle) VALUES (%s) ON CONFLICT DO NOTHING", (p,))
-    conn.commit()
-    with conn.cursor() as cursor:
-        cursor.execute("SELECT identifier FROM globals WHERE pickle = %s", (p,))
-        id = cursor.fetchone()[0]
-        persistent_data[str(id)] = obj
-        persistent_data_inverse[obj] = str(id)
+    # See this stackoverflow post: https://stackoverflow.com/questions/34708509/how-to-use-returning-with-on-conflict-in-postgresql
+    # for issues with the simple "ON CONFLICT DO NOTHING RETURNING identifier"
+    with conn:
+        with conn.cursor() as cursor:
+            cursor.execute("INSERT INTO globals (pickle) VALUES (%s) ON CONFLICT DO NOTHING", (p,))
+            cursor.execute("SELECT identifier FROM globals WHERE pickle = %s", (p,))
+            id = cursor.fetchone()[0]
+            persistent_data[str(id)] = obj
+            persistent_data_inverse[obj] = str(id)
 
 def load_globals():
     with conn.cursor() as cursor:
@@ -1793,21 +1798,28 @@ def SQL_stage2():
             persistent_data.clear()
             persistent_data_inverse.clear()
 
+# I'm experimenting with turning these on or off for efficiency
+#
+# We can dump polynomials to the SQL table 'globals' and only store persistent ids in the 'systems' table.
+# This saves disk space because duplicate polynomials are only stored once.
+#
+# We can save tracking information that tracks which systems came from which stage2 systems.
+
+dump_polynomials_to_globals_table = True
+tracking = True
 
 def insert_into_systems(system, simplifications, origin):
-    # improve efficiency: don't dump globals, just encode the polynomials into the "systems" table
-    #for eqn in system:
-    #    save_global(eqn)
-    #for eqn in simplifications:
-    #    save_global(eqn)
+    if dump_polynomials_to_globals_table:
+        for eqn in system:
+            save_global(eqn)
+        for eqn in simplifications:
+            save_global(eqn)
     p = persistent_pickle((system, simplifications))
     if len(system) == 0:
         deg = 1
     else:
         deg = max(p.degree() for p in system)
     with conn.cursor() as cursor:
-        # improve efficiency: don't do "tracking"
-        tracking = True
         if tracking:
             cursor.execute("""INSERT INTO systems (system, degree, num, current_status) VALUES (%s, %s, 1, 'queued')
                               ON CONFLICT (md5(system)) DO UPDATE SET num = systems.num + 1
