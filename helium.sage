@@ -1806,17 +1806,20 @@ def insert_into_systems(system, simplifications, origin):
         deg = max(p.degree() for p in system)
     with conn.cursor() as cursor:
         # improve efficiency: don't do "tracking"
-        #cursor.execute("""INSERT INTO systems (system, degree, num, current_status) VALUES (%s, %s, 1, 'queued')
-        #                  ON CONFLICT (md5(system)) DO UPDATE SET num = systems.num + 1
-        #                  RETURNING identifier""",
-        #               (p, int(deg)))
-        #id = cursor.fetchone()[0]
-        #cursor.execute("""INSERT INTO tracking (origin, destination, count) VALUES (%s, %s, 1)
-        #                  ON CONFLICT (origin, destination) DO UPDATE SET count = tracking.count + 1""",
-        #               (origin, id))
-        cursor.execute("""INSERT INTO systems (system, degree, num, current_status) VALUES (%s, %s, 1, 'queued')
-                          ON CONFLICT (md5(system)) DO UPDATE SET num = systems.num + 1""",
-                       (p, int(deg)))
+        tracking = True
+        if tracking:
+            cursor.execute("""INSERT INTO systems (system, degree, num, current_status) VALUES (%s, %s, 1, 'queued')
+                              ON CONFLICT (md5(system)) DO UPDATE SET num = systems.num + 1
+                              RETURNING identifier""",
+                           (p, int(deg)))
+            id = cursor.fetchone()[0]
+            cursor.execute("""INSERT INTO tracking (origin, destination, count) VALUES (%s, %s, 1)
+                              ON CONFLICT (origin, destination) DO UPDATE SET count = tracking.count + 1""",
+                           (origin, id))
+        else:
+            cursor.execute("""INSERT INTO systems (system, degree, num, current_status) VALUES (%s, %s, 1, 'queued')
+                              ON CONFLICT (md5(system)) DO UPDATE SET num = systems.num + 1""",
+                           (p, int(deg)))
     # improve efficiency: don't commit until we're all done this stage2 system (the commit is in SQL_stage3_single_thread)
     #conn.commit()
 
