@@ -1227,13 +1227,17 @@ def parallel_factor_eqns(eqns):
     print()
     return tuple(tuple(f for f,m in future.result()) for future in futures)
 
-def optimized_build_systems(eqns, parallel=True):
+def optimized_build_systems(eqns, parallel=True, stats=None):
+    time1 = time.time()
     if not parallel:
         eqns_factors = tuple(tuple(f for f,m in factor(eqn)) for eqn in eqns)
         num_threads = 1
     else:
         eqns_factors = parallel_factor_eqns(eqns)
         num_threads = 12
+    time2 = time.time()
+    if stats:
+        stats['factor_time'] += time2-time1
     all_factors = tuple(set(f for l in eqns_factors for f in l))
     proc = subprocess.Popen(['./build_systems', str(num_threads)], stdin=subprocess.PIPE, stdout=subprocess.PIPE)
     # build_systems reads all of its stdin before outputting anything, so there's no danger of stdin blocking here.
@@ -1245,6 +1249,9 @@ def optimized_build_systems(eqns, parallel=True):
     # So we read proc.stdout first, then wait for the subprocess to terminate.
     retval = tuple(tuple(all_factors[i] for i in FrozenBitset(bs.decode().strip())) for bs in proc.stdout)
     proc.wait()
+    time3 = time.time()
+    if stats:
+        stats['build_systems_time'] += time3-time2
     if proc.returncode != 0:
         raise subprocess.CalledProcessError(proc.returncode, './build_systems')
     return retval
@@ -1526,7 +1533,10 @@ CREATE TABLE tracking (
 
 CREATE UNIQUE INDEX ON tracking(origin, destination);
 
-CREATE TABLE globals (            -- this table contains the pickled rings, to keep down the size of the pickled polynomials
+-- This table contains pickled rings and pickled polynomials, to keep down the size of the pickled systems.
+-- We expect lots of duplicate polynomials, so we only want to store each one once.
+
+CREATE TABLE globals (
       identifier INTEGER GENERATED ALWAYS AS IDENTITY,
       pickle BYTEA
 );
@@ -1536,6 +1546,19 @@ CREATE TABLE globals (            -- this table contains the pickled rings, to k
 CREATE UNIQUE INDEX ON globals(md5(pickle));
 
 CREATE INDEX ON globals(identifier);
+
+CREATE TABLE stage3_stats (
+      identifier INTEGER,
+      node VARCHAR,
+      pid INTEGER,
+      unpickle_time INTERVAL,
+      factor_time INTERVAL,
+      build_systems_time INTERVAL,
+      save_global_time INTERVAL,
+      simplifyIdeal_time INTERVAL,
+      insert_into_systems_time INTERVAL,
+      total_time INTERVAL
+);
 '''
 
 def delete_database():
@@ -1815,12 +1838,16 @@ def SQL_stage2():
 dump_polynomials_to_globals_table = True
 tracking = True
 
-def insert_into_systems(system, simplifications, origin):
+def insert_into_systems(system, simplifications, origin, stats=None):
+    time1 = time.time()
     if dump_polynomials_to_globals_table:
         for eqn in system:
             save_global(eqn)
         for eqn in simplifications:
             save_global(eqn)
+    time2 = time.time()
+    if stats:
+        stats['save_global_time'] += time2-time1
     p = persistent_pickle((system, simplifications))
     if len(system) == 0:
         deg = 1
@@ -1842,23 +1869,30 @@ def insert_into_systems(system, simplifications, origin):
                            (p, int(deg)))
     # improve efficiency: don't commit until we're all done this stage2 system (the commit is in SQL_stage3_single_thread)
     #conn.commit()
+    time3 = time.time()
+    if stats:
+        stats['insert_into_systems_time'] += time3-time2
 
-def stage3(system, simplifications, origin):
+def stage3(system, simplifications, origin, stats=None):
+    time1 = time.time()
     eqns,s = simplifyIdeal(system)
+    time2 = time.time()
+    if stats:
+        stats['simplifyIdeal_time'] += time2 - time1
     simplifications = simplifications + normalize(s)
     eqns = normalize(dropZeros(eqns))
     if len(eqns) == 0:
-        insert_into_systems(eqns, simplifications, origin)
+        insert_into_systems(eqns, simplifications, origin, stats=stats)
         return
     if any(eqn == 1 for eqn in eqns):
         # the system is inconsistent and needs no further processing
         return
-    list_of_systems = optimized_build_systems(eqns, parallel=False)
+    list_of_systems = optimized_build_systems(eqns, parallel=False, stats=stats)
     if len(list_of_systems) == 1:
-        insert_into_systems(eqns, simplifications, origin)
+        insert_into_systems(eqns, simplifications, origin, stats=stats)
     else:
         for system in list_of_systems:
-            stage3(system, simplifications, origin)
+            stage3(system, simplifications, origin, stats=stats)
 
 
 def SQL_stage3_single_thread():
@@ -1882,16 +1916,27 @@ def SQL_stage3_single_thread():
                 break
             pickled_system, identifier = cursor.fetchone()
             try:
+                stats = {'identifier' : identifier,
+                         'pid' : os.getpid(),
+                         'node' : os.uname()[1],
+                         'unpickle_time' : 0,
+                         'factor_time' : 0,
+                         'insert_into_systems_time': 0,
+                         'build_systems_time' : 0,
+                         'save_global_time' : 0,
+                         'simplifyIdeal_time' : 0}
+
                 start_time = time.time()
                 print('Starting stage 2 system', identifier)
                 system_pair = unpickle(pickled_system)
-                time2 = time.time()
+                stats['unpickle_time'] = time.time() - start_time
 
-                stage3(system_pair[0], system_pair[1], identifier)
+                stage3(system_pair[0], system_pair[1], identifier, stats)
+                stats['total_time'] = time.time() - start_time
 
                 time3 = time.time()
                 memory_utilization = psutil.Process(os.getpid()).memory_info().rss
-                cpu_time = datetime.timedelta(seconds = time3 - start_time)
+                cpu_time = datetime.timedelta(seconds = stats['total_time'])
                 cursor.execute("""UPDATE stage2
                                   SET current_status = 'finished',
                                       cpu_time = %s,
@@ -1899,10 +1944,13 @@ def SQL_stage3_single_thread():
                                   WHERE system = %s""", (cpu_time, memory_utilization, pickled_system))
                 conn.commit()
 
-                unpickle_time = datetime.timedelta(seconds = time2 - start_time)
-                stage3_time = datetime.timedelta(seconds = time3 - time2)
-                commit_time = datetime.timedelta(seconds = time.time() - time3)
-                print('Finished stage 2 system', identifier, 'unpickle time:', unpickle_time, 'stage3 time:', stage3_time, 'commit time:', commit_time)
+                for k in stats:
+                    if k.endswith('_time'):
+                        stats[k] = datetime.timedelta(seconds = stats[k])
+                cursor.execute(f"INSERT INTO stage3_stats ({','.join(stats.keys())}) VALUES %s", (tuple(stats.values()),))
+                conn.commit()
+
+                print('Finished stage 2 system', identifier)
             except KeyboardInterrupt:
                 conn.rollback()
                 cursor.execute("""UPDATE stage2
