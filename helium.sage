@@ -2199,3 +2199,8 @@ def load_simplified_systems():
         for sys in cursor:
             retval.append(unpickle(sys[0]))
     return retval
+
+def get_system_sizes():
+    with conn.cursor() as cursor:
+        cursor.execute("SELECT identifier, length(system) FROM systems ORDER BY length(system)")
+        return [v for v in cursor]
