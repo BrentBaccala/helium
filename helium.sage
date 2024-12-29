@@ -133,8 +133,9 @@ except ModuleNotFoundError:
 
 def postgres_connect():
     try:
-        global conn
+        global conn, conn2
         conn = psycopg2.connect(**postgres_connection_parameters)
+        conn2 = psycopg2.connect(**postgres_connection_parameters)
     except psycopg2.OperationalError as ex:
         print('SQL OperationalError during connection attempt; no SQL database support')
     except NameError as ex:
@@ -1571,7 +1572,22 @@ def create_database():
         cursor.execute(sql_schema)
     conn.commit()
 
-# To keep the size of our pickled objects down, we don't pickle the ring that the polynomials come from.
+# To keep the size of our pickled objects down, we use the "persistent data" feature of the pickle
+# protocol, which allows objects to be tagged with an identifier string that is saved into
+# the pickle instead of the pickled object itself.
+#
+# We pickle the polynomials (and the ring that the polynomials come from) and save them in
+# a SQL table called 'globals', then use an integer in the table as the identifier string.
+#
+# We also have a UNIQUE constraint on the pickled data in 'globals' so that identical
+# polynomials are only stored once.
+#
+# Inserting polynomials into 'globals' during a long-running transaction creates deadlocks
+# on the 'globals' index if there are other processes doing the same thing.
+#
+# To avoid this, we do all of our 'globals' operations on a separate SQL connection (conn2)
+# and commit after every polynomial is inserted.  The long-running transaction is on the
+# original connection (conn).
 
 persistent_data = {}
 persistent_data_inverse = {}
@@ -1582,8 +1598,8 @@ def save_global(obj):
     p = persistent_pickle(obj)
     # See this stackoverflow post: https://stackoverflow.com/questions/34708509/how-to-use-returning-with-on-conflict-in-postgresql
     # for issues with the simple "ON CONFLICT DO NOTHING RETURNING identifier"
-    with conn:
-        with conn.cursor() as cursor:
+    with conn2:
+        with conn2.cursor() as cursor:
             cursor.execute("INSERT INTO globals (pickle) VALUES (%s) ON CONFLICT DO NOTHING", (p,))
             cursor.execute("SELECT identifier FROM globals WHERE pickle = %s", (p,))
             id = cursor.fetchone()[0]
@@ -1591,12 +1607,13 @@ def save_global(obj):
             persistent_data_inverse[obj] = str(id)
 
 def load_globals():
-    with conn.cursor() as cursor:
-        cursor.execute("SELECT identifier, pickle FROM globals")
-        for id, p in cursor:
-            obj = pickle.loads(p)
-            persistent_data[str(id)] = obj
-            persistent_data_inverse[obj] = str(id)
+    with conn2:
+        with conn2.cursor() as cursor:
+            cursor.execute("SELECT identifier, pickle FROM globals")
+            for id, p in cursor:
+                obj = pickle.loads(p)
+                persistent_data[str(id)] = obj
+                persistent_data_inverse[obj] = str(id)
 
 def persistent_id(obj):
     # It's hard to tell if an arbitrary Python object is hashable
@@ -1627,8 +1644,11 @@ def persistent_pickle(val):
     return src.getvalue()
 
 def persistent_load(id):
+    # We don't start a new transaction here "with conn2" because the unpickling step
+    # can trigger a recursive call to persistent_load while the transaction is still open,
+    # and that would fail.
     if id not in persistent_data:
-        with conn.cursor() as cursor:
+        with conn2.cursor() as cursor:
             cursor.execute("SELECT pickle FROM globals WHERE identifier = %s", (int(id),))
             if cursor.rowcount == 0:
                 raise pickle.UnpicklingError("Invalid persistent id")
@@ -1727,8 +1747,9 @@ def simplifyIdeal4(eqns, simplifications=tuple(), depth=1):
 def process_pool_initializer():
     # futures can't share the original SQL connection, so create a new one
     # We DON'T want to close the existing connection, since it's still being used by the parent process
-    global conn
+    global conn, conn2
     conn = psycopg2.connect(**postgres_connection_parameters)
+    conn2 = psycopg2.connect(**postgres_connection_parameters)
 
 def dump_bitset_to_SQL(origin, i):
     global bitsets
@@ -1867,8 +1888,10 @@ def insert_into_systems(system, simplifications, origin, stats=None):
             cursor.execute("""INSERT INTO systems (system, degree, num, current_status) VALUES (%s, %s, 1, 'queued')
                               ON CONFLICT (md5(system)) DO UPDATE SET num = systems.num + 1""",
                            (p, int(deg)))
-    # improve efficiency: don't commit until we're all done this stage2 system (the commit is in SQL_stage3_single_thread)
-    #conn.commit()
+    # We don't commit until we're all done this stage2 system (the commit is in SQL_stage3_single_thread)
+    # Not only does this improve efficiency, but it makes the entire processing step for one stage2 system
+    # atomic, which simplifies things.  If the processing step fails or is interrupted, it has to be completely
+    # re-run anyway, so in that case we just rollback the whole transaction.
     time3 = time.time()
     if stats:
         stats['insert_into_systems_time'] += time3-time2
