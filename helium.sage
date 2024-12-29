@@ -1923,16 +1923,28 @@ def SQL_stage3_single_thread():
             persistent_data_inverse.clear()
 
 def SQL_stage3(max_workers = 12):
-    with concurrent.futures.ProcessPoolExecutor(max_workers=max_workers, initializer=process_pool_initializer) as executor:
-        futures = [executor.submit(SQL_stage3_single_thread) for _ in range(max_workers)]
+    try:
+        with concurrent.futures.ProcessPoolExecutor(max_workers=max_workers, initializer=process_pool_initializer) as executor:
+            futures = [executor.submit(SQL_stage3_single_thread) for _ in range(max_workers)]
+            for future in futures:
+                future.add_done_callback(done_callback)
+            num_completed = 0
+            while num_completed < max_workers:
+                concurrent.futures.wait(futures, timeout=1)
+                num_completed = tuple(future.done() for future in futures).count(True)
         for future in futures:
-            future.add_done_callback(done_callback)
-        num_completed = 0
-        while num_completed < max_workers:
-            concurrent.futures.wait(futures, timeout=1)
-            num_completed = tuple(future.done() for future in futures).count(True)
-    for future in futures:
-        future.result()
+            future.result()
+    except:
+        # The only exception I've actually seen here is a BrokenProcessPool when my attempt to raise CalledProcessError
+        # in one of the futures failed due to a TypeError because I didn't call the BrokenProcessPool constructor correctly.
+        conn.rollback()
+        with conn.cursor() as cursor:
+            cursor.execute("""UPDATE stage2
+                              SET current_status = 'failed'
+                              WHERE current_status = 'running' AND node = %s""", (os.uname()[1],))
+        conn.commit()
+        raise
+
 
 def SQL_stage1(eqns):
     save_global(eqns[0].parent())
