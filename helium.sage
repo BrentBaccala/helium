@@ -1520,8 +1520,6 @@ CREATE TABLE stage2 (
       origin INTEGER,
       system BYTEA,               -- a pickle of a tuple pair of tuples of polynomials; the first complex, the second simple
       current_status status,
-      cpu_time INTERVAL,          -- I'm actually using this for wall time
-      memory_utilization BIGINT,
       node VARCHAR,
       pid INTEGER
 );
@@ -1558,7 +1556,8 @@ CREATE TABLE stage3_stats (
       save_global_time INTERVAL,
       simplifyIdeal_time INTERVAL,
       insert_into_systems_time INTERVAL,
-      total_time INTERVAL
+      total_time INTERVAL,
+      memory_utilization BIGINT
 );
 '''
 
@@ -1946,6 +1945,11 @@ def SQL_stage3_single_thread(requested_identifier=None):
                 break
             pickled_system, identifier = cursor.fetchone()
             try:
+                # The keys in this dictionary must match column names in the 'stage3_stats' SQL table
+                # The keys ending in '_time' are processed differently because they correspond to SQL INTERVALs;
+                # the other keys correspond to SQL INTEGERs, BIGINTs, or VARCHARs.  For the '_time' variables,
+                # we store seconds in the dictionary, then convert them to datetime.timedelta's right
+                # before we pass them to SQL.
                 stats = {'identifier' : identifier,
                          'pid' : os.getpid(),
                          'node' : os.uname()[1],
@@ -1962,22 +1966,21 @@ def SQL_stage3_single_thread(requested_identifier=None):
                 stats['unpickle_time'] = time.time() - start_time
 
                 stage3(system_pair[0], system_pair[1], identifier, stats)
-                stats['total_time'] = time.time() - start_time
 
-                time3 = time.time()
-                memory_utilization = psutil.Process(os.getpid()).memory_info().rss
-                cpu_time = datetime.timedelta(seconds = stats['total_time'])
                 cursor.execute("""UPDATE stage2
-                                  SET current_status = 'finished',
-                                      cpu_time = %s,
-                                      memory_utilization = %s
-                                  WHERE system = %s""", (cpu_time, memory_utilization, pickled_system))
-                conn.commit()
+                                  SET current_status = 'finished'
+                                  WHERE system = %s""", (pickled_system,))
+
+                stats['total_time'] = time.time() - start_time
+                stats['memory_utilization'] = psutil.Process(os.getpid()).memory_info().rss
 
                 for k in stats:
                     if k.endswith('_time'):
-                        stats[k] = datetime.timedelta(seconds = stats[k])
+                        stats[k] = datetime.timedelta(seconds = int(stats[k]))
                 cursor.execute(f"INSERT INTO stage3_stats ({','.join(stats.keys())}) VALUES %s", (tuple(stats.values()),))
+
+                # This is the end of a typically long-running transaction that started when we set current_status = 'running'
+                # and includes many INSERT statements that were generated during the call to stage3()
                 conn.commit()
 
                 print('Finished stage 2 system', identifier)
