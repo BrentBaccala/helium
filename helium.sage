@@ -2230,3 +2230,11 @@ def get_system_sizes():
     with conn.cursor() as cursor:
         cursor.execute("SELECT identifier, length(system) FROM systems ORDER BY length(system)")
         return [v for v in cursor]
+
+def SQL_stage3_reset():
+    with conn:
+        with conn.cursor() as cursor:
+            cursor.execute("DELETE FROM systems")
+            cursor.execute("DELETE FROM tracking")
+            cursor.execute("DELETE FROM stage3_stats")
+            cursor.execute("UPDATE stage2 SET current_status = 'queued', pid = NULL, node = NULL")
