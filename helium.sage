@@ -1895,23 +1895,30 @@ def stage3(system, simplifications, origin, stats=None):
             stage3(system, simplifications, origin, stats=stats)
 
 
-def SQL_stage3_single_thread():
+def SQL_stage3_single_thread(requested_identifier=None):
     with conn.cursor() as cursor:
         while True:
             # This post explains the subquery and the use of "FOR UPDATE SKIP LOCKED"
             # https://dba.stackexchange.com/a/69497
-            cursor.execute("""UPDATE stage2
-                              SET current_status = 'running', pid = %s, node = %s
-                              WHERE identifier = (
-                                  SELECT identifier
-                                  FROM stage2
-                                  WHERE current_status = 'queued' OR current_status = 'interrupted'
-                                  ORDER BY identifier
-                                  LIMIT 1
-                                  FOR UPDATE SKIP LOCKED
-                                  )
-                              RETURNING system, identifier""", (os.getpid(), os.uname()[1]) )
-            conn.commit()
+            if requested_identifier:
+                cursor.execute("""UPDATE stage2
+                                  SET current_status = 'running', pid = %s, node = %s
+                                  WHERE identifier = %s AND ( current_status = 'queued' OR current_status = 'interrupted' )
+                                  RETURNING system, identifier""", (os.getpid(), os.uname()[1], int(requested_identifier)) )
+                conn.commit()
+            else:
+                cursor.execute("""UPDATE stage2
+                                  SET current_status = 'running', pid = %s, node = %s
+                                  WHERE identifier = (
+                                      SELECT identifier
+                                      FROM stage2
+                                      WHERE current_status = 'queued' OR current_status = 'interrupted'
+                                      ORDER BY identifier
+                                      LIMIT 1
+                                      FOR UPDATE SKIP LOCKED
+                                      )
+                                  RETURNING system, identifier""", (os.getpid(), os.uname()[1]) )
+                conn.commit()
             if cursor.rowcount == 0:
                 break
             pickled_system, identifier = cursor.fetchone()
