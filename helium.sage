@@ -1235,12 +1235,19 @@ def optimized_build_systems(eqns, parallel=True):
         eqns_factors = parallel_factor_eqns(eqns)
         num_threads = 12
     all_factors = tuple(set(f for l in eqns_factors for f in l))
-    with subprocess.Popen(['./build_systems', str(num_threads)], stdin=subprocess.PIPE, stdout=subprocess.PIPE) as proc:
-        for l in sorted(eqns_factors, key=lambda x:len(x)):
-            proc.stdin.write(str(FrozenBitset(tuple(all_factors.index(f) for f in l), capacity=len(all_factors))).encode())
-            proc.stdin.write(b'\n')
-        proc.stdin.close()
-        return tuple(tuple(all_factors[i] for i in FrozenBitset(bs.decode().strip())) for bs in proc.stdout)
+    proc = subprocess.Popen(['./build_systems', str(num_threads)], stdin=subprocess.PIPE, stdout=subprocess.PIPE)
+    # build_systems reads all of its stdin before outputting anything, so there's no danger of stdin blocking here.
+    for l in sorted(eqns_factors, key=lambda x:len(x)):
+        proc.stdin.write(str(FrozenBitset(tuple(all_factors.index(f) for f in l), capacity=len(all_factors))).encode())
+        proc.stdin.write(b'\n')
+    proc.stdin.close()
+    # There is some concern that if we proc.wait() here, proc.stdout could fill with data and both processes will deadlock.
+    # So we read proc.stdout first, then wait for the subprocess to terminate.
+    retval = tuple(tuple(all_factors[i] for i in FrozenBitset(bs.decode().strip())) for bs in proc.stdout)
+    proc.wait()
+    if proc.returncode != 0:
+        raise subprocess.CalledProcessError(proc.returncode, './build_systems')
+    return retval
 
 def is_irreducible(eq):
     factors = factor(eq)
