@@ -1864,7 +1864,7 @@ def SQL_stage3_single_thread():
                               WHERE identifier = (
                                   SELECT identifier
                                   FROM stage2
-                                  WHERE current_status = 'queued'
+                                  WHERE current_status = 'queued' OR current_status = 'interrupted'
                                   ORDER BY identifier
                                   LIMIT 1
                                   FOR UPDATE SKIP LOCKED
@@ -1896,10 +1896,17 @@ def SQL_stage3_single_thread():
                 stage3_time = datetime.timedelta(seconds = time3 - time2)
                 commit_time = datetime.timedelta(seconds = time.time() - time3)
                 print('Finished stage 2 system', identifier, 'unpickle time:', unpickle_time, 'stage3 time:', stage3_time, 'commit time:', commit_time)
-            except:
+            except KeyboardInterrupt:
                 conn.rollback()
                 cursor.execute("""UPDATE stage2
                                   SET current_status = 'interrupted'
+                                  WHERE identifier = %s""", (identifier,))
+                conn.commit()
+                raise
+            except:
+                conn.rollback()
+                cursor.execute("""UPDATE stage2
+                                  SET current_status = 'failed'
                                   WHERE identifier = %s""", (identifier,))
                 conn.commit()
                 raise
