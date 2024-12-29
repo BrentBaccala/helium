@@ -1497,6 +1497,8 @@ CREATE TABLE systems (
       simplified_system BYTEA,    -- initially NULL; ultimately a pickle of a tuple of tuples of simplified systems
       current_status status,
       degree INTEGER,             -- the maximum degree of the polynomials in the system
+      npolys INTEGER,             -- the number of polynomials in the complex part of the system
+      nvars INTEGER,              -- the number of variables in the complex part of the system
       cpu_time INTERVAL,
       memory_utilization BIGINT,
       pid INTEGER,
@@ -1871,22 +1873,26 @@ def insert_into_systems(system, simplifications, origin, stats=None):
     p = persistent_pickle((system, simplifications))
     if len(system) == 0:
         deg = 1
+        npolys = 0
+        nvars = 0
     else:
         deg = max(p.degree() for p in system)
+        npolys = len(system)
+        nvars = len(set(v for p in system for v in p.variables()))
     with conn.cursor() as cursor:
         if tracking:
-            cursor.execute("""INSERT INTO systems (system, degree, num, current_status) VALUES (%s, %s, 1, 'queued')
+            cursor.execute("""INSERT INTO systems (system, degree, npolys, nvars, num, current_status) VALUES (%s, %s, %s, %s, 1, 'queued')
                               ON CONFLICT (md5(system)) DO UPDATE SET num = systems.num + 1
                               RETURNING identifier""",
-                           (p, int(deg)))
+                           (p, int(deg), int(npolys), int(nvars)))
             id = cursor.fetchone()[0]
             cursor.execute("""INSERT INTO tracking (origin, destination, count) VALUES (%s, %s, 1)
                               ON CONFLICT (origin, destination) DO UPDATE SET count = tracking.count + 1""",
                            (origin, id))
         else:
-            cursor.execute("""INSERT INTO systems (system, degree, num, current_status) VALUES (%s, %s, 1, 'queued')
+            cursor.execute("""INSERT INTO systems (system, degree, npolys, nvars, num, current_status) VALUES (%s, %s, %s, %s, 1, 'queued')
                               ON CONFLICT (md5(system)) DO UPDATE SET num = systems.num + 1""",
-                           (p, int(deg)))
+                           (p, int(deg), int(npolys), int(nvars)))
     # We don't commit until we're all done this stage2 system (the commit is in SQL_stage3_single_thread)
     # Not only does this improve efficiency, but it makes the entire processing step for one stage2 system
     # atomic, which simplifies things.  If the processing step fails or is interrupted, it has to be completely
