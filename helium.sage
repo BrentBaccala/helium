@@ -1506,6 +1506,7 @@ CREATE TABLE systems (
 );
 
 CREATE UNIQUE INDEX ON systems(md5(system));
+CREATE INDEX ON systems(identifier);
 
 CREATE TABLE stage1 (
       identifier INTEGER GENERATED ALWAYS AS IDENTITY,
@@ -2181,6 +2182,65 @@ def md5_test():
         cursor.execute("SELECT md5 FROM systems LIMIT 1;")
         for system in cursor:
             return system[0]
+
+def GTZ_single_threaded(requested_identifier=None):
+    while True:
+        with conn.cursor() as cursor:
+            if requested_identifier:
+                cursor.execute("""UPDATE systems
+                                  SET current_status = 'running', pid = %s
+                                  WHERE identifier = %s AND ( current_status = 'queued' OR current_status = 'interrupted' )
+                                  RETURNING system, identifier""", (os.getpid(), int(requested_identifier)) )
+                conn.commit()
+            else:
+                cursor.execute("""UPDATE systems
+                                  SET current_status = 'running', pid = %s
+                                  WHERE identifier = (
+                                      SELECT identifier
+                                      FROM systems
+                                      WHERE current_status = 'queued' OR current_status = 'interrupted'
+                                      ORDER BY identifier
+                                      LIMIT 1
+                                      FOR UPDATE SKIP LOCKED
+                                      )
+                                  RETURNING system, identifier""", (os.getpid(),) )
+                conn.commit()
+            if cursor.rowcount == 0:
+                break
+            pickled_system, identifier = cursor.fetchone()
+            try:
+                start_time = time.time()
+                print('Starting system', identifier)
+                system, simplifications = unpickle(pickled_system)
+                if len(system) == 0:
+                    subsystems = tuple((simplifyIdeal6(simplifications), ))
+                else:
+                    minimal_primes = ideal(system).minimal_associated_primes()
+                    subsystems = tuple(simplifyIdeal6(mp.gens() + simplifications) for mp in minimal_primes)
+                memory_utilization = psutil.Process(os.getpid()).memory_info().rss
+                cpu_time = datetime.timedelta(seconds = time.time() - start_time)
+                cursor.execute("""UPDATE systems
+                                  SET simplified_system = %s,
+                                      current_status = 'finished',
+                                      cpu_time = %s,
+                                      memory_utilization = %s
+                                  WHERE identifier = %s""", (persistent_pickle(subsystems), cpu_time, memory_utilization, identifier))
+                conn.commit()
+                print('Finished system', identifier)
+            except KeyboardInterrupt:
+                conn.rollback()
+                cursor.execute("""UPDATE systems
+                                  SET current_status = 'interrupted'
+                                  WHERE identifier = %s""", (identifier,))
+                conn.commit()
+                raise
+            except:
+                conn.rollback()
+                cursor.execute("""UPDATE systems
+                                  SET current_status = 'failed'
+                                  WHERE identifier = %s""", (identifier,))
+                conn.commit()
+                raise
 
 def concurrent_GTZ_everything():
     # futures can't share the original connection
