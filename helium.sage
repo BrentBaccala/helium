@@ -1501,6 +1501,7 @@ CREATE TABLE systems (
       nvars INTEGER,              -- the number of variables in the complex part of the system
       cpu_time INTERVAL,
       memory_utilization BIGINT,
+      node VARCHAR,
       pid INTEGER,
       num INTEGER                 -- the number of identical systems that have been found
 );
@@ -2130,7 +2131,7 @@ def simplifyIdeal6(I):
     # I should be a list or a tuple of polynomials, not an ideal
     # returns a list of equations after substituting zero for any variables that appear alone in the system
     #
-    # Maybe we could use the Singular version, but it's return convention is different
+    # Maybe we could use the Singular version, but its return convention is different
     #
     # try:
     #     from sage.libs.singular.function_factory import ff
@@ -2188,13 +2189,13 @@ def GTZ_single_threaded(requested_identifier=None):
         with conn.cursor() as cursor:
             if requested_identifier:
                 cursor.execute("""UPDATE systems
-                                  SET current_status = 'running', pid = %s
+                                  SET current_status = 'running', pid = %s, node = %s
                                   WHERE identifier = %s AND ( current_status = 'queued' OR current_status = 'interrupted' )
-                                  RETURNING system, identifier""", (os.getpid(), int(requested_identifier)) )
+                                  RETURNING system, identifier""", (os.getpid(), os.uname()[1], int(requested_identifier)) )
                 conn.commit()
             else:
                 cursor.execute("""UPDATE systems
-                                  SET current_status = 'running', pid = %s
+                                  SET current_status = 'running', pid = %s, node = %s
                                   WHERE identifier = (
                                       SELECT identifier
                                       FROM systems
@@ -2203,7 +2204,7 @@ def GTZ_single_threaded(requested_identifier=None):
                                       LIMIT 1
                                       FOR UPDATE SKIP LOCKED
                                       )
-                                  RETURNING system, identifier""", (os.getpid(),) )
+                                  RETURNING system, identifier""", (os.getpid(), os.uname()[1]) )
                 conn.commit()
             if cursor.rowcount == 0:
                 break
