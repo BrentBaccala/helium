@@ -2243,35 +2243,28 @@ def GTZ_single_threaded(requested_identifier=None):
                 conn.commit()
                 raise
 
-def concurrent_GTZ_everything():
-    # futures can't share the original connection
-    conn = psycopg2.connect(**postgres_connection_parameters)
-    while True:
+def GTZ_parallel(max_workers = 8):
+    try:
+        with concurrent.futures.ProcessPoolExecutor(max_workers=max_workers, initializer=process_pool_initializer) as executor:
+            futures = [executor.submit(GTZ_single_threaded) for _ in range(max_workers)]
+            for future in futures:
+                future.add_done_callback(done_callback)
+            num_completed = 0
+            while num_completed < max_workers:
+                concurrent.futures.wait(futures, timeout=1)
+                num_completed = tuple(future.done() for future in futures).count(True)
+        for future in futures:
+            future.result()
+    except:
+        # The only exception I've actually seen here is a BrokenProcessPool when my attempt to raise CalledProcessError
+        # in one of the futures failed due to a TypeError because I didn't call the BrokenProcessPool constructor correctly.
+        conn.rollback()
         with conn.cursor() as cursor:
             cursor.execute("""UPDATE systems
-                              SET current_status = 'running', pid = %s
-                              WHERE md5 = ( SELECT md5 FROM systems WHERE current_status = 'queued' ORDER BY degree LIMIT 1 )
-                              RETURNING md5, system""", (os.getpid(),) )
-            conn.commit()
-            if cursor.rowcount == 0:
-                break
-            md5, pickled_system = cursor.fetchone()
-            start_time = time.time()
-            system, simplifications = unpickle(pickled_system)
-            if len(system) == 0:
-                subsystems = tuple((simplifyIdeal6(simplifications), ))
-            else:
-                minimal_primes = ideal(system).minimal_associated_primes(algorithm=['GTZ', 'gtz', 'noFacstd'])
-                subsystems = tuple(simplifyIdeal6(mp.gens() + simplifications) for mp in minimal_primes)
-            memory_utilization = psutil.Process(os.getpid()).memory_info().rss
-            cpu_time = datetime.timedelta(seconds = time.time() - start_time)
-            cursor.execute("""UPDATE systems
-                              SET simplified_system = %s,
-                                  current_status = 'finished',
-                                  cpu_time = %s,
-                                  memory_utilization = %s
-                              WHERE md5 = %s""", (persistent_pickle(subsystems), cpu_time, memory_utilization, md5))
-            conn.commit()
+                              SET current_status = 'failed'
+                              WHERE current_status = 'running' AND node = %s""", (os.uname()[1],))
+        conn.commit()
+        raise
 
 def list_systems():
     with conn.cursor() as cursor:
