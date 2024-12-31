@@ -2218,6 +2218,9 @@ def GTZ_single_threaded(requested_identifier=None):
                 else:
                     minimal_primes = ideal(system).minimal_associated_primes()
                     subsystems = tuple(simplifyIdeal6(mp.gens() + simplifications) for mp in minimal_primes)
+                for ss in subsystems:
+                    for p in ss:
+                        save_global(p)
                 memory_utilization = psutil.Process(os.getpid()).memory_info().rss
                 cpu_time = datetime.timedelta(seconds = time.time() - start_time)
                 cursor.execute("""UPDATE systems
@@ -2298,3 +2301,8 @@ def SQL_stage3_reset():
             cursor.execute("DELETE FROM tracking")
             cursor.execute("DELETE FROM stage3_stats")
             cursor.execute("UPDATE stage2 SET current_status = 'queued', pid = NULL, node = NULL")
+
+def SQL_GTZ_reset():
+    with conn:
+        with conn.cursor() as cursor:
+            cursor.execute("UPDATE systems SET current_status = 'queued', pid = NULL, node = NULL, simplified_system = NULL WHERE current_status != 'queued'")
