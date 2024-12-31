@@ -1507,7 +1507,14 @@ CREATE TABLE systems (
 );
 
 CREATE UNIQUE INDEX ON systems(md5(system));
+
+-- this next index doesn't help GTZ_single_threaded very much
+-- CREATE INDEX ON systems(current_status, identifier);
+-- this index helps GTZ_single_threaded at first, but after a while isn't as useful without the next one
+-- we need both, it seems
 CREATE INDEX ON systems(identifier);
+-- this index does help GTZ_single_threaded quite a bit
+CREATE INDEX ON systems(identifier) where current_status = 'queued' or current_status = 'interrupted';
 
 CREATE TABLE stage1 (
       identifier INTEGER GENERATED ALWAYS AS IDENTITY,
