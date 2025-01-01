@@ -2318,6 +2318,12 @@ def load_simplified_systems():
             retval.append(unpickle(sys[0]))
     return retval
 
+def load_simplified_ideal(identifier):
+    with conn:
+        with conn.cursor() as cursor:
+            cursor.execute("SELECT ideal FROM simplified_ideals WHERE identifier = %s", (int(identifier),))
+            return unpickle(cursor.fetchone()[0])
+
 def get_system_sizes():
     with conn.cursor() as cursor:
         cursor.execute("SELECT identifier, length(system) FROM systems ORDER BY length(system)")
