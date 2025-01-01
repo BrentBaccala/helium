@@ -1491,6 +1491,15 @@ def simplifyIdeal2(I):
 sql_schema='''
 CREATE TYPE status AS ENUM ('queued', 'running', 'finished', 'interrupted', 'failed');
 
+CREATE TABLE simplified_ideals (
+      identifier INTEGER GENERATED ALWAYS AS IDENTITY,
+      ideal BYTEA,                -- a pickle of a tuple of polynomials
+      degree INTEGER,             -- the maximum degree of the polynomials in the ideal
+      num INTEGER
+);
+
+CREATE UNIQUE INDEX ON simplified_ideals(md5(ideal));
+
 CREATE TABLE systems (
       identifier INTEGER GENERATED ALWAYS AS IDENTITY,
       system BYTEA,               -- a pickle of a tuple pair of tuples of polynomials; the first complex, the second simple
@@ -1539,6 +1548,11 @@ CREATE TABLE tracking (
       origin INTEGER,
       destination INTEGER,
       count INTEGER
+);
+
+CREATE TABLE tracking2 (
+      origin INTEGER,
+      destination INTEGER
 );
 
 CREATE UNIQUE INDEX ON tracking(origin, destination);
@@ -2228,14 +2242,22 @@ def GTZ_single_threaded(requested_identifier=None):
                 for ss in subsystems:
                     for p in ss:
                         save_global(p)
+                    degree = max(p.degree() for p in ss)
+                    p = persistent_pickle(ss)
+                    cursor.execute("""INSERT INTO simplified_ideals (ideal, degree, num) VALUES (%s, %s, 1)
+                                      ON CONFLICT (md5(ideal)) DO UPDATE SET num = simplified_ideals.num + 1
+                                      RETURNING identifier""",
+                                   (p, int(degree)))
+                    id = cursor.fetchone()[0]
+                    cursor.execute("""INSERT INTO tracking2 (origin, destination) VALUES (%s, %s)""",
+                                   (identifier, id))
                 memory_utilization = psutil.Process(os.getpid()).memory_info().rss
                 cpu_time = datetime.timedelta(seconds = time.time() - start_time)
                 cursor.execute("""UPDATE systems
-                                  SET simplified_system = %s,
-                                      current_status = 'finished',
+                                  SET current_status = 'finished',
                                       cpu_time = %s,
                                       memory_utilization = %s
-                                  WHERE identifier = %s""", (persistent_pickle(subsystems), cpu_time, memory_utilization, identifier))
+                                  WHERE identifier = %s""", (cpu_time, memory_utilization, identifier))
                 conn.commit()
                 print('Finished system', identifier)
             except KeyboardInterrupt:
@@ -2312,4 +2334,6 @@ def SQL_stage3_reset():
 def SQL_GTZ_reset():
     with conn:
         with conn.cursor() as cursor:
-            cursor.execute("UPDATE systems SET current_status = 'queued', pid = NULL, node = NULL, simplified_system = NULL WHERE current_status != 'queued'")
+            cursor.execute("""UPDATE systems
+                              SET current_status = 'queued', pid = NULL, node = NULL, simplified_system = NULL
+                              WHERE current_status != 'queued'""")
