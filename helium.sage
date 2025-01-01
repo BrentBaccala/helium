@@ -1493,7 +1493,7 @@ CREATE TYPE status AS ENUM ('queued', 'running', 'finished', 'interrupted', 'fai
 
 CREATE TABLE simplified_ideals (
       identifier INTEGER GENERATED ALWAYS AS IDENTITY,
-      ideal BYTEA,                -- a pickle of a tuple of polynomials
+      ideal BYTEA,                -- a pickle of a list of polynomials
       degree INTEGER,             -- the maximum degree of the polynomials in the ideal
       num INTEGER
 );
@@ -2243,7 +2243,7 @@ def GTZ_single_threaded(requested_identifier=None):
                     for p in ss:
                         save_global(p)
                     degree = max(p.degree() for p in ss)
-                    p = persistent_pickle(ss)
+                    p = persistent_pickle(sorted(ss))
                     cursor.execute("""INSERT INTO simplified_ideals (ideal, degree, num) VALUES (%s, %s, 1)
                                       ON CONFLICT (md5(ideal)) DO UPDATE SET num = simplified_ideals.num + 1
                                       RETURNING identifier""",
