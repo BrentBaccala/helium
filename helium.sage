@@ -2343,3 +2343,6 @@ def SQL_GTZ_reset():
             cursor.execute("""UPDATE systems
                               SET current_status = 'queued', pid = NULL, node = NULL, simplified_system = NULL
                               WHERE current_status != 'queued'""")
+            cursor.execute("DELETE FROM tracking2")
+            cursor.execute("DELETE FROM simplified_ideals")
+
