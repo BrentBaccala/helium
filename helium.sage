@@ -1421,41 +1421,48 @@ def latex_array(eqns):
 # q()v+p()=0, which can be split into two systems, one where q and p are both zero,
 # and the other where v=-p/q.
 
-def simplifyIdeal(I):
-    # I should be a list or a tuple, not an ideal
-    # returns a pair: a list of equations and a list of substitutions
-    # The substitutions are equations with a simple linear term that were eliminated from the first list of equations
+try:
+    # This version of simplifyIdeal (the fastest) requires the input to be a list, not a tuple,
+    # and returns a modified version of that list.
+    from sage.rings.polynomial.multi_polynomial_ideal_libsingular import simplifyIdeal_libsingular as simplifyIdeal
+except ImportError:
     try:
         from sage.libs.singular.function_factory import ff
-        singularSimplifyIdeal = ff.primdec__lib.simplifyIdealBWB
-        return singularSimplifyIdeal(ideal(I))
+        singularSimplifyIdeal = ff.simplifyIdeal__lib.simplifyIdealBWB
+        def simplifyIdeal(I):
+            return singularSimplifyIdeal(ideal(I))
+        print("Optimized simplifyIdeal not available; failing back on Singular version")
     except NameError:
-        print("Singular simplifyIdealBWB not available; falling back on slow Python version")
-    simplifications = []
-    for v in I[0].parent().gens():
-        for p in I:
-            if p == 0:
-                pass
-            elif p/p.lc() == v:
-                #print(v, "=", 0)
-                I = tuple(map(lambda p: p.subs({v: 0}), I))
-                simplifications.append(v)
-            elif p.degree(v) == 1:
-                q,r = p.quo_rem(v)
-                if r == 0:
-                    # We should pick this up case with another run through optimized_build_systems
-                    # print("reducible polynomial detected")
-                    pass
-                elif q.is_constant() and r.number_of_terms() == 1:
-                    # polynomial is qv+r; qv+r=0; replace v with -r/q
-                    #print(v, "=", -r/q)
-                    #start_time = time.time()
-                    I = tuple(map(lambda p: p.subs({v: -r/q}), I))
-                    #execution_time = time.time() - start_time
-                    #print(f'subs done in {execution_time} seconds')
-                    simplifications.append(q*v+r)
-                    break
-    return I,tuple(simplifications)
+        print("Neither optimized nor Singular simplifyIdealBWB available; falling back on slow Python version")
+        def simplifyIdeal(I):
+            # I should be a list or a tuple, not an ideal
+            # returns a pair: a list of equations and a list of substitutions
+            # The substitutions are equations with a simple linear term that were eliminated from the first list of equations
+            simplifications = []
+            for v in I[0].parent().gens():
+                for p in I:
+                    if p == 0:
+                        pass
+                    elif p/p.lc() == v:
+                        #print(v, "=", 0)
+                        I = tuple(map(lambda p: p.subs({v: 0}), I))
+                        simplifications.append(v)
+                    elif p.degree(v) == 1:
+                        q,r = p.quo_rem(v)
+                        if r == 0:
+                            # We should pick this up case with another run through optimized_build_systems
+                            # print("reducible polynomial detected")
+                            pass
+                        elif q.is_constant() and r.number_of_terms() == 1:
+                            # polynomial is qv+r; qv+r=0; replace v with -r/q
+                            #print(v, "=", -r/q)
+                            #start_time = time.time()
+                            I = tuple(map(lambda p: p.subs({v: -r/q}), I))
+                            #execution_time = time.time() - start_time
+                            #print(f'subs done in {execution_time} seconds')
+                            simplifications.append(q*v+r)
+                            break
+            return I,tuple(simplifications)
 
 def simplifyIdeal2(I):
     # I should be a list or a tuple, not an ideal
@@ -1926,7 +1933,7 @@ def insert_into_systems(system, simplifications, origin, stats=None):
 
 def stage3(system, simplifications, origin, stats=None):
     time1 = time.time()
-    eqns,s = simplifyIdeal(system)
+    eqns,s = simplifyIdeal(list(system))
     time2 = time.time()
     if stats:
         stats['simplifyIdeal_time'] += time2 - time1

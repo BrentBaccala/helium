@@ -1,0 +1,67 @@
+// A variation of the simplifyIdeal routine in Singular's primdec.lib
+//
+// This version removes the substituted variables completely from the ideal, and returns in a slightly different
+// format more amenable to Sage's python interface.
+
+proc simplifyIdealBWB(ideal i)
+{
+  ASSUME(1, hasFieldCoefficient(basering) );
+  ASSUME(1, hasGlobalOrdering(basering) ) ;
+
+  def r=basering;
+
+  ideal iwork=i;
+
+  int j,k;
+  int t;
+  map phi;
+  poly p;
+  ideal imap1=maxideal(1);
+  list l;
+  // first try: very simple substitutions
+  intvec tested=0:nvars(r);
+  for(j=1;j<=nvars(r);j++)
+  {
+    for(k=1;k<=ncols(i);k++)
+    {
+      if(deg(iwork[k]/var(j))==0)
+      {
+        p=-1/leadcoef(iwork[k]/var(j))*iwork[k];
+        if(size(p)<=2)
+        {
+          tested[j]=1;
+          imap1[j]=p+var(j);
+          phi=r,imap1;
+          iwork=phi(iwork);
+          iwork[k]=0;
+          l = l + list(p);
+          imap1=maxideal(1);
+          break;
+        }
+      }
+    }
+  }
+  // second try: substitutions not so simple
+  for(j=1;j<=nvars(r);j++)
+  {
+    if (tested[j]==0)
+    {
+      for(k=1;k<=ncols(i);k++)
+      {
+        if(deg(iwork[k]/var(j))==0)
+        {
+          p=-1/leadcoef(iwork[k]/var(j))*iwork[k];
+          imap1[j]=p+2*var(j);
+          phi=r,imap1;
+          iwork=phi(iwork);
+          iwork=subst(iwork,var(j),0);
+          iwork[k]=0;
+          imap1=maxideal(1);
+          l = l + list(p);
+          break;
+        }
+      }
+    }
+  }
+  return(list(iwork,l));
+}
