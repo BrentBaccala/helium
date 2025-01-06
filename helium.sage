@@ -8,7 +8,7 @@
 # load('helium.sage')
 # prep_hydrogen(5)
 # init()
-# ideal(eqns_RQQ).minimal_associate_primes()
+# ideal(eqns_RQQ).minimal_associated_primes()
 #
 # This will produce a solution to the hydrogen atom using ansatz 5.
 # You can also prep_helium(), and supply an ansatz number as argument,
@@ -19,6 +19,43 @@
 # FLINT implementation because there are no roots in the Hamiltonian
 # and FLINT doesn't have a Groebner basis implementation, which is
 # required to handle roots.
+#
+# minimal_associated_primes() can run out of memory on large
+# polynomial systems.  In the case, we can run a series of
+# simplification steps that produce a family of simpler systems that
+# are stored in a PostgreSQL database, processed in parallel, then
+# recombined for the final result.  In this case, the command sequence
+# looks like this:
+#
+# load('helium.sage')
+# prep_hydrogen(5)
+# init()
+# create_database()
+# SQL_stage1(eqns_RQQ)
+# SQL_stage2()
+# SQL_stage3_single_thread()
+# GTZ_single_thread()
+# consolidate_ideals(load_simplified_ideals())
+#
+# SQL_stage3_single_thread() and GTZ_single_thread() have parallelized
+# variants SQL_stage3_parallel() and GTZ_parallel().  Additionally,
+# these routines can be run on a cluster, using the SQL database as a
+# centralized data store.
+#
+# SQL_stage1() and SQL_stage2() run in parallel (multiple threads) on
+# a single node.  SQL_stage2() can be run on multiple nodes in
+# parallel.
+#
+# For speed, the SQL version of the code should be run with the
+# build_systems program compiled and available in the current working
+# directory, and using a custom version of Sage that has an optimized
+# simplifyIdeal function.
+#
+# The two algorithms should produce identical results.  In particular,
+# the output of the following two commands should be identical:
+#
+# sorted([j.groebner_basis() for j in ideal(eqns_RQQ).minimal_associated_primes()])
+# sorted([j.groebner_basis() for j in consolidate_ideals(load_simplified_ideals())])
 #
 # "Homogenization" (not a very good term) is used to force selected
 # polynomials to be non-zero by forcing their coefficients to be 1,
@@ -1524,12 +1561,12 @@ CREATE TABLE systems (
 
 CREATE UNIQUE INDEX ON systems(md5(system));
 
--- this next index doesn't help GTZ_single_threaded very much
+-- this next index doesn't help GTZ_single_thread very much
 -- CREATE INDEX ON systems(current_status, identifier);
--- this index helps GTZ_single_threaded at first, but after a while isn't as useful without the next one
+-- this index helps GTZ_single_thread at first, but after a while isn't as useful without the next one
 -- we need both, it seems
 CREATE INDEX ON systems(identifier);
--- this index does help GTZ_single_threaded quite a bit
+-- this index does help GTZ_single_thread quite a bit
 CREATE INDEX ON systems(identifier) where current_status = 'queued' or current_status = 'interrupted';
 
 CREATE TABLE stage1 (
@@ -1794,20 +1831,15 @@ def dump_bitset_to_SQL(origin, i):
 
 def stage2(system, origin):
     print('simplifyIdeal')
-    eqns,s = simplifyIdeal(system)
+    eqns,s = simplifyIdeal(list(system))
     # simplifications = simplifications + normalize(s)
     global simplifications
     simplifications = normalize(s)
     save_global(simplifications)
     eqns = normalize(dropZeros(eqns))
     if len(eqns) == 0:
-        with conn.cursor() as cursor:
-            p = persistent_pickle(simplifications)
-            h = str(uuid.UUID(bytes=hashlib.md5(p).digest()))
-            cursor.execute("INSERT INTO systems (md5, system, degree, num, current_status) VALUES (%s, %s, 1, 0, 'queued') ON CONFLICT DO NOTHING",
-                           (h, p))
-            cursor.execute("UPDATE systems SET num = num + %s WHERE md5 = %s", (p[2], h))
-        conn.commit()
+        insert_into_systems(eqns, simplifications, origin, stats=None)
+        return
     if any(eqn == 1 for eqn in eqns):
         # the system is inconsistent and needs no further processing
         return
@@ -2039,7 +2071,7 @@ def SQL_stage3_single_thread(requested_identifier=None):
             persistent_data.clear()
             persistent_data_inverse.clear()
 
-def SQL_stage3(max_workers = 12):
+def SQL_stage3_parallel(max_workers = 12):
     try:
         with concurrent.futures.ProcessPoolExecutor(max_workers=max_workers, initializer=process_pool_initializer) as executor:
             futures = [executor.submit(SQL_stage3_single_thread) for _ in range(max_workers)]
@@ -2212,7 +2244,7 @@ def md5_test():
         for system in cursor:
             return system[0]
 
-def GTZ_single_threaded(requested_identifier=None):
+def GTZ_single_thread(requested_identifier=None):
     while True:
         with conn.cursor() as cursor:
             if requested_identifier:
@@ -2285,7 +2317,7 @@ def GTZ_single_threaded(requested_identifier=None):
 def GTZ_parallel(max_workers = 8):
     try:
         with concurrent.futures.ProcessPoolExecutor(max_workers=max_workers, initializer=process_pool_initializer) as executor:
-            futures = [executor.submit(GTZ_single_threaded) for _ in range(max_workers)]
+            futures = [executor.submit(GTZ_single_thread) for _ in range(max_workers)]
             for future in futures:
                 future.add_done_callback(done_callback)
             num_completed = 0
@@ -2317,18 +2349,24 @@ def list_simplified_systems():
         for sys in cursor:
             print(unpickle(sys[0]))
 
-def load_simplified_systems():
+def load_simplified_ideals():
     retval = []
     with conn.cursor() as cursor:
-        cursor.execute("SELECT simplified_system FROM systems WHERE current_status = 'finished'")
+        cursor.execute("SELECT ideal FROM simplified_ideals")
         for sys in cursor:
-            retval.append(unpickle(sys[0]))
+            retval.append(ideal(unpickle(sys[0])))
     return retval
 
 def load_simplified_ideal(identifier):
     with conn:
         with conn.cursor() as cursor:
             cursor.execute("SELECT ideal FROM simplified_ideals WHERE identifier = %s", (int(identifier),))
+            return unpickle(cursor.fetchone()[0])
+
+def load_stage1(identifier):
+    with conn:
+        with conn.cursor() as cursor:
+            cursor.execute("SELECT system FROM stage1 WHERE identifier = %s", (int(identifier),))
             return unpickle(cursor.fetchone()[0])
 
 def get_system_sizes():
