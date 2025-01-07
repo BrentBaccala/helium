@@ -1236,12 +1236,6 @@ def load_build_systems_output(fn):
 # consolidated version of the above subroutines that takes a tuple of equations (generators of an ideal)
 # and returns a tuple of tuples of equations, a factorization of the input ideal.
 
-def dropZeros(eqns):
-    return tuple(e for e in eqns if e != 0)
-
-def normalize(eqns):
-    return tuple(e/e.lc() for e in eqns)
-
 # parallelized Singular polynomial factorization
 
 import concurrent.futures
@@ -1677,6 +1671,9 @@ def save_global(obj):
             persistent_data[str(id)] = obj
             persistent_data_inverse[obj] = str(id)
 
+# This routine isn't called anywhere (it's just for debugging) because the globals table is large
+# and we don't want to load the whole thing into memory.  But this is the idea.
+
 def load_globals():
     with conn2:
         with conn2.cursor() as cursor:
@@ -1685,6 +1682,9 @@ def load_globals():
                 obj = pickle.loads(p)
                 persistent_data[str(id)] = obj
                 persistent_data_inverse[obj] = str(id)
+
+# Note that no attempt is made to save objects that aren't already in the persistent data tables.
+# If you want something saved into the globals table, you have to call save_global() explicitly.
 
 def persistent_id(obj):
     # It's hard to tell if an arbitrary Python object is hashable
@@ -1696,16 +1696,6 @@ def persistent_id(obj):
     return None
 
 # This is pretty much how the dumps code works, except that it tries first to use an optimized version from _pickle
-def pickleWithoutRing(val):
-    src = io.BytesIO()
-    p = pickle.Pickler(src)
-    p.persistent_id = persistent_id
-    p.dump(val)
-    if val[0] == tuple():
-        deg = 1
-    else:
-        deg = max(p.degree() for p in val[0])
-    return (src.getvalue(), int(deg))
 
 def persistent_pickle(val):
     src = io.BytesIO()
@@ -1735,18 +1725,7 @@ def unpickle(p):
     up.persistent_load = persistent_load
     return up.load()
 
-def load_systems():
-    conn2 = psycopg2.connect(**postgres_connection_parameters)
-    retval = []
-    with conn2.cursor() as cursor:
-        cursor.execute("SELECT system FROM systems;")
-        for pickled_system in cursor:
-            dst = io.BytesIO(pickled_system[0])
-            up = pickle.Unpickler(dst)
-            up.persistent_load = persistent_load
-            retval.append(up.load())
-    conn2.close()
-    return retval
+# We use ProcessPool's for parallelization, and need an initializer and a done callback.
 
 def done_callback(future):
     if future.exception():
@@ -1775,6 +1754,12 @@ def dump_bitset_to_SQL(origin, i):
 
 def save_factor_as_global(i):
     save_global(all_factors[i])
+
+def dropZeros(eqns):
+    return tuple(e for e in eqns if e != 0)
+
+def normalize(eqns):
+    return tuple(e/e.lc() for e in eqns)
 
 # Creating ProcessPools after all_factors and bitsets have been created and passing "i" (instead of passing one
 # of the factors or bitsets) is done to avoid serialization delay in the parallel code.
@@ -1847,6 +1832,11 @@ def stage1and2(system, initial_simplifications, origin):
     print()
     for future in futures:
         future.result()
+
+def SQL_stage1(eqns):
+    # To keep the size of the pickles down, we save the ring as a global since it's referred to constantly.
+    save_global(eqns[0].parent())
+    stage1and2(eqns, tuple(), 0)
 
 def SQL_stage2():
     with conn.cursor() as cursor:
@@ -1934,6 +1924,11 @@ def insert_into_systems(system, simplifications, origin, stats=None):
     time3 = time.time()
     if stats:
         stats['insert_into_systems_time'] += time3-time2
+
+# Stage 3 is different from stages 1 and 2 because there is no stage 4 per se.  In stage 3, we keep
+# calling stage3() recursively until we've fully simplified the systems.  Selecting which stage to stop
+# staging into SQL and just recurse until we're done is dependent on the complexity of the system.
+# I've picked stage 3 arbitrarily because it seems to work for helium ansatz -16.6.
 
 def stage3(system, simplifications, origin, stats=None):
     time1 = time.time()
@@ -2065,12 +2060,6 @@ def SQL_stage3_parallel(max_workers = 12):
                               WHERE current_status = 'running' AND node = %s""", (os.uname()[1],))
         conn.commit()
         raise
-
-
-def SQL_stage1(eqns):
-    # To keep the size of the pickles down, we save the ring as a global since it's referred to constantly.
-    save_global(eqns[0].parent())
-    stage1and2(eqns, tuple(), 0)
 
 def process_pair(i):
     # The pair is a pair of sets of polynomials.  The first one (might be empty) is relatively complex
@@ -2245,6 +2234,14 @@ def load_simplified_ideals():
     return retval
 
 # Various utility functions for debugging the SQL database from the command line
+
+def load_systems():
+    retval = []
+    with conn.cursor() as cursor:
+        cursor.execute("SELECT system FROM systems;")
+        for pickled_system in cursor:
+            retval(unpickle(pickled_system[0]))
+    return retval
 
 def list_systems():
     with conn.cursor() as cursor:
