@@ -1659,7 +1659,7 @@ persistent_data_inverse = {}
 
 def save_global(obj):
     if obj in persistent_data_inverse:
-        return
+        return persistent_data_inverse[obj]
     p = persistent_pickle(obj)
     # See this stackoverflow post: https://stackoverflow.com/questions/34708509/how-to-use-returning-with-on-conflict-in-postgresql
     # for issues with the simple "ON CONFLICT DO NOTHING RETURNING identifier"
@@ -1670,6 +1670,7 @@ def save_global(obj):
             id = cursor.fetchone()[0]
             persistent_data[str(id)] = obj
             persistent_data_inverse[obj] = str(id)
+    return str(id)
 
 # This routine isn't called anywhere (it's just for debugging) because the globals table is large
 # and we don't want to load the whole thing into memory.  But this is the idea.
@@ -1753,7 +1754,7 @@ def dump_bitset_to_SQL(origin, i):
     conn.commit()
 
 def save_factor_as_global(i):
-    save_global(all_factors[i])
+    return save_global(all_factors[i])
 
 def dropZeros(eqns):
     return tuple(e for e in eqns if e != 0)
@@ -1761,8 +1762,9 @@ def dropZeros(eqns):
 def normalize(eqns):
     return tuple(e/e.lc() for e in eqns)
 
-# Creating ProcessPools after all_factors and bitsets have been created and passing "i" (instead of passing one
-# of the factors or bitsets) is done to avoid serialization delay in the parallel code.
+# Creating ProcessPools after all_factors and bitsets have been created (as globals) and passing an integer
+# index into those lists (instead of passing one of the factors or bitsets) is done to avoid serialization
+# delay in the parallel code.
 
 def stage1and2(system, initial_simplifications, origin):
     print('simplifyIdeal')
@@ -1810,6 +1812,17 @@ def stage1and2(system, initial_simplifications, origin):
     pb.done()
     print()
 
+    # We need to get the objects tagged with their persistent ids (they were only tagged in the ProcessPool
+    # subprocesses), and I want to do this without having to transfer their pickled representations over a
+    # process boundary (either the subprocesses or postgres).  It's precisely for this step that
+    # save_global and save_factor_as_global (the function called by the future) return the persistent id.
+    print('Loading persistent ids')
+    for i,future in enumerate(futures):
+        id = future.result()
+        persistent_data[id] = all_factors[i]
+        persistent_data_inverse[all_factors[i]] = id
+
+    print('build_systems')
     with subprocess.Popen(['./build_systems', str(num_threads)], stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE) as proc:
         for l in sorted(eqns_factors, key=lambda x:len(x)):
             proc.stdin.write(str(FrozenBitset(tuple(all_factors.index(f) for f in l), capacity=len(all_factors))).encode())
