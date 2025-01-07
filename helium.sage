@@ -2112,18 +2112,27 @@ def SQL_stage1(eqns):
     eqns_factors = parallel_factor_eqns(eqns)
     num_threads = 12
     all_factors = tuple(set(f for l in eqns_factors for f in l))
-    for f in all_factors:
+    pb = ProgressBar(label='saving factors as globals', expected_size=len(all_factors))
+    for i,f in enumerate(all_factors):
         save_global(f)
+        pb.show(i)
+    pb.done()
+    print()
     with subprocess.Popen(['./build_systems', str(num_threads)], stdin=subprocess.PIPE, stdout=subprocess.PIPE) as proc:
         for l in sorted(eqns_factors, key=lambda x:len(x)):
             proc.stdin.write(str(FrozenBitset(tuple(all_factors.index(f) for f in l), capacity=len(all_factors))).encode())
             proc.stdin.write(b'\n')
         proc.stdin.close()
-        with conn.cursor() as cursor:
-            for bs in proc.stdout:
-                t = tuple(all_factors[i] for i in FrozenBitset(bs.decode().strip()))
-                cursor.execute("INSERT INTO stage1 (system, current_status) VALUES (%s, 'queued')", (persistent_pickle(t),))
-        conn.commit()
+        bitsets = tuple(FrozenBitset(bs.decode().strip()) for bs in proc.stdout)
+    pb = ProgressBar(label='insert systems into SQL table stage1', expected_size=len(bitsets))
+    with conn.cursor() as cursor:
+        for n,bs in enumerate(bitsets):
+            t = tuple(all_factors[i] for i in bs)
+            cursor.execute("INSERT INTO stage1 (system, current_status) VALUES (%s, 'queued')", (persistent_pickle(t),))
+            pb.show(n+1)
+    conn.commit()
+    pb.done()
+    print()
 
 def simplify_one_system():
     with conn.cursor() as cursor:
