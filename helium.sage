@@ -1835,9 +1835,10 @@ def dump_bitset_to_SQL(origin, i):
 def stage2(system, origin):
     print('simplifyIdeal')
     eqns,s = simplifyIdeal(list(system))
-    # simplifications = simplifications + normalize(s)
+    # See comment below for why we like to keep things sorted
+    # We need simplifications to be a tuple because we're going to pickle it
     global simplifications
-    simplifications = normalize(s)
+    simplifications = tuple(sorted(normalize(s)))
     save_global(simplifications)
     eqns = normalize(dropZeros(eqns))
     if len(eqns) == 0:
@@ -1851,7 +1852,11 @@ def stage2(system, origin):
     eqns_factors = parallel_factor_eqns(eqns)
     num_threads = 12
     global all_factors
-    all_factors = tuple(set(f for l in eqns_factors for f in l))
+    # By sorting all_factors, we ensure that the systems inserted into stage2 are sorted,
+    # because iterating over a FrozenBitset (in dump_bitset_to_SQL) generates integers
+    # in ascending order, which are then used as indices to all_factors.
+    # We like sorted systems because they help us detect duplicate systems and reduce duplicate work.
+    all_factors = sorted(set(f for l in eqns_factors for f in l))
     pb = ProgressBar(label='saving factors as globals', expected_size=len(all_factors))
     for i,f in enumerate(all_factors):
         save_global(f)
@@ -2371,6 +2376,12 @@ def get_system_sizes():
     with conn.cursor() as cursor:
         cursor.execute("SELECT identifier, length(system) FROM systems ORDER BY length(system)")
         return [v for v in cursor]
+
+def SQL_stage2_reset():
+    with conn:
+        with conn.cursor() as cursor:
+            cursor.execute("DELETE FROM stage2")
+            cursor.execute("UPDATE stage1 SET current_status = 'queued', cpu_time = NULL, memory_utilization = NULL, pid = NULL, node = NULL")
 
 def SQL_stage3_reset():
     with conn:
