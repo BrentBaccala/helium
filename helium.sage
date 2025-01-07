@@ -1547,7 +1547,6 @@ CREATE UNIQUE INDEX ON simplified_ideals(md5(ideal));
 CREATE TABLE systems (
       identifier INTEGER GENERATED ALWAYS AS IDENTITY,
       system BYTEA,               -- a pickle of a tuple pair of tuples of polynomials; the first complex, the second simple
-      simplified_system BYTEA,    -- initially NULL; ultimately a pickle of a tuple of tuples of simplified systems
       current_status status,
       degree INTEGER,             -- the maximum degree of the polynomials in the system
       npolys INTEGER,             -- the number of polynomials in the complex part of the system
@@ -1588,11 +1587,15 @@ CREATE TABLE stage2 (
       pid INTEGER
 );
 
+-- tracking from stage2 to systems
+
 CREATE TABLE tracking (
       origin INTEGER,
       destination INTEGER,
       count INTEGER
 );
+
+-- tracking from systems to simplified_ideals
 
 CREATE TABLE tracking2 (
       origin INTEGER,
@@ -1839,6 +1842,7 @@ def stage2(system, origin):
     eqns = normalize(dropZeros(eqns))
     if len(eqns) == 0:
         insert_into_systems(eqns, simplifications, origin, stats=None)
+        conn.commit()
         return
     if any(eqn == 1 for eqn in eqns):
         # the system is inconsistent and needs no further processing
@@ -1905,7 +1909,7 @@ def SQL_stage2():
                               SET current_status = 'finished',
                                   cpu_time = %s,
                                   memory_utilization = %s
-                              WHERE system = %s""", (cpu_time, memory_utilization, pickled_system))
+                              WHERE identifier = %s""", (cpu_time, memory_utilization, identifier))
             conn.commit()
 
             # keep our memory down by clearing our cached polynomials
@@ -2343,12 +2347,6 @@ def list_systems():
         for sys in cursor:
             print(unpickle(sys[0]))
 
-def list_simplified_systems():
-    with conn.cursor() as cursor:
-        cursor.execute("SELECT simplified_system FROM systems WHERE current_status = 'finished'")
-        for sys in cursor:
-            print(unpickle(sys[0]))
-
 def load_simplified_ideals():
     retval = []
     with conn.cursor() as cursor:
@@ -2386,7 +2384,7 @@ def SQL_GTZ_reset():
     with conn:
         with conn.cursor() as cursor:
             cursor.execute("""UPDATE systems
-                              SET current_status = 'queued', pid = NULL, node = NULL, simplified_system = NULL
+                              SET current_status = 'queued', pid = NULL, node = NULL
                               WHERE current_status != 'queued'""")
             cursor.execute("DELETE FROM tracking2")
             cursor.execute("DELETE FROM simplified_ideals")
