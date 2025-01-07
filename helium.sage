@@ -1835,12 +1835,16 @@ def dump_bitset_to_SQL(origin, i):
             cursor.execute("INSERT INTO stage2 (system, origin, current_status) VALUES (%s, %s, 'queued')", (system, origin))
     conn.commit()
 
+def save_factor_as_global(i):
+    save_global(all_factors[i])
+
 def stage1and2(system, initial_simplifications, origin):
     print('simplifyIdeal')
     eqns,s = simplifyIdeal(list(system))
     print(len(s), 'simplifications')
     # See comment below for why we like to keep things sorted
     # We need simplifications to be a tuple because we're going to pickle it
+    # simplifications is global so dump_bitset_to_SQL can access from the subprocesses in the second ProcessPool
     global simplifications
     simplifications = tuple(sorted(initial_simplifications + normalize(s)))
     # We can't save simplifications itself, since persistent_id() only works on rings and polynomials, not tuples
@@ -1857,27 +1861,38 @@ def stage1and2(system, initial_simplifications, origin):
     # list_of_systems = optimized_build_systems(eqns, parallel=True)
     eqns_factors = parallel_factor_eqns(eqns)
     num_threads = 12
+    # all_factors is global so that the subprocesses in the next two ProcessPools can access it
     global all_factors
     # By sorting all_factors, we ensure that the systems inserted into stage2 are sorted,
     # because iterating over a FrozenBitset (in dump_bitset_to_SQL) generates integers
     # in ascending order, which are then used as indices to all_factors.
     # We like sorted systems because they help us detect duplicate systems and reduce duplicate work.
-    print("Sorting factors")
-    all_factors = sorted(set(f for l in eqns_factors for f in l))
-    pb = ProgressBar(label='saving factors as globals', expected_size=len(all_factors))
-    for i,f in enumerate(all_factors):
-        save_global(f)
-        pb.show(i)
+    all_factors = set(f for l in eqns_factors for f in l)
+    print("Sorting", len(all_factors), "factors")
+    all_factors = sorted(all_factors)
+
+    pb = ProgressBar(label='saving factors as SQL globals', expected_size=len(all_factors))
+    with concurrent.futures.ProcessPoolExecutor(max_workers=12, initializer=process_pool_initializer) as executor:
+        futures = [executor.submit(save_factor_as_global, i) for i in range(len(all_factors))]
+        for future in futures:
+            future.add_done_callback(done_callback)
+        num_completed = 0
+        while num_completed < len(all_factors):
+            concurrent.futures.wait(futures, timeout=1)
+            num_completed = tuple(future.done() for future in futures).count(True)
+            pb.show(num_completed)
     pb.done()
     print()
+
     with subprocess.Popen(['./build_systems', str(num_threads)], stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE) as proc:
         for l in sorted(eqns_factors, key=lambda x:len(x)):
             proc.stdin.write(str(FrozenBitset(tuple(all_factors.index(f) for f in l), capacity=len(all_factors))).encode())
             proc.stdin.write(b'\n')
         proc.stdin.close()
+        # bitsets is global so the subprocesses in the next ProcessPool can access it
         global bitsets
         bitsets = tuple(FrozenBitset(bs.decode().strip()) for bs in proc.stdout)
-    pb = ProgressBar(label='dump to SQL', expected_size=len(bitsets))
+    pb = ProgressBar(label='insert systems into SQL', expected_size=len(bitsets))
     with concurrent.futures.ProcessPoolExecutor(max_workers=12, initializer=process_pool_initializer) as executor:
         futures = [executor.submit(dump_bitset_to_SQL, origin, i) for i in range(len(bitsets))]
         for future in futures:
