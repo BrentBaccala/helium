@@ -1839,7 +1839,9 @@ def stage2(system, origin):
     # We need simplifications to be a tuple because we're going to pickle it
     global simplifications
     simplifications = tuple(sorted(normalize(s)))
-    save_global(simplifications)
+    # We can't save simplifications itself, since persistent_id() only works on rings and polynomials, not tuples
+    for s in simplifications:
+        save_global(s)
     eqns = normalize(dropZeros(eqns))
     if len(eqns) == 0:
         insert_into_systems(eqns, simplifications, origin, stats=None)
@@ -2105,6 +2107,7 @@ def SQL_stage3_parallel(max_workers = 12):
 
 
 def SQL_stage1(eqns):
+    # To keep the size of the pickles down, we save the ring as a global since it's referred to constantly.
     save_global(eqns[0].parent())
     eqns_factors = parallel_factor_eqns(eqns)
     num_threads = 12
