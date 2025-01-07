@@ -1570,7 +1570,7 @@ CREATE INDEX ON systems(identifier) where current_status = 'queued' or current_s
 
 CREATE TABLE stage1 (
       identifier INTEGER GENERATED ALWAYS AS IDENTITY,
-      system BYTEA,               -- a pickle of a tuple of polynomials
+      system BYTEA,               -- a pickle of a tuple pair of tuples of polynomials; the first complex, the second simple
       current_status status,
       cpu_time INTERVAL,          -- I'm actually using this for wall time
       memory_utilization BIGINT,
@@ -1580,7 +1580,7 @@ CREATE TABLE stage1 (
 
 CREATE TABLE stage2 (
       identifier INTEGER GENERATED ALWAYS AS IDENTITY,
-      origin INTEGER,
+      origin INTEGER,             -- which identifier in stage1 this system came from
       system BYTEA,               -- a pickle of a tuple pair of tuples of polynomials; the first complex, the second simple
       current_status status,
       node VARCHAR,
@@ -1829,16 +1829,20 @@ def dump_bitset_to_SQL(origin, i):
     t = tuple(all_factors[j] for j in bitsets[i])
     system = persistent_pickle((t,simplifications))
     with conn.cursor() as cursor:
-        cursor.execute("INSERT INTO stage2 (system, origin, current_status) VALUES (%s, %s, 'queued')", (system, origin))
+        if origin == 0:
+            cursor.execute("INSERT INTO stage1 (system, current_status) VALUES (%s, 'queued')", (system, ))
+        else:
+            cursor.execute("INSERT INTO stage2 (system, origin, current_status) VALUES (%s, %s, 'queued')", (system, origin))
     conn.commit()
 
-def stage2(system, origin):
+def stage1and2(system, initial_simplifications, origin):
     print('simplifyIdeal')
     eqns,s = simplifyIdeal(list(system))
+    print(len(s), 'simplifications')
     # See comment below for why we like to keep things sorted
     # We need simplifications to be a tuple because we're going to pickle it
     global simplifications
-    simplifications = tuple(sorted(normalize(s)))
+    simplifications = tuple(sorted(initial_simplifications + normalize(s)))
     # We can't save simplifications itself, since persistent_id() only works on rings and polynomials, not tuples
     for s in simplifications:
         save_global(s)
@@ -1858,6 +1862,7 @@ def stage2(system, origin):
     # because iterating over a FrozenBitset (in dump_bitset_to_SQL) generates integers
     # in ascending order, which are then used as indices to all_factors.
     # We like sorted systems because they help us detect duplicate systems and reduce duplicate work.
+    print("Sorting factors")
     all_factors = sorted(set(f for l in eqns_factors for f in l))
     pb = ProgressBar(label='saving factors as globals', expected_size=len(all_factors))
     for i,f in enumerate(all_factors):
@@ -1906,9 +1911,9 @@ def SQL_stage2():
             pickled_system, identifier = cursor.fetchone()
             start_time = time.time()
             print('Unpickling stage 1 system', identifier)
-            system = unpickle(pickled_system)
+            system, simplifications = unpickle(pickled_system)
 
-            stage2(system, identifier)
+            stage1and2(system, simplifications, identifier)
 
             memory_utilization = psutil.Process(os.getpid()).memory_info().rss
             cpu_time = datetime.timedelta(seconds = time.time() - start_time)
@@ -2109,30 +2114,7 @@ def SQL_stage3_parallel(max_workers = 12):
 def SQL_stage1(eqns):
     # To keep the size of the pickles down, we save the ring as a global since it's referred to constantly.
     save_global(eqns[0].parent())
-    eqns_factors = parallel_factor_eqns(eqns)
-    num_threads = 12
-    all_factors = tuple(set(f for l in eqns_factors for f in l))
-    pb = ProgressBar(label='saving factors as globals', expected_size=len(all_factors))
-    for i,f in enumerate(all_factors):
-        save_global(f)
-        pb.show(i)
-    pb.done()
-    print()
-    with subprocess.Popen(['./build_systems', str(num_threads)], stdin=subprocess.PIPE, stdout=subprocess.PIPE) as proc:
-        for l in sorted(eqns_factors, key=lambda x:len(x)):
-            proc.stdin.write(str(FrozenBitset(tuple(all_factors.index(f) for f in l), capacity=len(all_factors))).encode())
-            proc.stdin.write(b'\n')
-        proc.stdin.close()
-        bitsets = tuple(FrozenBitset(bs.decode().strip()) for bs in proc.stdout)
-    pb = ProgressBar(label='insert systems into SQL table stage1', expected_size=len(bitsets))
-    with conn.cursor() as cursor:
-        for n,bs in enumerate(bitsets):
-            t = tuple(all_factors[i] for i in bs)
-            cursor.execute("INSERT INTO stage1 (system, current_status) VALUES (%s, 'queued')", (persistent_pickle(t),))
-            pb.show(n+1)
-    conn.commit()
-    pb.done()
-    print()
+    stage1and2(eqns, tuple(), 0)
 
 def simplify_one_system():
     with conn.cursor() as cursor:
