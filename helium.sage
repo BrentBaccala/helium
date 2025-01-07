@@ -1735,32 +1735,6 @@ def unpickle(p):
     up.persistent_load = persistent_load
     return up.load()
 
-# Forking after simplifyIdeal4_list_of_systems has been created and passing "i" (instead of passing one of the systems)
-# is done to avoid serialization delay in the parallel code.  For the same reason, we put the results into a SQL
-# database here instead of returning them across the fork and then putting them in the database.  Returning the
-# values this way also drops them from RAM, which keeps the memory footprint under control, rather than storing
-# everything in RAM until the futures in simplifyIdeal4 complete.
-
-def simplifyIdeal5(i, simplifications, depth):
-    global conn
-    if conn:
-        conn.close()
-        conn = psycopg2.connect(**postgres_connection_parameters)
-    retval = simplifyIdeal4(simplifyIdeal4_list_of_systems[i], simplifications, depth)
-    if conn:
-        retval_unique = set(retval)
-        retval_unique_pickles_with_degrees_and_counts = tuple(pickleWithoutRing(rv) + (retval.count(rv),) for rv in retval_unique)
-        retval_hashes = {str(uuid.UUID(bytes=hashlib.md5(p[0]).digest())):p for p in retval_unique_pickles_with_degrees_and_counts}
-        with conn.cursor() as cursor:
-            for h,p in retval_hashes.items():
-                cursor.execute("INSERT INTO systems (md5, system, degree, num, current_status) VALUES (%s, %s, %s, 0, 'queued') ON CONFLICT DO NOTHING",
-                               (h, p[0], p[1]))
-                cursor.execute("UPDATE systems SET num = num + %s WHERE md5 = %s", (p[2], h))
-        conn.commit()
-        return []
-    else:
-        return retval
-
 def load_systems():
     conn2 = psycopg2.connect(**postgres_connection_parameters)
     retval = []
@@ -1778,42 +1752,6 @@ def done_callback(future):
     if future.exception():
         # I'm not sure what to do here to get a full traceback printed
         traceback.print_exception(None, future.exception(), None)
-
-def simplifyIdeal4(eqns, simplifications=tuple(), depth=1):
-    #print('simplifyIdeal4:', eqns, simplifications)
-    eqns,s = simplifyIdeal(eqns)
-    #print('simplifyIdeal:', eqns,s)
-    #simplifications.extend(normalize(s))
-    simplifications = simplifications + normalize(s)
-    eqns = normalize(dropZeros(eqns))
-    if len(eqns) == 0:
-        return [(tuple(), simplifications)]
-    if any(eqn == 1 for eqn in eqns):
-        return []
-    list_of_systems = optimized_build_systems(eqns, parallel=(depth == 1))
-    if len(list_of_systems) == 1:
-        return [(eqns, simplifications)]
-    else:
-        #print('recursing on', len(list_of_systems), 'systems; depth', depth)
-        if depth == 1:
-            num_of_systems = len(list_of_systems)
-            pb = ProgressBar(label='simplify equations', expected_size=num_of_systems)
-            # Use a global variable to avoid serialization delay in relaying the polynomials to worker subprocesses
-            global simplifyIdeal4_list_of_systems
-            simplifyIdeal4_list_of_systems = list_of_systems
-            with concurrent.futures.ProcessPoolExecutor(max_workers=12) as executor:
-                futures = [executor.submit(simplifyIdeal5, i, simplifications, depth+1) for i in range(num_of_systems)]
-                for future in futures:
-                    future.add_done_callback(done_callback)
-                num_completed = 0
-                while num_completed < num_of_systems:
-                    concurrent.futures.wait(futures, timeout=1)
-                    num_completed = tuple(future.done() for future in futures).count(True)
-                    pb.show(num_completed)
-            pb.done()
-            return [l for future in futures for l in future.result()]
-        else:
-            return [l for sys in list_of_systems for l in simplifyIdeal4(sys, simplifications, depth+1)]
 
 def process_pool_initializer():
     # futures can't share the original SQL connection, so create a new one
@@ -1837,6 +1775,9 @@ def dump_bitset_to_SQL(origin, i):
 
 def save_factor_as_global(i):
     save_global(all_factors[i])
+
+# Creating ProcessPools after all_factors and bitsets have been created and passing "i" (instead of passing one
+# of the factors or bitsets) is done to avoid serialization delay in the parallel code.
 
 def stage1and2(system, initial_simplifications, origin):
     print('simplifyIdeal')
@@ -2131,32 +2072,6 @@ def SQL_stage1(eqns):
     save_global(eqns[0].parent())
     stage1and2(eqns, tuple(), 0)
 
-def simplify_one_system():
-    with conn.cursor() as cursor:
-        cursor.execute("""UPDATE stage1
-                          SET current_status = 'running', pid = %s, node = %s
-                          WHERE system = (
-                              SELECT system
-                              FROM stage1
-                              WHERE current_status = 'queued'
-                              LIMIT 1
-                              )
-                          RETURNING system""", (os.getpid(), os.uname()[1]) )
-        conn.commit()
-        if cursor.rowcount != 0:
-            pickled_system = cursor.fetchone()[0]
-            start_time = time.time()
-            system = unpickle(pickled_system)
-            simplifyIdeal4(system)
-            memory_utilization = psutil.Process(os.getpid()).memory_info().rss
-            cpu_time = datetime.timedelta(seconds = time.time() - start_time)
-            cursor.execute("""UPDATE stage1
-                              SET current_status = 'finished',
-                                  cpu_time = %s,
-                                  memory_utilization = %s
-                              WHERE system = %s""", (cpu_time, memory_utilization, pickled_system))
-            conn.commit()
-
 def process_pair(i):
     # The pair is a pair of sets of polynomials.  The first one (might be empty) is relatively complex
     # (all irreducible, no linear terms) while the second one is simpler (all linear terms).  We only need to run
@@ -2227,40 +2142,6 @@ def simplifyIdeal6(I):
                 I = tuple(map(lambda p: p.subs({v: 0}), I))
                 simplifications.append(v)
     return simplifications + [p for p in I if p != 0]
-
-def md5_everything():
-    while True:
-        with conn.cursor() as cursor:
-            with conn.cursor() as cursor2:
-                cursor.execute("SELECT DISTINCT system FROM systems WHERE md5 IS null LIMIT 10")
-                if cursor.rowcount == 0:
-                    break
-                for system in cursor:
-                    hash = str(uuid.UUID(bytes=hashlib.md5(system[0]).digest()))
-                    cursor2.execute("UPDATE systems SET md5 = %s WHERE system = %s;", (hash, system[0]))
-        print('one md5 block done')
-        conn.commit()
-
-def concurrent_md5_everything():
-    # futures can't share the original connection
-    conn = psycopg2.connect(**postgres_connection_parameters)
-    while True:
-        with conn.cursor() as cursor:
-            with conn.cursor() as cursor2:
-                cursor.execute("SELECT DISTINCT system FROM systems WHERE md5 IS null LIMIT 10")
-                if cursor.rowcount == 0:
-                    break
-                for system in cursor:
-                    hash = str(uuid.UUID(bytes=hashlib.md5(system[0]).digest()))
-                    cursor2.execute("UPDATE systems SET md5 = %s WHERE system = %s;", (hash, system[0]))
-        print('one md5 block done')
-        conn.commit()
-
-def md5_test():
-    with conn.cursor() as cursor:
-        cursor.execute("SELECT md5 FROM systems LIMIT 1;")
-        for system in cursor:
-            return system[0]
 
 def GTZ_single_thread(requested_identifier=None):
     while True:
@@ -2355,12 +2236,6 @@ def GTZ_parallel(max_workers = 8):
         conn.commit()
         raise
 
-def list_systems():
-    with conn.cursor() as cursor:
-        cursor.execute("SELECT system FROM systems WHERE current_status = 'finished'")
-        for sys in cursor:
-            print(unpickle(sys[0]))
-
 def load_simplified_ideals():
     retval = []
     with conn.cursor() as cursor:
@@ -2368,6 +2243,14 @@ def load_simplified_ideals():
         for sys in cursor:
             retval.append(ideal(unpickle(sys[0])))
     return retval
+
+# Various utility functions for debugging the SQL database from the command line
+
+def list_systems():
+    with conn.cursor() as cursor:
+        cursor.execute("SELECT system FROM systems WHERE current_status = 'finished'")
+        for sys in cursor:
+            print(unpickle(sys[0]))
 
 def load_simplified_ideal(identifier):
     with conn:
