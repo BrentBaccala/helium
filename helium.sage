@@ -105,6 +105,8 @@
 # TODO list:
 # - check collected coefficient polynomials to see if they factor
 
+num_processes = 12
+
 import itertools
 from itertools import *
 
@@ -1244,7 +1246,7 @@ def factor_eqn(eqn):
     return eqn.factor()
 
 def parallel_factor_eqns(eqns):
-    with concurrent.futures.ProcessPoolExecutor(max_workers=12) as executor:
+    with concurrent.futures.ProcessPoolExecutor(max_workers=num_processes) as executor:
         # "factor" itself is cached; we can't use a functools._lru_cache_wrapper here, so use the underlying sage.arith.misc.factor
         # actually, don't do this - this is some kind of generic factorization
         # futures = [executor.submit(sage.arith.misc.factor, eqn) for eqn in eqns]
@@ -1263,15 +1265,16 @@ def optimized_build_systems(eqns, parallel=True, stats=None):
     time1 = time.time()
     if not parallel:
         eqns_factors = tuple(tuple(f for f,m in factor(eqn)) for eqn in eqns)
-        num_threads = 1
+        cmd = ['./build_systems']
     else:
         eqns_factors = parallel_factor_eqns(eqns)
-        num_threads = 12
+        # Parallelization in build_systems is actually done with threads and not processes
+        cmd = ['./build_systems', str(num_processes) ]
     time2 = time.time()
     if stats:
         stats['factor_time'] += time2-time1
     all_factors = tuple(set(f for l in eqns_factors for f in l))
-    proc = subprocess.Popen(['./build_systems', str(num_threads)], stdin=subprocess.PIPE, stdout=subprocess.PIPE)
+    proc = subprocess.Popen(cmd, stdin=subprocess.PIPE, stdout=subprocess.PIPE)
     # build_systems reads all of its stdin before outputting anything, so there's no danger of stdin blocking here.
     for l in sorted(eqns_factors, key=lambda x:len(x)):
         proc.stdin.write(str(FrozenBitset(tuple(all_factors.index(f) for f in l), capacity=len(all_factors))).encode())
@@ -1788,7 +1791,6 @@ def stage1and2(system, initial_simplifications, origin):
         return
     # list_of_systems = optimized_build_systems(eqns, parallel=True)
     eqns_factors = parallel_factor_eqns(eqns)
-    num_threads = 12
     # all_factors is global so that the subprocesses in the next two ProcessPools can access it
     global all_factors
     # By sorting all_factors, we ensure that the systems inserted into stage2 are sorted,
@@ -1800,7 +1802,7 @@ def stage1and2(system, initial_simplifications, origin):
     all_factors = sorted(all_factors)
 
     pb = ProgressBar(label='saving factors as SQL globals', expected_size=len(all_factors))
-    with concurrent.futures.ProcessPoolExecutor(max_workers=12, initializer=process_pool_initializer) as executor:
+    with concurrent.futures.ProcessPoolExecutor(max_workers=num_processes, initializer=process_pool_initializer) as executor:
         futures = [executor.submit(save_factor_as_global, i) for i in range(len(all_factors))]
         for future in futures:
             future.add_done_callback(done_callback)
@@ -1823,7 +1825,7 @@ def stage1and2(system, initial_simplifications, origin):
         persistent_data_inverse[all_factors[i]] = id
 
     print('build_systems')
-    with subprocess.Popen(['./build_systems', str(num_threads)], stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE) as proc:
+    with subprocess.Popen(['./build_systems', str(num_processes)], stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE) as proc:
         for l in sorted(eqns_factors, key=lambda x:len(x)):
             proc.stdin.write(str(FrozenBitset(tuple(all_factors.index(f) for f in l), capacity=len(all_factors))).encode())
             proc.stdin.write(b'\n')
@@ -1832,7 +1834,7 @@ def stage1and2(system, initial_simplifications, origin):
         global bitsets
         bitsets = tuple(FrozenBitset(bs.decode().strip()) for bs in proc.stdout)
     pb = ProgressBar(label='insert systems into SQL', expected_size=len(bitsets))
-    with concurrent.futures.ProcessPoolExecutor(max_workers=12, initializer=process_pool_initializer) as executor:
+    with concurrent.futures.ProcessPoolExecutor(max_workers=num_processes, initializer=process_pool_initializer) as executor:
         futures = [executor.submit(dump_bitset_to_SQL, origin, i) for i in range(len(bitsets))]
         for future in futures:
             future.add_done_callback(done_callback)
@@ -2051,7 +2053,7 @@ def SQL_stage3_single_thread(requested_identifier=None):
             persistent_data.clear()
             persistent_data_inverse.clear()
 
-def SQL_stage3_parallel(max_workers = 12):
+def SQL_stage3_parallel(max_workers = num_processes):
     try:
         with concurrent.futures.ProcessPoolExecutor(max_workers=max_workers, initializer=process_pool_initializer) as executor:
             futures = [executor.submit(SQL_stage3_single_thread) for _ in range(max_workers)]
