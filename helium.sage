@@ -1261,6 +1261,55 @@ def parallel_factor_eqns(eqns):
     print()
     return tuple(tuple(f for f,m in future.result()) for future in futures)
 
+# After we factor all of the polynomials, we have a system of equations which all have to be zero,
+# and each equation is a product of factors, only one of which needs to be zero to make that
+# entire equation zero.  From a standpoint of logic theory, treating each factor as a logic
+# variable, this is a AND-of-ORs, or a product-of-sums, a conjunctive normal form (CNF).
+# We wish to convert this to disjunctive normal form (DNF), an OR-of-ANDs, sum-of-products,
+# that will give us multiple systems of irreducible factors.
+#
+# I've tried several ways to do this, starting with native Python code and later an optimized
+# C++ version of my simple algorithm.  Most recently, I've been using a dedicated logic
+# optimizer, "espresso", available from https://github.com/classabbyamp/espresso-logic.
+
+def cnf2dnf_espresso(cnf_bitsets, stats=None):
+    time2 = time.time()
+    cnf_bitset_lengths = set(bs.capacity() for bs in cnf_bitsets)
+    assert len(cnf_bitset_lengths) == 1
+    cnf_bitset_length = cnf_bitset_lengths.pop()
+
+    # Configure espresso to convert CNF to DNF by using 'type f', encoding '1' and '0' and '0' as do-not-care,
+    # and specifying '-epos' to swap the ON-set and OFF-set.  See espresso man page.
+    proc = subprocess.Popen(['./espresso', '-epos'], stdin=subprocess.PIPE, stdout=subprocess.PIPE)
+
+    # espresso reads all of its stdin before outputting anything, so there's no danger of stdin blocking here.
+    proc.stdin.write(f'.i {cnf_bitset_length}\n'.encode())
+    proc.stdin.write('.o 1\n'.encode())
+    proc.stdin.write('.type f\n'.encode())
+    for bs in cnf_bitsets:
+        proc.stdin.write('{} 1\n'.format(str(bs).replace('0','-').replace('1','0')).encode())
+    proc.stdin.close()
+
+    # There is some concern that if we proc.wait() here, proc.stdout could fill with data and both processes will deadlock.
+    # So we read proc.stdout first, then wait for the subprocess to terminate.
+    retval = []
+    for line in proc.stdout:
+        line = line.decode()
+        if line.startswith('.i ') or line.startswith('.o ') or line.startswith('#.phase ') or line.startswith('.p ') or line == '.e\n':
+            pass
+        else:
+            product_term_str, output_str = line.split(' ')
+            if output_str != '1\n' or set(product_term_str) > set('1-'):
+                raise RuntimeError('unexpected espresso output')
+            retval.append(FrozenBitset(product_term_str.replace('-', '0')))
+    proc.wait()
+    time3 = time.time()
+    if stats:
+        stats['build_systems_time'] += time3-time2
+    if proc.returncode != 0:
+        raise subprocess.CalledProcessError(proc.returncode, 'espresso')
+    return retval
+
 def optimized_build_systems(eqns, parallel=True, stats=None):
     time1 = time.time()
     if not parallel:
