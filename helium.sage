@@ -1217,7 +1217,7 @@ def init():
 # when we know we'll only get 5 irreducible varieties.
 
 # code to write and read data in the bitset format used by the build_systems program,
-# which is a C++ version of build_systems() below, optimized for speed
+# which is a C++ version of cnf2dnf() below, optimized for speed
 
 from sage.data_structures.bitset import FrozenBitset
 
@@ -1272,8 +1272,10 @@ def parallel_factor_eqns(eqns):
 # C++ version of my simple algorithm.  Most recently, I've been using a dedicated logic
 # optimizer, "espresso", available from https://github.com/classabbyamp/espresso-logic.
 
-def cnf2dnf_espresso(cnf_bitsets, stats=None):
-    time2 = time.time()
+def cnf2dnf_espresso(cnf_bitsets, num_processes=0):
+    # num_processes is ignored
+    # convert a generator to a tuple, because we're about to iterate it twice
+    cnf_bitsets = tuple(cnf_bitsets)
     cnf_bitset_lengths = set(bs.capacity() for bs in cnf_bitsets)
     assert len(cnf_bitset_lengths) == 1
     cnf_bitset_length = cnf_bitset_lengths.pop()
@@ -1303,39 +1305,23 @@ def cnf2dnf_espresso(cnf_bitsets, stats=None):
                 raise RuntimeError('unexpected espresso output')
             retval.append(FrozenBitset(product_term_str.replace('-', '0')))
     proc.wait()
-    time3 = time.time()
-    if stats:
-        stats['build_systems_time'] += time3-time2
     if proc.returncode != 0:
         raise subprocess.CalledProcessError(proc.returncode, 'espresso')
     return retval
 
-def optimized_build_systems(eqns, parallel=True, stats=None):
-    time1 = time.time()
-    if not parallel:
-        eqns_factors = tuple(tuple(f for f,m in factor(eqn)) for eqn in eqns)
-        cmd = ['./build_systems']
-    else:
-        eqns_factors = parallel_factor_eqns(eqns)
-        # Parallelization in build_systems is actually done with threads and not processes
-        cmd = ['./build_systems', str(num_processes) ]
-    time2 = time.time()
-    if stats:
-        stats['factor_time'] += time2-time1
-    all_factors = tuple(set(f for l in eqns_factors for f in l))
+def cnf2dnf_external(cnf_bitsets, num_processes=1):
+    # we sort cnf_bitsets so that the bitsets with a single one bit come first, to speed processing in build_systems
+    cnf_bitsets = sorted(cnf_bitsets, key=lambda x:len(x))
+    cmd = ['./build_systems', str(num_processes)]
     proc = subprocess.Popen(cmd, stdin=subprocess.PIPE, stdout=subprocess.PIPE)
-    # build_systems reads all of its stdin before outputting anything, so there's no danger of stdin blocking here.
-    for l in sorted(eqns_factors, key=lambda x:len(x)):
-        proc.stdin.write(str(FrozenBitset(tuple(all_factors.index(f) for f in l), capacity=len(all_factors))).encode())
+    for bs in cnf_bitsets:
+        proc.stdin.write(str(bs).encode())
         proc.stdin.write(b'\n')
     proc.stdin.close()
     # There is some concern that if we proc.wait() here, proc.stdout could fill with data and both processes will deadlock.
     # So we read proc.stdout first, then wait for the subprocess to terminate.
-    retval = tuple(tuple(all_factors[i] for i in FrozenBitset(bs.decode().strip())) for bs in proc.stdout)
+    retval = tuple(FrozenBitset(bs.decode().strip()) for bs in proc.stdout)
     proc.wait()
-    time3 = time.time()
-    if stats:
-        stats['build_systems_time'] += time3-time2
     if proc.returncode != 0:
         raise subprocess.CalledProcessError(proc.returncode, './build_systems')
     return retval
@@ -1344,7 +1330,7 @@ def is_irreducible(eq):
     factors = factor(eq)
     return len(factors) == 1 and not any(m > 1 for f,m in factors)
 
-debug_build_systems = False
+debug_cnf2dnf = False
 
 # Setup caching for factorization and degree testing, which together speed hydrogen-5 from 90 sec to 15 sec
 
@@ -1381,7 +1367,7 @@ def add_system(systems, newsys):
         systems.remove(sys)
     systems.add(newsys)
 
-def build_systems(eqns):
+def cnf2dnf_python(eqns):
     eqns_factors = tuple(tuple(f for f,m in factor(eqn)) for eqn in eqns)
     all_factors = tuple(set(f for l in eqns_factors for f in l))
     systems = set()
@@ -1391,7 +1377,7 @@ def build_systems(eqns):
     start_point = float(0.0)
     end_point = float(100.0)
     total_progress = float(0.0)
-    #pb = ProgressBar(label='build_systems ', expected_size=int(end_point))
+    #pb = ProgressBar(label='cnf2dnf ', expected_size=int(end_point))
     while True:
         # put this here in case we've just popped from tracking_info and last_i = len(eqns)-1
         # In that case, we don't have anything to do in the next for loop (all of the equations are accounted for),
@@ -1404,7 +1390,7 @@ def build_systems(eqns):
                 continue
             tracking_info.extend(subroutine_one(eqns_factors[i], working_ideal, i, start_point, end_point))
             #print(tracking_info)
-            if debug_build_systems:
+            if debug_cnf2dnf:
                 for r,a,b in tracking_info:
                     for eq2 in r:
                         assert is_irreducible(eq2), "loop 1"
@@ -1419,7 +1405,7 @@ def build_systems(eqns):
             #pb.show(int(end_point))
             #total_progress += end_point - start_point
             #print('progress', total_progress, 'len(systems)', len(systems))
-            if debug_build_systems:
+            if debug_cnf2dnf:
                 for eq in working_ideal:
                     try:
                         assert is_irreducible(eq), "point 2"
@@ -1429,7 +1415,7 @@ def build_systems(eqns):
                         raise
         try:
             working_ideal, last_i, start_point, end_point = tracking_info.pop()
-            if debug_build_systems:
+            if debug_cnf2dnf:
                 for eq in working_ideal:
                     assert is_irreducible(eq), "point 3"
         except IndexError:
@@ -1442,7 +1428,7 @@ def build_systems(eqns):
 
 def subroutine_one(factors, equations, equation_number, start_point, end_point):
     #print('subroutine_one', equations, equation_number)
-    if debug_build_systems:
+    if debug_cnf2dnf:
         assert type(equations) == set
     result = []
     for i,f in enumerate(factors):
@@ -1454,6 +1440,10 @@ def subroutine_one(factors, equations, equation_number, start_point, end_point):
         #print('new start/end_point', new_start_point, new_end_point)
         result.append((newset, equation_number, new_start_point, new_end_point))
     return result
+
+# Which version of cnf2dnf should we use?  cnf2dnf_espresso, cnf2dnf_external, or cnf2dnf_python
+
+cnf2dnf = cnf2dnf_espresso
 
 # Once we've built all of the systems, then we do this:
 #
@@ -1533,7 +1523,7 @@ except ImportError:
                     elif p.degree(v) == 1:
                         q,r = p.quo_rem(v)
                         if r == 0:
-                            # We should pick this up case with another run through optimized_build_systems
+                            # We should pick up this case with another run through cnf2dnf
                             # print("reducible polynomial detected")
                             pass
                         elif q.is_constant() and r.number_of_terms() == 1:
@@ -1670,7 +1660,7 @@ CREATE TABLE stage3_stats (
       pid INTEGER,
       unpickle_time INTERVAL,
       factor_time INTERVAL,
-      build_systems_time INTERVAL,
+      cnf2dnf_time INTERVAL,
       save_global_time INTERVAL,
       simplifyIdeal_time INTERVAL,
       insert_into_systems_time INTERVAL,
@@ -1838,7 +1828,6 @@ def stage1and2(system, initial_simplifications, origin):
     if any(eqn == 1 for eqn in eqns):
         # the system is inconsistent and needs no further processing
         return
-    # list_of_systems = optimized_build_systems(eqns, parallel=True)
     eqns_factors = parallel_factor_eqns(eqns)
     # all_factors is global so that the subprocesses in the next two ProcessPools can access it
     global all_factors
@@ -1873,15 +1862,11 @@ def stage1and2(system, initial_simplifications, origin):
         persistent_data[id] = all_factors[i]
         persistent_data_inverse[all_factors[i]] = id
 
-    print('build_systems')
-    with subprocess.Popen(['./build_systems', str(num_processes)], stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE) as proc:
-        for l in sorted(eqns_factors, key=lambda x:len(x)):
-            proc.stdin.write(str(FrozenBitset(tuple(all_factors.index(f) for f in l), capacity=len(all_factors))).encode())
-            proc.stdin.write(b'\n')
-        proc.stdin.close()
-        # bitsets is global so the subprocesses in the next ProcessPool can access it
-        global bitsets
-        bitsets = tuple(FrozenBitset(bs.decode().strip()) for bs in proc.stdout)
+    print('cnf2dnf')
+    # bitsets is global so the subprocesses in the next ProcessPool can access it
+    global bitsets
+    bitsets = cnf2dnf((FrozenBitset(tuple(all_factors.index(f) for f in l), capacity=len(all_factors)) for l in eqns_factors), num_processes=num_processes)
+    # return
     pb = ProgressBar(label='insert systems into SQL', expected_size=len(bitsets))
     with concurrent.futures.ProcessPoolExecutor(max_workers=num_processes, initializer=process_pool_initializer) as executor:
         futures = [executor.submit(dump_bitset_to_SQL, origin, i) for i in range(len(bitsets))]
@@ -2008,7 +1993,16 @@ def stage3(system, simplifications, origin, stats=None):
     if any(eqn == 1 for eqn in eqns):
         # the system is inconsistent and needs no further processing
         return
-    list_of_systems = optimized_build_systems(eqns, parallel=False, stats=stats)
+    eqns_factors = tuple(tuple(f for f,m in factor(eqn)) for eqn in eqns)
+    time3 = time.time()
+    if stats:
+        stats['factor_time'] += time3-time2
+    all_factors = tuple(set(f for l in eqns_factors for f in l))
+    dnf_bitsets = cnf2dnf(FrozenBitset(tuple(all_factors.index(f) for f in l), capacity=len(all_factors)) for l in eqns_factors)
+    list_of_systems = tuple(tuple(all_factors[i] for i in bs) for bs in dnf_bitsets)
+    time4 = time.time()
+    if stats:
+        stats['cnf2dnf_time'] += time4-time3
     if len(list_of_systems) == 1:
         insert_into_systems(eqns, simplifications, origin, stats=stats)
     else:
@@ -2055,7 +2049,7 @@ def SQL_stage3_single_thread(requested_identifier=None):
                          'unpickle_time' : 0,
                          'factor_time' : 0,
                          'insert_into_systems_time': 0,
-                         'build_systems_time' : 0,
+                         'cnf2dnf_time' : 0,
                          'save_global_time' : 0,
                          'simplifyIdeal_time' : 0}
 
