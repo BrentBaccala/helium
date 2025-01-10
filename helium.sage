@@ -47,9 +47,10 @@
 # parallel.
 #
 # For speed, the SQL version of the code should be run with the
-# build_systems program compiled and available in the current working
+# espresso program compiled and available in the current working
 # directory, and using a custom version of Sage that has an optimized
-# simplifyIdeal function.
+# simplifyIdeal function, available as the simplifyIdeal branch of
+# https://github.com/BrentBaccala/sage.
 #
 # The two algorithms should produce identical results.  In particular,
 # the output of the following two commands should be identical:
@@ -1280,8 +1281,11 @@ def cnf2dnf_espresso(cnf_bitsets, num_processes=0):
     assert len(cnf_bitset_lengths) == 1
     cnf_bitset_length = cnf_bitset_lengths.pop()
 
-    # Configure espresso to convert CNF to DNF by using 'type f', encoding '1' and '0' and '0' as do-not-care,
-    # and specifying '-epos' to swap the ON-set and OFF-set.  See espresso man page.
+    # Espresso's input is a list of product terms that are logically OR-ed together to specify the ON-set in DNF.
+    # How can we provide CNF input?  We take advantage of the fact that complementing CNF produces DNF, so we
+    # complement all of our input bits, encoding '1' and '0' and '0' as do-not-care, then specify '-epos' to
+    # swap the ON-set and OFF-set.  See espresso man page.
+
     proc = subprocess.Popen(['./espresso', '-epos'], stdin=subprocess.PIPE, stdout=subprocess.PIPE)
 
     # espresso reads all of its stdin before outputting anything, so there's no danger of stdin blocking here.
@@ -1300,6 +1304,11 @@ def cnf2dnf_espresso(cnf_bitsets, num_processes=0):
         if line.startswith('.i ') or line.startswith('.o ') or line.startswith('#.phase ') or line.startswith('.p ') or line == '.e\n':
             pass
         else:
+            # In principle, espresso could produce both 1s and 0s (as well as do-not-care dashes) in its output.
+            # Yet I've never seen 0s in the output, and that would be very strange - it would mean that our
+            # system would be true if some polynomial was NOT zero, and if that was the case, why wouldn't
+            # it also be true if that polynomial was zero?  In any event, if we ever see a zero in the output,
+            # it will raise an exception here.
             product_term_str, output_str = line.split(' ')
             if output_str != '1\n' or set(product_term_str) > set('1-'):
                 raise RuntimeError('unexpected espresso output')
