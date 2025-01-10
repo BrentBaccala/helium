@@ -98,21 +98,15 @@
 # by Brent Baccala
 #
 # first version - August 2019
-# latest version - December 2024
+# latest version - January 2025
 #
 # no rights reserved; you may freely copy, modify, or distribute this
 # program
-#
-# TODO list:
-# - check collected coefficient polynomials to see if they factor
 
 num_processes = 12
 
 import itertools
 from itertools import *
-
-# import functools for functools.lru_cache
-import functools
 
 import subprocess
 
@@ -125,10 +119,11 @@ import os
 import psutil
 import datetime
 
-import typing
+import time
 
-import hashlib
-import uuid
+from sage.data_structures.bitset import FrozenBitset
+
+import concurrent.futures
 
 import traceback
 
@@ -1135,8 +1130,6 @@ def reduce_denominator(I=None):
     eq_a_reduceRing_d = reduce_mod_ideal(eq_a_convertField.denominator(), I)
     print('eq_a_convertField: denominator', eq_a_reduceRing_d.number_of_terms(), 'terms')
 
-import time
-
 def timefunc(func, *args, **kwargs):
     start_time = time.perf_counter()
     retval = func(*args, **kwargs)
@@ -1210,47 +1203,23 @@ def init():
     timefunc(create_eqns_RQQ)
     timefunc(create_eqns_R32003)
 
-# Factor all of the polynomials in the system of equations and build a set of systems,
-# all with irreducible polynomials, that generates the same variety.  From each factored
-# set that arises from a polynomial in the original system, we want one factor.
+# Solving a system of polynomials
 #
-# Currently works, but builds way more systems that are really needed.  871 on hydrogen-5,
-# when we know we'll only get 5 irreducible varieties.
+# For small systems, we can just call minimal_associated_primes, but for larger systems, we wish to repeatedly
+# apply two simplification steps before calling that function:
+#
+# 1. Factor all of the polynomials in the system of equations and build a set of systems,
+# all with irreducible polynomials, that generates the same variety.
+#
+# 2. Find simple linear substitutions that allow a variable to be eliminated.
 
-# code to write and read data in the bitset format used by the build_systems program,
-# which is a C++ version of cnf2dnf() below, optimized for speed
-
-from sage.data_structures.bitset import FrozenBitset
-
-def print_build_systems(file=sys.stdout):
-    for l in sorted(eqns_RQQ_factors, key=lambda x:len(x)):
-        print(FrozenBitset(tuple(all_factors.index(f) for f in l), capacity=len(all_factors)), file=file)
-
-def load_build_systems_output(fn):
-    with open(fn) as f:
-        s = f.read()
-        # The sort can be really slow, though I want it there to verify that systems is the same as created
-        #    using the Python code below (the call to add_system() in build_systems() sorts working_ideal first)
-        # I also changed the set to a tuple because I want to index it, so I can process one ideal at a time,
-        #    and I want it in the same order that it came in from the 'cout' file
-        #return set(tuple(sorted(tuple(all_factors[i] for i in FrozenBitset(bs)))) for bs in s.split())
-        return tuple(tuple(all_factors[i] for i in FrozenBitset(bs)) for bs in s.split())
-
-# consolidated version of the above subroutines that takes a tuple of equations (generators of an ideal)
-# and returns a tuple of tuples of equations, a factorization of the input ideal.
-
-# parallelized Singular polynomial factorization
-
-import concurrent.futures
+# Parallelized Singular polynomial factorization
 
 def factor_eqn(eqn):
     return eqn.factor()
 
 def parallel_factor_eqns(eqns):
     with concurrent.futures.ProcessPoolExecutor(max_workers=num_processes) as executor:
-        # "factor" itself is cached; we can't use a functools._lru_cache_wrapper here, so use the underlying sage.arith.misc.factor
-        # actually, don't do this - this is some kind of generic factorization
-        # futures = [executor.submit(sage.arith.misc.factor, eqn) for eqn in eqns]
         futures = [executor.submit(factor_eqn, eqn) for eqn in eqns]
         pb = ProgressBar(label='factor equations', expected_size=len(eqns))
         num_completed = 0
@@ -1273,8 +1242,7 @@ def parallel_factor_eqns(eqns):
 # C++ version of my simple algorithm.  Most recently, I've been using a dedicated logic
 # optimizer, "espresso", available from https://github.com/classabbyamp/espresso-logic.
 
-def cnf2dnf_espresso(cnf_bitsets, num_processes=0):
-    # num_processes is ignored
+def cnf2dnf(cnf_bitsets):
     # convert a generator to a tuple, because we're about to iterate it twice
     cnf_bitsets = tuple(cnf_bitsets)
     cnf_bitset_lengths = set(bs.capacity() for bs in cnf_bitsets)
@@ -1284,7 +1252,7 @@ def cnf2dnf_espresso(cnf_bitsets, num_processes=0):
     # Espresso's input is a list of product terms that are logically OR-ed together to specify the ON-set in DNF.
     # How can we provide CNF input?  We take advantage of the fact that complementing CNF produces DNF, so we
     # complement all of our input bits, encoding '1' and '0' and '0' as do-not-care, then specify '-epos' to
-    # swap the ON-set and OFF-set.  See espresso man page.
+    # swap the ON-set and OFF-set, effectively inputting the OFF-set in DNF.  See espresso man page.
 
     proc = subprocess.Popen(['./espresso', '-epos'], stdin=subprocess.PIPE, stdout=subprocess.PIPE)
 
@@ -1317,142 +1285,6 @@ def cnf2dnf_espresso(cnf_bitsets, num_processes=0):
     if proc.returncode != 0:
         raise subprocess.CalledProcessError(proc.returncode, 'espresso')
     return retval
-
-def cnf2dnf_external(cnf_bitsets, num_processes=1):
-    # we sort cnf_bitsets so that the bitsets with a single one bit come first, to speed processing in build_systems
-    cnf_bitsets = sorted(cnf_bitsets, key=lambda x:len(x))
-    cmd = ['./build_systems', str(num_processes)]
-    proc = subprocess.Popen(cmd, stdin=subprocess.PIPE, stdout=subprocess.PIPE)
-    for bs in cnf_bitsets:
-        proc.stdin.write(str(bs).encode())
-        proc.stdin.write(b'\n')
-    proc.stdin.close()
-    # There is some concern that if we proc.wait() here, proc.stdout could fill with data and both processes will deadlock.
-    # So we read proc.stdout first, then wait for the subprocess to terminate.
-    retval = tuple(FrozenBitset(bs.decode().strip()) for bs in proc.stdout)
-    proc.wait()
-    if proc.returncode != 0:
-        raise subprocess.CalledProcessError(proc.returncode, './build_systems')
-    return retval
-
-def is_irreducible(eq):
-    factors = factor(eq)
-    return len(factors) == 1 and not any(m > 1 for f,m in factors)
-
-debug_cnf2dnf = False
-
-# Setup caching for factorization and degree testing, which together speed hydrogen-5 from 90 sec to 15 sec
-
-if type(factor) is not functools._lru_cache_wrapper:
-    factor = functools.lru_cache(maxsize=None)(factor)
-
-@functools.lru_cache(maxsize=None)
-def is_linear_in_var(poly, v):
-    return poly.degree(v) == 1 and poly.coefficient(v).is_constant()
-
-# Algorithm:
-#   - run through the system of equations from beginning to end
-#   - we're tracking a system of equations, initially empty
-#   - for each equation, either its already satisfied, or we need to change something to satisfy it
-#   - to check if the equation is satisfied, look first to see if any of its factors are in the system of equations
-#     (if so it's satisfied)
-#   - if the equation is satisfied, skip to the next one
-#   - if the equation is not satisfied, call subroutine one; it returns a list of tuples
-#   - each tuple is a system of equations and the number of the equation we're working on
-#   - for each tuple in the list, continue the main loop starting with the next equation
-#   - when we get through the entire system, add the system of equations to the output
-#   - pop the last tuple on the list and go back to the top of this loop
-
-def add_system(systems, newsys):
-    #print("adding system")
-    systems_to_remove = []
-    for sys in systems:
-        # if an existing sys is a strict subset of newsys, we don't do anything
-        if len(sys) < len(newsys) and all(p in newsys for p in sys):
-            return
-        if len(newsys) < len(sys) and all(p in sys for p in newsys):
-            systems_to_remove.append(sys)
-    for sys in systems_to_remove:
-        systems.remove(sys)
-    systems.add(newsys)
-
-def cnf2dnf_python(eqns):
-    eqns_factors = tuple(tuple(f for f,m in factor(eqn)) for eqn in eqns)
-    all_factors = tuple(set(f for l in eqns_factors for f in l))
-    systems = set()
-    working_ideal = set()
-    tracking_info = list()
-    last_i = -1
-    start_point = float(0.0)
-    end_point = float(100.0)
-    total_progress = float(0.0)
-    #pb = ProgressBar(label='cnf2dnf ', expected_size=int(end_point))
-    while True:
-        # put this here in case we've just popped from tracking_info and last_i = len(eqns)-1
-        # In that case, we don't have anything to do in the next for loop (all of the equations are accounted for),
-        #    but we need to make sure that the "i == len(eqns) - 1" test triggers, and the for loop won't
-        #    change i at all if the range is empty
-        i = last_i
-        for i in range(last_i+1, len(eqns)):
-            # if any polynomial in the working ideal is a factor of this equation, skip the equation, as it's already satisfied
-            if not working_ideal.isdisjoint(eqns_factors[i]):
-                continue
-            tracking_info.extend(subroutine_one(eqns_factors[i], working_ideal, i, start_point, end_point))
-            #print(tracking_info)
-            if debug_cnf2dnf:
-                for r,a,b in tracking_info:
-                    for eq2 in r:
-                        assert is_irreducible(eq2), "loop 1"
-            if i == len(eqns) - 1:
-                # force it to pop from tracking_info
-                i = 0
-            break
-        #print('i', i)
-        # working_ideal might have factors in it, if we broke out of the loop, but we're about to discard it in that case
-        if i == len(eqns) - 1:
-            add_system(systems, tuple(sorted(tuple(working_ideal))))
-            #pb.show(int(end_point))
-            #total_progress += end_point - start_point
-            #print('progress', total_progress, 'len(systems)', len(systems))
-            if debug_cnf2dnf:
-                for eq in working_ideal:
-                    try:
-                        assert is_irreducible(eq), "point 2"
-                    except AssertionError:
-                        print(old_working_ideal)
-                        print(working_ideal)
-                        raise
-        try:
-            working_ideal, last_i, start_point, end_point = tracking_info.pop()
-            if debug_cnf2dnf:
-                for eq in working_ideal:
-                    assert is_irreducible(eq), "point 3"
-        except IndexError:
-            return systems
-
-# Call subroutine one:
-#   - input is a list, a set of equations (to be satisfied) and an equation number for labeling purposes
-#   - the first input is a list of factors, one of which has to be added to the set
-#   - loop over the factors and add each one to the set, returning the union of all the resulting sets
-
-def subroutine_one(factors, equations, equation_number, start_point, end_point):
-    #print('subroutine_one', equations, equation_number)
-    if debug_cnf2dnf:
-        assert type(equations) == set
-    result = []
-    for i,f in enumerate(factors):
-        newset = equations.copy()
-        newset.add(f)
-        new_start_point = start_point + (len(factors) - i - 1)*(end_point - start_point)/len(factors)
-        new_end_point = start_point + (len(factors) - i)*(end_point - start_point)/len(factors)
-        #print('start/end_point', start_point, end_point)
-        #print('new start/end_point', new_start_point, new_end_point)
-        result.append((newset, equation_number, new_start_point, new_end_point))
-    return result
-
-# Which version of cnf2dnf should we use?  cnf2dnf_espresso, cnf2dnf_external, or cnf2dnf_python
-
-cnf2dnf = cnf2dnf_espresso
 
 # Once we've built all of the systems, then we do this:
 #
@@ -1545,29 +1377,6 @@ except ImportError:
                             simplifications.append(q*v+r)
                             break
             return I,tuple(simplifications)
-
-def simplifyIdeal2(I):
-    # I should be a list or a tuple, not an ideal
-    for v in I[0].parent().gens():
-        q_candidate = None
-        r_candidate = None
-        for p in I:
-            if p.degree(v) == 1:
-                q,r = p.quo_rem(v)
-                if r == 0:
-                    print("reducible polynomial detected")
-                elif not q_candidate or q.number_of_terms() < q_candidate.number_of_terms() or \
-                        (q.number_of_terms() == q_candidate.number_of_terms() and r.number_of_terms() < r_candidate.number_of_terms()):
-                    q_candidate = q
-                    r_candidate = r
-        if q_candidate:
-            # v=qv+r; replace v with -r/q
-            print(v, "=", -r_candidate/q_candidate)
-            start_time = time.time()
-            I = tuple(map(lambda p: p.subs({v: -r_candidate/q_candidate}).numerator(), I))
-            execution_time = time.time() - start_time
-            print(f'subs done in {execution_time} seconds')
-    return I
 
 # We use simple simplifications (factoring polynomials and substituting for linear variables) to split a big
 # system of polynomial equations into subsystems, each of which are then pickled and stored into a SQL
@@ -1874,8 +1683,8 @@ def stage1and2(system, initial_simplifications, origin):
     print('cnf2dnf')
     # bitsets is global so the subprocesses in the next ProcessPool can access it
     global bitsets
-    bitsets = cnf2dnf((FrozenBitset(tuple(all_factors.index(f) for f in l), capacity=len(all_factors)) for l in eqns_factors), num_processes=num_processes)
-    # return
+    bitsets = cnf2dnf(FrozenBitset(tuple(all_factors.index(f) for f in l), capacity=len(all_factors)) for l in eqns_factors)
+
     pb = ProgressBar(label='insert systems into SQL', expected_size=len(bitsets))
     with concurrent.futures.ProcessPoolExecutor(max_workers=num_processes, initializer=process_pool_initializer) as executor:
         futures = [executor.submit(dump_bitset_to_SQL, origin, i) for i in range(len(bitsets))]
