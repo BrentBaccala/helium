@@ -1242,7 +1242,7 @@ def parallel_factor_eqns(eqns):
 # C++ version of my simple algorithm.  Most recently, I've been using a dedicated logic
 # optimizer, "espresso", available from https://github.com/classabbyamp/espresso-logic.
 
-def cnf2dnf(cnf_bitsets):
+def cnf2dnf_espresso(cnf_bitsets):
     # convert a generator to a tuple, because we're about to iterate it twice
     cnf_bitsets = tuple(cnf_bitsets)
     cnf_bitset_lengths = set(bs.capacity() for bs in cnf_bitsets)
@@ -1285,6 +1285,27 @@ def cnf2dnf(cnf_bitsets):
     if proc.returncode != 0:
         raise subprocess.CalledProcessError(proc.returncode, 'espresso')
     return retval
+
+def cnf2dnf_external(cnf_bitsets, num_processes=1):
+    # we sort cnf_bitsets so that the bitsets with a single one bit come first, to speed processing in build_systems
+    cnf_bitsets = sorted(cnf_bitsets, key=lambda x:len(x))
+    cmd = ['./build_systems', str(num_processes)]
+    proc = subprocess.Popen(cmd, stdin=subprocess.PIPE, stdout=subprocess.PIPE)
+    for bs in cnf_bitsets:
+        proc.stdin.write(str(bs).encode())
+        proc.stdin.write(b'\n')
+    proc.stdin.close()
+    # There is some concern that if we proc.wait() here, proc.stdout could fill with data and both processes will deadlock.
+    # So we read proc.stdout first, then wait for the subprocess to terminate.
+    retval = tuple(FrozenBitset(bs.decode().strip()) for bs in proc.stdout)
+    proc.wait()
+    if proc.returncode != 0:
+        raise subprocess.CalledProcessError(proc.returncode, './build_systems')
+    return retval
+
+# Which version of cnf2dnf should we use?  cnf2dnf_espresso or cnf2dnf_external
+
+cnf2dnf = cnf2dnf_espresso
 
 # Once we've built all of the systems, then we do this:
 #
