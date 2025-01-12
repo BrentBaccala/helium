@@ -1289,7 +1289,7 @@ def cnf2dnf_espresso(cnf_bitsets):
 def cnf2dnf_external(cnf_bitsets, num_processes=1):
     # we sort cnf_bitsets so that the bitsets with a single one bit come first, to speed processing in build_systems
     cnf_bitsets = sorted(cnf_bitsets, key=lambda x:len(x))
-    cmd = ['./build_systems', str(num_processes)]
+    cmd = ['./cnf2dnf', str(num_processes)]
     proc = subprocess.Popen(cmd, stdin=subprocess.PIPE, stdout=subprocess.PIPE)
     for bs in cnf_bitsets:
         proc.stdin.write(str(bs).encode())

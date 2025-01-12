@@ -1,22 +1,24 @@
 /*
- * build_systems - optimized version of build_systems() from Sage/Python helium.sage
+ * cnf2dnf - conjunctive normal form (CNF) to disjunctive normal form (DNF) converter
  *
- * BUILD: g++ -std=c++2a -march=native -O3 -o build_systems build_systems.cc -lpthread
+ * BUILD: g++ -std=c++2a -march=native -O3 -o cnf2dnf cnf2dnf.cc -lpthread
  *
- * USAGE: ./build_systems NUM_THREADS < input-bit-strings > output-bit-strings
+ * USAGE: ./cnf2dnf NUM_THREADS < input-bit-strings > output-bit-strings
  *
  * GOAL: Given a set of polynomials (that form an ideal), we want to factor them all and
  * form a set of ideals, all formed from irreducible polynomials.
  *
  * PREPROCESS: Sage factors the polynomials and forms a list of factors.
  *
- * INPUT: a list of bit strings.  Each input bit string corresponds to a polynomial, and each
- * bit corresponds to a factor.
+ * INPUT: a list of bit strings.  Each input bit string describes a cover, a list of logic
+ * variables, any one of which can be true for the cover to be satisfied.  All of the
+ * covers must be satisfied to satisfy the entire system.
  *
- * OUTPUT: a list of bit strings.  Each output bit string corresponds to an ideal,
- * and the 1 bits are the factors in that ideal.
+ * OUTPUT: a list of bit strings.  Each output bit string describes a product term, a
+ * list of logic variables, all of which must be true for the product term to be satisfied.
+ * Any of the product terms can be satisfied to satisfy the entire system.
  *
- * See the print_build_systems() and load_systems() routines in helium.sage for generating
+ * See the cnf2def_external() routine in helium.sage for generating
  * the input strings to this program, and parsing the output strings.
  *
  * All of the bit strings are of the same length (the number of factors).  We store
