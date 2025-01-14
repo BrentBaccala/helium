@@ -26,7 +26,7 @@
  *
  * ALGORITHM:
  *
- * Start with a bit string of all zeros (an empty ideal), a bit string of all ones (the allowed factors),
+ * Start with a bit string of all zeros (an empty ideal) and
  * and an empty list of finished bit strings, but note that we might remove a bit string from the list of
  * finished bit strings, so they're not completely "finished".  (Or maybe not, as we don't seem to be
  * removing anything from the finished bit strings)
@@ -35,12 +35,10 @@
  * any overlap between the polynomial's bit string and the working bit string (bitwise AND).
  * If so, this polynomial is satisfied; move on to the next one.
  *
- * Otherwise, we loop over the bits in polynomial's bit string that are also in the allowed
- * factors (logical AND).  If there are none, then we discard this case and backtrack.  For each allowed one bit, we form
+ * Otherwise, we loop over the bits in polynomial's bit string.
+ * If there are none, then we discard this case and backtrack.  For each one bit, we form
  * a new bit string by adding that one bit to the working bit string.  This will produce
- * a set of bit strings that we keep in a list.  We remove the remaining bits
- * from the allowed bits, since there is no reason to consider them later, as these
- * factors will be considered when we backtrack to this point.
+ * a set of bit strings that we keep in a list.
  *
  * See https://stackoverflow.com/questions/68798413/blsi-instruction-isolate-lowest-set-bit
  *
@@ -59,7 +57,6 @@
  *
  * For each point in the stack of backtrack points:
  *    - working ideal bit string
- *    - allowed bits bit string
  *    - polynomial number to process next
  *
  * Keep the stack of backtrack points as a queue.
@@ -288,7 +285,6 @@ std::ostream& operator<<(std::ostream& stream, BitString bs)
 struct BacktrackPoint
 {
   BitString bitstring;
-  BitString allowed_bits;
   unsigned int next_polynomial;
 };
 
@@ -353,7 +349,6 @@ void task(void)
    */
   BacktrackPoint current_work;
   BitString next_work_bitstring;
-  BitString next_work_allowed_bits;
   BacktrackPoint extra_work;
 
   while (true) {
@@ -376,47 +371,32 @@ void task(void)
 	bool have_next_work = false;
 	/* Extend backtrack queue if there's more than one factor(bit) in the polynomial */
 	for (BitString next_bit: expanded_polys[current_work.next_polynomial]) {
-	  // std::cerr << "adding " << next_bit << " " << current_work.allowed_bits << "\n";
-	  /* skip this bit if it's not in the allowed_bits set */
-	  if (next_bit && current_work.allowed_bits) {
-	    if (! have_next_work) {
-	      /* Like this, but avoids a copy */
-	      /* next_work_bitstring = current_work.bitstring | next_bit; */
-	      current_work.bitstring.logical_or_assign(next_work_bitstring, next_bit);
-	      /* remove all of the current polynomial's bits from the allowed bits for future work */
-	      next_work_allowed_bits = current_work.allowed_bits & inverted_polys[current_work.next_polynomial];
-	      // std::cerr << "inverted_poly " << inverted_polys[current_work.next_polynomial] << "\n";
-	      // std::cerr << "next_work_allowed_bits " << next_work_allowed_bits << "\n";
-	      /* Check first if this is a superset of an existing bit string; skip it if it is */
-	      if (finished_bitstrings.contain_a_subset_of(next_work_bitstring)) {
-		std::cerr << "detected superset\n";
-		continue;
-	      }
-	      have_next_work = true;
-	    } else {
-	      /* Like this, but avoids a copy */
-	      /* extra_work.bitstring = current_work.bitstring | next_bit; */
-	      current_work.bitstring.logical_or_assign(extra_work.bitstring, next_bit);
-	      extra_work.allowed_bits = current_work.allowed_bits & inverted_polys[current_work.next_polynomial];
-	      extra_work.next_polynomial = current_work.next_polynomial + 1;
-	      /* Check first if this is a superset of an existing bit string; skip it if it is */
-	      if (finished_bitstrings.contain_a_subset_of(extra_work.bitstring)) {
-		std::cerr << "detected superset\n";
-		continue;
-	      }
-	      backtrack_queue.push(extra_work);
-	    }
+
+	  // std::cerr << "adding " << next_bit << "\n";
+	  if (! have_next_work) {
+	    /* Like this, but avoids a copy */
+	    /* next_work_bitstring = current_work.bitstring | next_bit; */
+	    current_work.bitstring.logical_or_assign(next_work_bitstring, next_bit);
+	    /* Check first if this is a superset of an existing bit string; skip it if it is */
+	    if (finished_bitstrings.contain_a_subset_of(next_work_bitstring)) continue;
+	    have_next_work = true;
+	  } else {
+	    /* Like this, but avoids a copy */
+	    /* extra_work.bitstring = current_work.bitstring | next_bit; */
+	    current_work.bitstring.logical_or_assign(extra_work.bitstring, next_bit);
+	    extra_work.next_polynomial = current_work.next_polynomial + 1;
+	    /* Check first if this is a superset of an existing bit string; skip it if it is */
+	    if (finished_bitstrings.contain_a_subset_of(extra_work.bitstring)) continue;
+	    backtrack_queue.push(extra_work);
 	  }
 	}
 	if (! have_next_work) {
 	  goto get_next_work_from_queue;
 	}
 	current_work.bitstring = next_work_bitstring;
-	current_work.allowed_bits = next_work_allowed_bits;
       }
       current_work.next_polynomial ++;
     }
-
     finished_bitstrings.add(current_work.bitstring);
   }
 }
@@ -456,8 +436,6 @@ int main(int argc, char ** argv)
   }
 
   BacktrackPoint initial_work;
-  initial_work.allowed_bits = ~ BitString(bitstring_len);
-  // std::cerr << "allowed_bits " << initial_work.allowed_bits << "\n";
   initial_work.next_polynomial = 0;
   backtrack_queue.push(initial_work);
   backtrack_queue.set_num_workers(nthreads);
