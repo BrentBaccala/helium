@@ -1307,6 +1307,27 @@ def cnf2dnf_external(cnf_bitsets, num_processes=1):
 
 cnf2dnf = cnf2dnf_espresso
 
+cnf2dnf_tests = [
+    (['1'], ['1']),
+    (['1', '1'], ['1']),
+    (['01', '10'], ['11']),
+    (['11'], ['01', '10']),
+    (['11', '01'], ['01']),
+    (['11', '01', '10'], ['11']),
+    # check 5f28bf
+    (['100000000', '000000001'], ['100000001']),
+    # check 2c332f
+    (['10000000', '00000001'], ['10000001']),
+]
+
+def test_cnf2dnf():
+    for test in cnf2dnf_tests:
+        inputs = [FrozenBitset(s) for s in test[0]]
+        outputs = [FrozenBitset(s) for s in test[1]]
+        if sorted(cnf2dnf(inputs)) != sorted(outputs):
+            raise RuntimeError('cnf2dnf test failed')
+    print('All cnf2dnf tests passed')
+
 # Once we've built all of the systems, then we do this:
 #
 # consolidate_ideals(reduce(lambda a,b: a.union(b), [set(ideal(s).minimal_associated_primes()) for s in systems]))
