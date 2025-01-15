@@ -1242,7 +1242,7 @@ def parallel_factor_eqns(eqns):
 # C++ version of my simple algorithm.  Most recently, I've been using a dedicated logic
 # optimizer, "espresso", available from https://github.com/classabbyamp/espresso-logic.
 
-def cnf2dnf_espresso(cnf_bitsets):
+def cnf2dnf_espresso(cnf_bitsets, parallel=False):
     # convert a generator to a tuple, because we're about to iterate it twice
     cnf_bitsets = tuple(cnf_bitsets)
     cnf_bitset_lengths = set(bs.capacity() for bs in cnf_bitsets)
@@ -1286,10 +1286,10 @@ def cnf2dnf_espresso(cnf_bitsets):
         raise subprocess.CalledProcessError(proc.returncode, 'espresso')
     return retval
 
-def cnf2dnf_external(cnf_bitsets, num_processes=1):
+def cnf2dnf_external(cnf_bitsets, parallel=False):
     # we sort cnf_bitsets so that the bitsets with a single one bit come first, to speed processing in build_systems
     cnf_bitsets = sorted(cnf_bitsets, key=lambda x:len(x))
-    cmd = ['./cnf2dnf', str(num_processes)]
+    cmd = ['./cnf2dnf', str(num_processes if parallel else 1)]
     proc = subprocess.Popen(cmd, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=sys.stderr)
     for bs in cnf_bitsets:
         proc.stdin.write(str(bs).encode())
@@ -1305,7 +1305,7 @@ def cnf2dnf_external(cnf_bitsets, num_processes=1):
 
 # Which version of cnf2dnf should we use?  cnf2dnf_espresso or cnf2dnf_external
 
-cnf2dnf = cnf2dnf_espresso
+cnf2dnf = cnf2dnf_external
 
 cnf2dnf_tests = [
     (['1'], ['1']),
@@ -1725,7 +1725,7 @@ def stage1and2(system, initial_simplifications, origin):
     print('cnf2dnf')
     # bitsets is global so the subprocesses in the next ProcessPool can access it
     global bitsets
-    bitsets = cnf2dnf(FrozenBitset(tuple(all_factors.index(f) for f in l), capacity=len(all_factors)) for l in eqns_factors)
+    bitsets = cnf2dnf(FrozenBitset(tuple(all_factors.index(f) for f in l), capacity=len(all_factors)) for l in eqns_factors, parallel=True)
 
     pb = ProgressBar(label='insert systems into SQL', expected_size=len(bitsets))
     with concurrent.futures.ProcessPoolExecutor(max_workers=num_processes, initializer=process_pool_initializer) as executor:
