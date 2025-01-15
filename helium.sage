@@ -1431,6 +1431,8 @@ except ImportError:
 sql_schema='''
 CREATE TYPE status AS ENUM ('queued', 'running', 'finished', 'interrupted', 'failed');
 
+-- irreducible varieties
+
 CREATE TABLE simplified_ideals (
       identifier INTEGER GENERATED ALWAYS AS IDENTITY,
       ideal BYTEA,                -- a pickle of a list of polynomials
@@ -1439,6 +1441,8 @@ CREATE TABLE simplified_ideals (
 );
 
 CREATE UNIQUE INDEX ON simplified_ideals(md5(ideal));
+
+-- systems that have been simplified with simplifyIdeal and cnf2dnf, and are ready for GTZ processing
 
 CREATE TABLE systems (
       identifier INTEGER GENERATED ALWAYS AS IDENTITY,
@@ -1464,41 +1468,36 @@ CREATE INDEX ON systems(identifier);
 -- this index does help GTZ_single_thread quite a bit
 CREATE INDEX ON systems(identifier) where current_status = 'queued' or current_status = 'interrupted';
 
-CREATE TABLE stage1 (
-      identifier INTEGER GENERATED ALWAYS AS IDENTITY,
-      system BYTEA,               -- a pickle of a tuple pair of tuples of polynomials; the first complex, the second simple
-      current_status status,
-      cpu_time INTERVAL,          -- I'm actually using this for wall time
-      memory_utilization BIGINT,
-      node VARCHAR,
-      pid INTEGER
-);
+-- systems that have only be partially simplified
 
-CREATE TABLE stage2 (
+CREATE TABLE staging (
       identifier INTEGER GENERATED ALWAYS AS IDENTITY,
-      origin INTEGER,             -- which identifier in stage1 this system came from
+      stage INTEGER,
+      origin INTEGER,             -- for stage1, 0; for stage2, which identifier in stage1 this system came from
       system BYTEA,               -- a pickle of a tuple pair of tuples of polynomials; the first complex, the second simple
       current_status status,
       node VARCHAR,
       pid INTEGER
 );
 
--- tracking from stage2 to systems
+-- tracking from staging to systems
 
-CREATE TABLE tracking (
+CREATE TABLE systems_tracking (
       origin INTEGER,
       destination INTEGER,
       count INTEGER
 );
 
+CREATE UNIQUE INDEX ON systems_tracking(origin, destination);
+
 -- tracking from systems to simplified_ideals
 
-CREATE TABLE tracking2 (
+CREATE TABLE simplified_ideals_tracking (
       origin INTEGER,
       destination INTEGER
 );
 
-CREATE UNIQUE INDEX ON tracking(origin, destination);
+CREATE UNIQUE INDEX ON simplified_ideals_tracking(origin, destination);
 
 -- This table contains pickled rings and pickled polynomials, to keep down the size of the pickled systems.
 -- We expect lots of duplicate polynomials, so we only want to store each one once.
@@ -1514,7 +1513,7 @@ CREATE UNIQUE INDEX ON globals(md5(pickle));
 
 CREATE INDEX ON globals(identifier);
 
-CREATE TABLE stage3_stats (
+CREATE TABLE staging_stats (
       identifier INTEGER,
       node VARCHAR,
       pid INTEGER,
@@ -1649,10 +1648,7 @@ def dump_bitset_to_SQL(origin, i):
     t = tuple(all_factors[j] for j in bitsets[i])
     system = persistent_pickle((t,simplifications))
     with conn.cursor() as cursor:
-        if origin == 0:
-            cursor.execute("INSERT INTO stage1 (system, current_status) VALUES (%s, 'queued')", (system, ))
-        else:
-            cursor.execute("INSERT INTO stage2 (system, origin, current_status) VALUES (%s, %s, 'queued')", (system, origin))
+        cursor.execute("INSERT INTO staging (system, origin, current_status) VALUES (%s, %s, 'queued')", (system, int(origin)))
     conn.commit()
 
 def save_factor_as_global(i):
@@ -1668,9 +1664,13 @@ def normalize(eqns):
 # index into those lists (instead of passing one of the factors or bitsets) is done to avoid serialization
 # delay in the parallel code.
 
-def stage1and2(system, initial_simplifications, origin):
+def stage1and2(system, initial_simplifications, origin, stats=None):
     print('simplifyIdeal')
+    time1 = time.time()
     eqns,s = simplifyIdeal(list(system))
+    time2 = time.time()
+    if stats:
+        stats['simplifyIdeal_time'] += time2 - time1
     print(len(s), 'simplifications')
     # See comment below for why we like to keep things sorted
     # We need simplifications to be a tuple because we're going to pickle it
@@ -1680,15 +1680,21 @@ def stage1and2(system, initial_simplifications, origin):
     # We can't save simplifications itself, since persistent_id() only works on rings and polynomials, not tuples
     for s in simplifications:
         save_global(s)
+    time3 = time.time()
+    if stats:
+        stats['save_global_time'] += time3-time2
     eqns = normalize(dropZeros(eqns))
     if len(eqns) == 0:
-        insert_into_systems(eqns, simplifications, origin, stats=None)
+        insert_into_systems(eqns, simplifications, origin, stats=stats)
         conn.commit()
         return
     if any(eqn == 1 for eqn in eqns):
         # the system is inconsistent and needs no further processing
         return
     eqns_factors = parallel_factor_eqns(eqns)
+    time4 = time.time()
+    if stats:
+        stats['factor_time'] += time4-time3
     # all_factors is global so that the subprocesses in the next two ProcessPools can access it
     global all_factors
     # By sorting all_factors, we ensure that the systems inserted into stage2 are sorted,
@@ -1723,9 +1729,13 @@ def stage1and2(system, initial_simplifications, origin):
         persistent_data_inverse[all_factors[i]] = id
 
     print('cnf2dnf')
+    time5 = time.time()
     # bitsets is global so the subprocesses in the next ProcessPool can access it
     global bitsets
-    bitsets = cnf2dnf(FrozenBitset(tuple(all_factors.index(f) for f in l), capacity=len(all_factors)) for l in eqns_factors, parallel=True)
+    bitsets = cnf2dnf((FrozenBitset(tuple(all_factors.index(f) for f in l), capacity=len(all_factors)) for l in eqns_factors), parallel=True)
+    time6 = time.time()
+    if stats:
+        stats['cnf2dnf_time'] += time6-time5
 
     pb = ProgressBar(label='insert systems into SQL', expected_size=len(bitsets))
     with concurrent.futures.ProcessPoolExecutor(max_workers=num_processes, initializer=process_pool_initializer) as executor:
@@ -1741,6 +1751,9 @@ def stage1and2(system, initial_simplifications, origin):
     print()
     for future in futures:
         future.result()
+    time7 = time.time()
+    if stats:
+        stats['insert_into_systems_time'] += time7-time6
 
 def SQL_stage1(eqns):
     # To keep the size of the pickles down, we save the ring as a global since it's referred to constantly.
@@ -1750,12 +1763,12 @@ def SQL_stage1(eqns):
 def SQL_stage2():
     with conn.cursor() as cursor:
         while True:
-            cursor.execute("""UPDATE stage1
+            cursor.execute("""UPDATE staging
                               SET current_status = 'running', pid = %s, node = %s
                               WHERE identifier = (
                                   SELECT identifier
-                                  FROM stage1
-                                  WHERE current_status = 'queued'
+                                  FROM staging
+                                  WHERE current_status = 'queued' AND origin = 0
                                   ORDER BY identifier
                                   LIMIT 1
                                   )
@@ -1767,16 +1780,37 @@ def SQL_stage2():
             start_time = time.time()
             print('Unpickling stage 1 system', identifier)
             system, simplifications = unpickle(pickled_system)
+            unpickle_time = time.time() - start_time
 
-            stage1and2(system, simplifications, identifier)
+            # The keys in this dictionary must match column names in the 'staging_stats' SQL table
+            # The keys ending in '_time' are processed differently because they correspond to SQL INTERVALs;
+            # the other keys correspond to SQL INTEGERs, BIGINTs, or VARCHARs.  For the '_time' variables,
+            # we store seconds in the dictionary, then convert them to datetime.timedelta's right
+            # before we pass them to SQL.
+            stats = {'identifier' : identifier,
+                     'pid' : os.getpid(),
+                     'node' : os.uname()[1],
+                     'unpickle_time' : unpickle_time,
+                     'factor_time' : 0,
+                     'insert_into_systems_time': 0,
+                     'cnf2dnf_time' : 0,
+                     'save_global_time' : 0,
+                     'simplifyIdeal_time' : 0}
 
-            memory_utilization = psutil.Process(os.getpid()).memory_info().rss
-            cpu_time = datetime.timedelta(seconds = time.time() - start_time)
-            cursor.execute("""UPDATE stage1
-                              SET current_status = 'finished',
-                                  cpu_time = %s,
-                                  memory_utilization = %s
-                              WHERE identifier = %s""", (cpu_time, memory_utilization, identifier))
+            stage1and2(system, simplifications, identifier, stats=stats)
+
+            cursor.execute("""UPDATE staging
+                              SET current_status = 'finished'
+                              WHERE identifier = %s""", (identifier, ))
+
+            stats['total_time'] = time.time() - start_time
+            stats['memory_utilization'] = psutil.Process(os.getpid()).memory_info().rss
+
+            for k in stats:
+                if k.endswith('_time'):
+                    stats[k] = datetime.timedelta(seconds = int(stats[k]))
+            cursor.execute(f"INSERT INTO staging_stats ({','.join(stats.keys())}) VALUES %s", (tuple(stats.values()),))
+
             conn.commit()
 
             # keep our memory down by clearing our cached polynomials
@@ -1819,8 +1853,8 @@ def insert_into_systems(system, simplifications, origin, stats=None):
                               RETURNING identifier""",
                            (p, int(deg), int(npolys), int(nvars)))
             id = cursor.fetchone()[0]
-            cursor.execute("""INSERT INTO tracking (origin, destination, count) VALUES (%s, %s, 1)
-                              ON CONFLICT (origin, destination) DO UPDATE SET count = tracking.count + 1""",
+            cursor.execute("""INSERT INTO systems_tracking (origin, destination, count) VALUES (%s, %s, 1)
+                              ON CONFLICT (origin, destination) DO UPDATE SET count = systems_tracking.count + 1""",
                            (origin, id))
         else:
             cursor.execute("""INSERT INTO systems (system, degree, npolys, nvars, num, current_status) VALUES (%s, %s, %s, %s, 1, 'queued')
@@ -1876,17 +1910,17 @@ def SQL_stage3_single_thread(requested_identifier=None):
             # This post explains the subquery and the use of "FOR UPDATE SKIP LOCKED"
             # https://dba.stackexchange.com/a/69497
             if requested_identifier:
-                cursor.execute("""UPDATE stage2
+                cursor.execute("""UPDATE staging
                                   SET current_status = 'running', pid = %s, node = %s
                                   WHERE identifier = %s AND ( current_status = 'queued' OR current_status = 'interrupted' )
                                   RETURNING system, identifier""", (os.getpid(), os.uname()[1], int(requested_identifier)) )
                 conn.commit()
             else:
-                cursor.execute("""UPDATE stage2
+                cursor.execute("""UPDATE staging
                                   SET current_status = 'running', pid = %s, node = %s
                                   WHERE identifier = (
                                       SELECT identifier
-                                      FROM stage2
+                                      FROM staging
                                       WHERE current_status = 'queued' OR current_status = 'interrupted'
                                       ORDER BY identifier
                                       LIMIT 1
@@ -1898,7 +1932,7 @@ def SQL_stage3_single_thread(requested_identifier=None):
                 break
             pickled_system, identifier = cursor.fetchone()
             try:
-                # The keys in this dictionary must match column names in the 'stage3_stats' SQL table
+                # The keys in this dictionary must match column names in the 'staging_stats' SQL table
                 # The keys ending in '_time' are processed differently because they correspond to SQL INTERVALs;
                 # the other keys correspond to SQL INTEGERs, BIGINTs, or VARCHARs.  For the '_time' variables,
                 # we store seconds in the dictionary, then convert them to datetime.timedelta's right
@@ -1920,9 +1954,9 @@ def SQL_stage3_single_thread(requested_identifier=None):
 
                 stage3(system_pair[0], system_pair[1], identifier, stats)
 
-                cursor.execute("""UPDATE stage2
+                cursor.execute("""UPDATE staging
                                   SET current_status = 'finished'
-                                  WHERE system = %s""", (pickled_system,))
+                                  WHERE identifier = %s""", (identifier,))
 
                 stats['total_time'] = time.time() - start_time
                 stats['memory_utilization'] = psutil.Process(os.getpid()).memory_info().rss
@@ -1930,7 +1964,7 @@ def SQL_stage3_single_thread(requested_identifier=None):
                 for k in stats:
                     if k.endswith('_time'):
                         stats[k] = datetime.timedelta(seconds = int(stats[k]))
-                cursor.execute(f"INSERT INTO stage3_stats ({','.join(stats.keys())}) VALUES %s", (tuple(stats.values()),))
+                cursor.execute(f"INSERT INTO staging_stats ({','.join(stats.keys())}) VALUES %s", (tuple(stats.values()),))
 
                 # This is the end of a typically long-running transaction that started when we set current_status = 'running'
                 # and includes many INSERT statements that were generated during the call to stage3()
@@ -1939,14 +1973,14 @@ def SQL_stage3_single_thread(requested_identifier=None):
                 print('Finished stage 2 system', identifier)
             except KeyboardInterrupt:
                 conn.rollback()
-                cursor.execute("""UPDATE stage2
+                cursor.execute("""UPDATE staging
                                   SET current_status = 'interrupted'
                                   WHERE identifier = %s""", (identifier,))
                 conn.commit()
                 raise
             except:
                 conn.rollback()
-                cursor.execute("""UPDATE stage2
+                cursor.execute("""UPDATE staging
                                   SET current_status = 'failed'
                                   WHERE identifier = %s""", (identifier,))
                 conn.commit()
@@ -1973,7 +2007,7 @@ def SQL_stage3_parallel(max_workers = num_processes):
         # in one of the futures failed due to a TypeError because I didn't call the BrokenProcessPool constructor correctly.
         conn.rollback()
         with conn.cursor() as cursor:
-            cursor.execute("""UPDATE stage2
+            cursor.execute("""UPDATE staging
                               SET current_status = 'failed'
                               WHERE current_status = 'running' AND node = %s""", (os.uname()[1],))
         conn.commit()
@@ -2036,7 +2070,7 @@ def GTZ_single_thread(requested_identifier=None):
                                       RETURNING identifier""",
                                    (p, int(degree)))
                     id = cursor.fetchone()[0]
-                    cursor.execute("""INSERT INTO tracking2 (origin, destination) VALUES (%s, %s)""",
+                    cursor.execute("""INSERT INTO simplified_ideals_tracking (origin, destination) VALUES (%s, %s)""",
                                    (identifier, id))
                 memory_utilization = psutil.Process(os.getpid()).memory_info().rss
                 cpu_time = datetime.timedelta(seconds = time.time() - start_time)
@@ -2118,7 +2152,7 @@ def load_simplified_ideal(identifier):
 def load_stage1(identifier):
     with conn:
         with conn.cursor() as cursor:
-            cursor.execute("SELECT system FROM stage1 WHERE identifier = %s", (int(identifier),))
+            cursor.execute("SELECT system FROM staging WHERE identifier = %s", (int(identifier),))
             return unpickle(cursor.fetchone()[0])
 
 def get_system_sizes():
@@ -2129,16 +2163,17 @@ def get_system_sizes():
 def SQL_stage2_reset():
     with conn:
         with conn.cursor() as cursor:
-            cursor.execute("DELETE FROM stage2")
-            cursor.execute("UPDATE stage1 SET current_status = 'queued', cpu_time = NULL, memory_utilization = NULL, pid = NULL, node = NULL")
+            cursor.execute("DELETE FROM staging WHERE origin != 0")
+            cursor.execute("DELETE FROM staging_stats")
+            cursor.execute("UPDATE staging SET current_status = 'queued', pid = NULL, node = NULL")
 
 def SQL_stage3_reset():
     with conn:
         with conn.cursor() as cursor:
             cursor.execute("DELETE FROM systems")
-            cursor.execute("DELETE FROM tracking")
-            cursor.execute("DELETE FROM stage3_stats")
-            cursor.execute("UPDATE stage2 SET current_status = 'queued', pid = NULL, node = NULL")
+            cursor.execute("DELETE FROM systems_tracking")
+            cursor.execute("DELETE FROM staging_stats USING staging WHERE staging_stats.identifier = staging.identifier AND staging.origin != 0")
+            cursor.execute("UPDATE staging SET current_status = 'queued', pid = NULL, node = NULL WHERE origin != 0")
 
 def SQL_GTZ_reset():
     with conn:
