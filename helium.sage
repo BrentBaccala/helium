@@ -1472,7 +1472,6 @@ CREATE INDEX ON systems(identifier) where current_status = 'queued' or current_s
 
 CREATE TABLE staging (
       identifier INTEGER GENERATED ALWAYS AS IDENTITY,
-      stage INTEGER,
       origin INTEGER,             -- for stage1, 0; for stage2, which identifier in stage1 this system came from
       system BYTEA,               -- a pickle of a tuple pair of tuples of polynomials; the first complex, the second simple
       current_status status,
