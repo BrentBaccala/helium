@@ -372,7 +372,7 @@ void task(void)
     /* I put this here because while the work was on the queue, we could have added new finished bitstrings */
     /* There's probably a race condition here, as a new finished bitstring could appear at any time! */
     if (finished_bitstrings.contain_a_subset_of(current_work.bitstring)) {
-      std::cerr << "detected superset\n";
+      // std::cerr << "detected superset\n";
       continue;
     }
 
@@ -486,7 +486,9 @@ void compute_and_display_statistics(void)
     polynomials_covered[cover.count()] += polys_covered;
   }
   for (int i = 1; i <= polys[0].len; i ++) {
-    if (covers[i] > 0) {
+    if (covers[i] == 1) {
+      std::cerr << getpid() << ": 1 " << i << "-bit cover covering " << polynomials_covered[i] << " polynomials\n";
+    } else if (covers[i] > 1) {
       std::cerr << getpid() << ": " << covers[i] << " " << i << "-bit covers covering " << polynomials_covered[i] << " polynomials\n";
     }
   }
