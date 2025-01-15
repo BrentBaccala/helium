@@ -35,7 +35,7 @@
 # SQL_stage2()
 # SQL_stage3_single_thread()
 # GTZ_single_thread()
-# consolidate_ideals(load_simplified_ideals())
+# consolidate_ideals(load_prime_ideals())
 #
 # SQL_stage3_single_thread() and GTZ_single_thread() have parallelized
 # variants SQL_stage3_parallel() and GTZ_parallel().  Additionally,
@@ -56,7 +56,7 @@
 # the output of the following two commands should be identical:
 #
 # sorted([j.groebner_basis() for j in ideal(eqns_RQQ).minimal_associated_primes()])
-# sorted([j.groebner_basis() for j in consolidate_ideals(load_simplified_ideals())])
+# sorted([j.groebner_basis() for j in consolidate_ideals(load_prime_ideals())])
 #
 # "Homogenization" (not a very good term) is used to force selected
 # polynomials to be non-zero by forcing their coefficients to be 1,
@@ -1433,14 +1433,14 @@ CREATE TYPE status AS ENUM ('queued', 'running', 'finished', 'interrupted', 'fai
 
 -- irreducible varieties
 
-CREATE TABLE simplified_ideals (
+CREATE TABLE prime_ideals (
       identifier INTEGER GENERATED ALWAYS AS IDENTITY,
       ideal BYTEA,                -- a pickle of a list of polynomials
       degree INTEGER,             -- the maximum degree of the polynomials in the ideal
       num INTEGER
 );
 
-CREATE UNIQUE INDEX ON simplified_ideals(md5(ideal));
+CREATE UNIQUE INDEX ON prime_ideals(md5(ideal));
 
 -- systems that have been simplified with simplifyIdeal and cnf2dnf, and are ready for GTZ processing
 
@@ -1490,14 +1490,14 @@ CREATE TABLE systems_tracking (
 
 CREATE UNIQUE INDEX ON systems_tracking(origin, destination);
 
--- tracking from systems to simplified_ideals
+-- tracking from systems to prime_ideals
 
-CREATE TABLE simplified_ideals_tracking (
+CREATE TABLE prime_ideals_tracking (
       origin INTEGER,
       destination INTEGER
 );
 
-CREATE UNIQUE INDEX ON simplified_ideals_tracking(origin, destination);
+CREATE UNIQUE INDEX ON prime_ideals_tracking(origin, destination);
 
 -- This table contains pickled rings and pickled polynomials, to keep down the size of the pickled systems.
 -- We expect lots of duplicate polynomials, so we only want to store each one once.
@@ -2065,12 +2065,12 @@ def GTZ_single_thread(requested_identifier=None):
                         save_global(p)
                     degree = max(p.degree() for p in ss)
                     p = persistent_pickle(sorted(ss))
-                    cursor.execute("""INSERT INTO simplified_ideals (ideal, degree, num) VALUES (%s, %s, 1)
-                                      ON CONFLICT (md5(ideal)) DO UPDATE SET num = simplified_ideals.num + 1
+                    cursor.execute("""INSERT INTO prime_ideals (ideal, degree, num) VALUES (%s, %s, 1)
+                                      ON CONFLICT (md5(ideal)) DO UPDATE SET num = prime_ideals.num + 1
                                       RETURNING identifier""",
                                    (p, int(degree)))
                     id = cursor.fetchone()[0]
-                    cursor.execute("""INSERT INTO simplified_ideals_tracking (origin, destination) VALUES (%s, %s)""",
+                    cursor.execute("""INSERT INTO prime_ideals_tracking (origin, destination) VALUES (%s, %s)""",
                                    (identifier, id))
                 memory_utilization = psutil.Process(os.getpid()).memory_info().rss
                 cpu_time = datetime.timedelta(seconds = time.time() - start_time)
@@ -2119,10 +2119,10 @@ def GTZ_parallel(max_workers = 8):
         conn.commit()
         raise
 
-def load_simplified_ideals():
+def load_prime_ideals():
     retval = []
     with conn.cursor() as cursor:
-        cursor.execute("SELECT ideal FROM simplified_ideals")
+        cursor.execute("SELECT ideal FROM prime_ideals")
         for sys in cursor:
             retval.append(ideal(unpickle(sys[0])))
     return retval
@@ -2143,10 +2143,10 @@ def list_systems():
         for sys in cursor:
             print(unpickle(sys[0]))
 
-def load_simplified_ideal(identifier):
+def load_prime_ideal(identifier):
     with conn:
         with conn.cursor() as cursor:
-            cursor.execute("SELECT ideal FROM simplified_ideals WHERE identifier = %s", (int(identifier),))
+            cursor.execute("SELECT ideal FROM prime_ideals WHERE identifier = %s", (int(identifier),))
             return unpickle(cursor.fetchone()[0])
 
 def load_stage1(identifier):
@@ -2181,6 +2181,6 @@ def SQL_GTZ_reset():
             cursor.execute("""UPDATE systems
                               SET current_status = 'queued', pid = NULL, node = NULL
                               WHERE current_status != 'queued'""")
-            cursor.execute("DELETE FROM tracking2")
-            cursor.execute("DELETE FROM simplified_ideals")
+            cursor.execute("DELETE FROM prime_ideals")
+            cursor.execute("DELETE FROM prime_ideals_tracking")
 
