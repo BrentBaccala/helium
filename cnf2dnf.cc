@@ -6,7 +6,8 @@
  * USAGE: ./cnf2dnf NUM_THREADS < input-bit-strings > output-bit-strings
  *
  * GOAL: Given a set of polynomials (that form an ideal), we want to factor them all and
- * form a set of ideals, all formed from irreducible polynomials.
+ * form a set of ideals, all formed from irreducible polynomials.  The essence of
+ * this operation is converting a logical expression from CNF to DNF.
  *
  * PREPROCESS: Sage factors the polynomials and forms a list of factors.
  *
@@ -111,6 +112,8 @@
 #include <mutex>
 #include <shared_mutex>
 #include "LockingQueue.hpp"
+
+#include <unistd.h>
 
 // unsigned int bitstring_len = 0;
 
@@ -262,6 +265,15 @@ public:
     }
     return result;
   }
+
+  int count(void) const
+  {
+    int count = 0;
+    for (size_type i=0; i<bitstring.size(); i++) {
+      count += std::popcount(bitstring[i]);
+    }
+    return count;
+  }
 };
 
 std::ostream& operator<<(std::ostream& stream, BitString bs)
@@ -401,6 +413,85 @@ void task(void)
   }
 }
 
+/* Compute and display some statistics about the input data:
+ *
+ * Partition the input bits into sets that completely cover a group of polynomials,
+ * and display the number of bits in the set and the number of polynomials covered.
+ *
+ * Smaller partitions are easier to handle: 1 is a special case, and 2 through 5
+ * can be handled with lookup tables (not yet implemented).
+ */
+
+void compute_and_display_statistics(void)
+{
+  /* Which polynomials are yet to be grouped (initially all of them) */
+  std::vector<bool> under_consideration(polys.size(), true);
+  /* How many covers are there of each size, and how many polynomials are covered */
+  std::vector<int> covers(polys[0].len+1, 0);
+  std::vector<int> polynomials_covered(polys[0].len+1, 0);
+  /* How many polynomials (total) are yet to be grouped */
+  int polys_under_consideration = polys.size();
+  /* Step 1: eliminate polynomials with only a single bit set, and all others that depend on them */
+  for (int i=0; i<polys.size(); i++) {
+    if (under_consideration[i] && (polys[i].count() == 1)) {
+      under_consideration[i] = false;
+      polys_under_consideration --;
+      covers[1] ++;
+      polynomials_covered[1] ++;
+      for (int j=0; j<polys.size(); j++) {
+	if (under_consideration[j] && (polys[i] && polys[j])) {
+	  under_consideration[j] = false;
+	  polys_under_consideration --;
+	  polynomials_covered[1] ++;
+	}
+      }
+    }
+  }
+  /* Step 2: for each remaining polynomial, form a cover that is initially just the first polynomial.
+   * Then loop over all the polynomials, OR-ing in any polynomials that match the cover.  Keep looping
+   * until the cover stabilizes.  Remove all of these polynomials from consideration, and keep doing
+   * it until we've completely partitioned the input set.
+   */
+  while (polys_under_consideration > 0) {
+    BitString cover;
+    int polys_covered = 0;
+    int i;
+    for (i=0; i<polys.size(); i++) {
+      if (under_consideration[i]) {
+	cover = polys[i];
+	under_consideration[i] = false;
+	polys_under_consideration --;
+	polys_covered ++;
+	break;
+      }
+    }
+    if (i == polys.size()) {
+      /* We should always have at least one polynomial still under consideration */
+      throw "huh?";
+    }
+    bool expanding_cover;
+    do {
+      expanding_cover = false;
+      for (i=0; i<polys.size(); i++) {
+	if (under_consideration[i] && (cover && polys[i])) {
+	  cover |= polys[i];
+	  expanding_cover = true;
+	  under_consideration[i] = false;
+	  polys_under_consideration --;
+	  polys_covered ++;
+	}
+      }
+    } while (expanding_cover);
+    covers[cover.count()] ++;
+    polynomials_covered[cover.count()] += polys_covered;
+  }
+  for (int i = 1; i <= polys[0].len; i ++) {
+    if (covers[i] > 0) {
+      std::cerr << getpid() << ": " << covers[i] << " " << i << "-bit covers covering " << polynomials_covered[i] << " polynomials\n";
+    }
+  }
+}
+
 int main(int argc, char ** argv)
 {
   int nthreads = 1;
@@ -418,6 +509,7 @@ int main(int argc, char ** argv)
     BitString bs(bitstring);
     if (bitstring_len == 0) {
       bitstring_len = bs.len;
+      // std::cerr << bitstring_len << " byte bitstrings\n";
     } else if (bitstring_len != bs.len) {
       std::cerr << "bitstring lengths aren't consistent\n";
       exit(1);
@@ -434,6 +526,8 @@ int main(int argc, char ** argv)
       bs ^= rmsb;
     } while (bs);
   }
+
+  compute_and_display_statistics();
 
   BacktrackPoint initial_work;
   initial_work.next_polynomial = 0;
