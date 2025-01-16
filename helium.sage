@@ -103,8 +103,6 @@
 # no rights reserved; you may freely copy, modify, or distribute this
 # program
 
-num_processes = 4
-
 import itertools
 from itertools import *
 
@@ -126,6 +124,10 @@ from sage.data_structures.bitset import FrozenBitset
 import concurrent.futures
 
 import traceback
+
+# We expect to have twice as many threads as cores due to Intel Hyperthreading,
+# so completely occupy the cores while leaving the other threads available.
+num_processes = os.cpu_count() / 2
 
 try:
     from clint.textui.progress import Bar
@@ -159,6 +161,11 @@ except ModuleNotFoundError:
 postgres_connection_parameters = {
     'user':     'baccala',
 }
+
+# If we're on my laptop (samsung, for testing) or the postgres server (edge), use localhost
+# Otherwise, connect over IP to the postgres server (192.168.2.201, edge)
+if not os.uname()[1] in ('samsung', 'edge'):
+    postgres_connection_parameters['host'] = '192.168.2.201'
 
 try:
     import psycopg2
