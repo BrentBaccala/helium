@@ -1767,7 +1767,7 @@ def SQL_stage2():
                               WHERE identifier = (
                                   SELECT identifier
                                   FROM staging
-                                  WHERE current_status = 'queued' AND origin = 0
+                                  WHERE ( current_status = 'queued' OR current_status = 'interrupted' ) AND origin = 0
                                   ORDER BY identifier
                                   LIMIT 1
                                   )
@@ -1776,41 +1776,59 @@ def SQL_stage2():
             if cursor.rowcount == 0:
                 break
             pickled_system, identifier = cursor.fetchone()
-            start_time = time.time()
-            print('Unpickling stage 1 system', identifier)
-            system, simplifications = unpickle(pickled_system)
-            unpickle_time = time.time() - start_time
+            try:
+                start_time = time.time()
+                print('Unpickling stage 1 system', identifier)
+                system, simplifications = unpickle(pickled_system)
+                unpickle_time = time.time() - start_time
 
-            # The keys in this dictionary must match column names in the 'staging_stats' SQL table
-            # The keys ending in '_time' are processed differently because they correspond to SQL INTERVALs;
-            # the other keys correspond to SQL INTEGERs, BIGINTs, or VARCHARs.  For the '_time' variables,
-            # we store seconds in the dictionary, then convert them to datetime.timedelta's right
-            # before we pass them to SQL.
-            stats = {'identifier' : identifier,
-                     'pid' : os.getpid(),
-                     'node' : os.uname()[1],
-                     'unpickle_time' : unpickle_time,
-                     'factor_time' : 0,
-                     'insert_into_systems_time': 0,
-                     'cnf2dnf_time' : 0,
-                     'save_global_time' : 0,
-                     'simplifyIdeal_time' : 0}
+                # The keys in this dictionary must match column names in the 'staging_stats' SQL table
+                # The keys ending in '_time' are processed differently because they correspond to SQL INTERVALs;
+                # the other keys correspond to SQL INTEGERs, BIGINTs, or VARCHARs.  For the '_time' variables,
+                # we store seconds in the dictionary, then convert them to datetime.timedelta's right
+                # before we pass them to SQL.
+                stats = {'identifier' : identifier,
+                         'pid' : os.getpid(),
+                         'node' : os.uname()[1],
+                         'unpickle_time' : unpickle_time,
+                         'factor_time' : 0,
+                         'insert_into_systems_time': 0,
+                         'cnf2dnf_time' : 0,
+                         'save_global_time' : 0,
+                         'simplifyIdeal_time' : 0}
 
-            stage1and2(system, simplifications, identifier, stats=stats)
+                stage1and2(system, simplifications, identifier, stats=stats)
 
-            cursor.execute("""UPDATE staging
-                              SET current_status = 'finished'
-                              WHERE identifier = %s""", (identifier, ))
+                cursor.execute("""UPDATE staging
+                                  SET current_status = 'finished'
+                                  WHERE identifier = %s""", (identifier, ))
 
-            stats['total_time'] = time.time() - start_time
-            stats['memory_utilization'] = psutil.Process(os.getpid()).memory_info().rss
+                stats['total_time'] = time.time() - start_time
+                stats['memory_utilization'] = psutil.Process(os.getpid()).memory_info().rss
 
-            for k in stats:
-                if k.endswith('_time'):
-                    stats[k] = datetime.timedelta(seconds = int(stats[k]))
-            cursor.execute(f"INSERT INTO staging_stats ({','.join(stats.keys())}) VALUES %s", (tuple(stats.values()),))
+                for k in stats:
+                    if k.endswith('_time'):
+                        stats[k] = datetime.timedelta(seconds = int(stats[k]))
+                cursor.execute(f"INSERT INTO staging_stats ({','.join(stats.keys())}) VALUES %s", (tuple(stats.values()),))
 
-            conn.commit()
+                conn.commit()
+
+            except KeyboardInterrupt:
+                conn.rollback()
+                cursor.execute("""UPDATE staging
+                                  SET current_status = 'interrupted'
+                                  WHERE identifier = %s""", (identifier,))
+                cursor.execute("""DELETE FROM staging WHERE origin = %s""", (identifier,))
+                conn.commit()
+                raise
+            except:
+                conn.rollback()
+                cursor.execute("""UPDATE staging
+                                  SET current_status = 'failed'
+                                  WHERE identifier = %s""", (identifier,))
+                cursor.execute("""DELETE FROM staging WHERE origin = %s""", (identifier,))
+                conn.commit()
+                raise
 
             # keep our memory down by clearing our cached polynomials
             persistent_data.clear()
