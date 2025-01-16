@@ -158,6 +158,17 @@ public:
     return *rv;
   }
 
+  /* Bitwise equality */
+
+  bool operator==(const BitString& rhs) const
+  {
+    for (size_type i=0; i<bitstring.size(); i++) {
+      if (bitstring[i] != rhs.bitstring[i])
+	return false;
+    }
+    return true;
+  }
+
   /* Bitwise AND returning a BitString */
 
   BitString operator&(const BitString& rhs) const
@@ -422,6 +433,52 @@ void task(void)
  * can be handled with lookup tables (not yet implemented).
  */
 
+bool is_link(BitString top_cover, int link)
+{
+  std::vector<bool> under_consideration(polys.size());
+
+  if (polys[link].count() != 2) {
+    /* Links, by definition, have only two bits set */
+    return false;
+  }
+
+  /* Start by considering all polynomials under the top cover */
+  for (int i=0; i<polys.size(); i++) {
+    under_consideration[i] = polys[i] && top_cover;
+  }
+  /* Remove link from consideration */
+  under_consideration[link] = false;
+
+  /* Does this cause the top cover to partition in two? */
+
+  BitString cover;
+  int i;
+  for (i=0; i<polys.size(); i++) {
+    if (under_consideration[i]) {
+      cover = polys[i];
+      under_consideration[i] = false;
+      break;
+    }
+  }
+  if (i == polys.size()) {
+    /* If there's only one polynomial under the cover, then it's a link */
+    return true;
+  }
+  bool expanding_cover;
+  do {
+    expanding_cover = false;
+    for (i=0; i<polys.size(); i++) {
+      if (under_consideration[i] && (cover && polys[i])) {
+	cover |= polys[i];
+	expanding_cover = true;
+	under_consideration[i] = false;
+      }
+    }
+  } while (expanding_cover);
+
+  return ! (cover == top_cover);
+}
+
 void compute_and_display_statistics(void)
 {
   /* Which polynomials are yet to be grouped (initially all of them) */
@@ -429,6 +486,7 @@ void compute_and_display_statistics(void)
   /* How many covers are there of each size, and how many polynomials are covered */
   std::vector<int> covers(polys[0].len+1, 0);
   std::vector<int> polynomials_covered(polys[0].len+1, 0);
+  std::vector<int> links(polys[0].len+1, 0);
   /* How many polynomials (total) are yet to be grouped */
   int polys_under_consideration = polys.size();
   /* Step 1: eliminate polynomials with only a single bit set, and all others that depend on them */
@@ -484,12 +542,24 @@ void compute_and_display_statistics(void)
     } while (expanding_cover);
     covers[cover.count()] ++;
     polynomials_covered[cover.count()] += polys_covered;
+    for (i=0; i<polys.size(); i++) {
+      if (polys[i] && cover) {
+	if (is_link(cover, i)) {
+	  links[cover.count()] ++;
+	}
+      }
+    }
   }
   for (int i = 1; i <= polys[0].len; i ++) {
     if (covers[i] == 1) {
-      std::cerr << getpid() << ": 1 " << i << "-bit cover covering " << polynomials_covered[i] << " polynomials\n";
+      std::cerr << getpid() << ": 1 " << i << "-bit cover covering " << polynomials_covered[i] << " polynomials";
     } else if (covers[i] > 1) {
-      std::cerr << getpid() << ": " << covers[i] << " " << i << "-bit covers covering " << polynomials_covered[i] << " polynomials\n";
+      std::cerr << getpid() << ": " << covers[i] << " " << i << "-bit covers covering " << polynomials_covered[i] << " polynomials";
+    }
+    if (covers[i] >= 1) {
+      if (links[i] == 0) std::cerr << "; no links\n";
+      else if (links[i] == 1) std::cerr << "; 1 link\n";
+      else std::cerr << "; " << links[i] << " links\n";
     }
   }
 }
