@@ -108,6 +108,7 @@
 #include <iostream>
 #include <bitset>
 #include <vector>
+#include <list>
 #include <thread>
 #include <mutex>
 #include <shared_mutex>
@@ -486,7 +487,9 @@ void compute_and_display_statistics(void)
   /* How many covers are there of each size, and how many polynomials are covered */
   std::vector<int> covers(polys[0].len+1, 0);
   std::vector<int> polynomials_covered(polys[0].len+1, 0);
-  std::vector<int> links(polys[0].len+1, 0);
+  std::vector<int> count_of_links(polys[0].len+1, 0);
+  std::vector<int> count_of_chains(polys[0].len+1, 0);
+  std::vector<int> length_of_chains(polys[0].len+1, 0);
   /* How many polynomials (total) are yet to be grouped */
   int polys_under_consideration = polys.size();
   /* Step 1: eliminate polynomials with only a single bit set, and all others that depend on them */
@@ -542,12 +545,41 @@ void compute_and_display_statistics(void)
     } while (expanding_cover);
     covers[cover.count()] ++;
     polynomials_covered[cover.count()] += polys_covered;
+    std::list<int> links;
     for (i=0; i<polys.size(); i++) {
       if (polys[i] && cover) {
 	if (is_link(cover, i)) {
-	  links[cover.count()] ++;
+	  count_of_links[cover.count()] ++;
+	  links.emplace_back(i);
 	}
       }
+    }
+    while (links.size() > 0) {
+      int front_of_chain = links.front();
+      int back_of_chain = -1;
+      links.pop_front();
+      int length_of_chain = 1;
+      std::list<int>::iterator it;
+      do {
+	for (it = links.begin(); it != links.end(); it++) {
+	  if (polys[front_of_chain] && polys[*it]) {
+	    if (back_of_chain == -1) back_of_chain = front_of_chain;
+	    front_of_chain = *it;
+	    links.erase(it);
+	    length_of_chain ++;
+	    break;
+	  }
+	  if ((back_of_chain != -1) && (polys[back_of_chain] && polys[*it])) {
+	    back_of_chain = *it;
+	    links.erase(it);
+	    length_of_chain ++;
+	    break;
+	  }
+	}
+      } while (it != links.end());
+      count_of_chains[cover.count()] ++;
+      if (length_of_chain > length_of_chains[cover.count()])
+	length_of_chains[cover.count()] = length_of_chain;
     }
   }
   for (int i = 1; i <= polys[0].len; i ++) {
@@ -557,9 +589,14 @@ void compute_and_display_statistics(void)
       std::cerr << getpid() << ": " << covers[i] << " " << i << "-bit covers covering " << polynomials_covered[i] << " polynomials";
     }
     if (covers[i] >= 1) {
-      if (links[i] == 0) std::cerr << "; no links\n";
-      else if (links[i] == 1) std::cerr << "; 1 link\n";
-      else std::cerr << "; " << links[i] << " links\n";
+      if (count_of_links[i] == 0) std::cerr << "; no links\n";
+      else if (count_of_links[i] == 1) std::cerr << "; 1 link\n";
+      else {
+	std::cerr << "; " << count_of_links[i] << " links; ";
+	if (count_of_chains[i] == 0) std::cerr << "no chains\n";
+	else if (count_of_chains[i] == 1) std::cerr << "1 chain of length " << length_of_chains[i] << "\n";
+	else std::cerr << count_of_chains[i] << " chains; max length " << length_of_chains[i] << "\n";
+      }
     }
   }
 }
