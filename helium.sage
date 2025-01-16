@@ -1705,6 +1705,8 @@ def stage1and2(system, initial_simplifications, origin, stats=None):
     if any(eqn == 1 for eqn in eqns):
         # the system is inconsistent and needs no further processing
         return
+    # global for debugging purposes
+    global eqns_factors
     eqns_factors = parallel_factor_eqns(eqns)
     time4 = time.time()
     if stats:

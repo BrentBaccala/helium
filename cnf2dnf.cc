@@ -562,6 +562,11 @@ void compute_and_display_statistics(void)
       }
     }
 
+    /* Print the links */
+    std::cerr << "Links: ";
+    for (auto link: links) std::cerr << link << " ";
+    std::cerr << "\n";
+
     /* Remove all links from consideration, because we're going to repeat the cover calculation later without them. */
     for (auto link: links) under_consideration[link] = false;
 
