@@ -229,6 +229,7 @@ public:
 
   BitString operator|=(const BitString& rhs)
   {
+    if (len != rhs.len) throw "incompatible lengths in operator|=";
     for (size_type i=0; i<bitstring.size(); i++) {
       bitstring[i] |= rhs.bitstring[i];
     }
@@ -434,18 +435,43 @@ void task(void)
  * can be handled with lookup tables (not yet implemented).
  */
 
-bool is_link(BitString top_cover, int link)
+/* Given a cover and a set of polynomials "under consideration", expand the
+ * cover to include any polynomials under consideration that partially
+ * match the cover.  The cover argument is modified.  Once we're done,
+ * all of the polynomials "under consideration" are either completely
+ * under the (expanded) cover, or are not under it at all.
+ * Return the number of polynomials under the expanded cover.
+ */
+int expand_cover(BitString& cover, std::vector<bool> under_consideration)
 {
-  std::vector<bool> under_consideration(polys.size());
+    bool expanding_cover;
+    int polys_covered = 0;
+    do {
+      expanding_cover = false;
+      for (auto i=0; i<polys.size(); i++) {
+	if (under_consideration[i] && (cover && polys[i])) {
+	  under_consideration[i] = false;
+	  cover |= polys[i];
+	  polys_covered ++;
+	  expanding_cover = true;
+	}
+      }
+    } while (expanding_cover);
+    return polys_covered;
+}
 
+bool is_link(BitString top_cover, int link, std::vector<bool> under_consideration)
+{
   if (polys[link].count() != 2) {
     /* Links, by definition, have only two bits set */
     return false;
   }
 
-  /* Start by considering all polynomials under the top cover */
+  /* only consider polynomials under the top cover */
   for (int i=0; i<polys.size(); i++) {
-    under_consideration[i] = polys[i] && top_cover;
+    if (under_consideration[i]) {
+      under_consideration[i] = polys[i] && top_cover;
+    }
   }
   /* Remove link from consideration */
   under_consideration[link] = false;
@@ -457,7 +483,6 @@ bool is_link(BitString top_cover, int link)
   for (i=0; i<polys.size(); i++) {
     if (under_consideration[i]) {
       cover = polys[i];
-      under_consideration[i] = false;
       break;
     }
   }
@@ -465,18 +490,13 @@ bool is_link(BitString top_cover, int link)
     /* If there's only one polynomial under the cover, then it's a link */
     return true;
   }
-  bool expanding_cover;
-  do {
-    expanding_cover = false;
-    for (i=0; i<polys.size(); i++) {
-      if (under_consideration[i] && (cover && polys[i])) {
-	cover |= polys[i];
-	expanding_cover = true;
-	under_consideration[i] = false;
-      }
-    }
-  } while (expanding_cover);
 
+  expand_cover(cover, under_consideration);
+
+  /* If the expanded cover equals the top cover, then it's not a link.  Otherwise,
+   * the expanded cover is smaller because the top_cover partitioned into two,
+   * and it is a link.
+   */
   return ! (cover == top_cover);
 }
 
@@ -490,19 +510,16 @@ void compute_and_display_statistics(void)
   std::vector<int> count_of_links(polys[0].len+1, 0);
   std::vector<int> count_of_chains(polys[0].len+1, 0);
   std::vector<int> length_of_chains(polys[0].len+1, 0);
-  /* How many polynomials (total) are yet to be grouped */
-  int polys_under_consideration = polys.size();
+
   /* Step 1: eliminate polynomials with only a single bit set, and all others that depend on them */
   for (int i=0; i<polys.size(); i++) {
     if (under_consideration[i] && (polys[i].count() == 1)) {
       under_consideration[i] = false;
-      polys_under_consideration --;
       covers[1] ++;
       polynomials_covered[1] ++;
       for (int j=0; j<polys.size(); j++) {
 	if (under_consideration[j] && (polys[i] && polys[j])) {
 	  under_consideration[j] = false;
-	  polys_under_consideration --;
 	  polynomials_covered[1] ++;
 	}
       }
@@ -513,42 +530,31 @@ void compute_and_display_statistics(void)
    * until the cover stabilizes.  Remove all of these polynomials from consideration, and keep doing
    * it until we've completely partitioned the input set.
    */
-  while (polys_under_consideration > 0) {
+  BitString all_covers(polys[0].len);
+  while (true) {
     BitString cover;
-    int polys_covered = 0;
+    int polys_covered;
     int i;
     for (i=0; i<polys.size(); i++) {
-      if (under_consideration[i]) {
+      if (under_consideration[i] && ! (all_covers && polys[i])) {
 	cover = polys[i];
-	under_consideration[i] = false;
-	polys_under_consideration --;
-	polys_covered ++;
 	break;
       }
     }
     if (i == polys.size()) {
-      /* We should always have at least one polynomial still under consideration */
-      throw "huh?";
+      break;
     }
-    bool expanding_cover;
-    do {
-      expanding_cover = false;
-      for (i=0; i<polys.size(); i++) {
-	if (under_consideration[i] && (cover && polys[i])) {
-	  cover |= polys[i];
-	  expanding_cover = true;
-	  under_consideration[i] = false;
-	  polys_under_consideration --;
-	  polys_covered ++;
-	}
-      }
-    } while (expanding_cover);
+
+    polys_covered = expand_cover(cover, under_consideration);
+    all_covers |= cover;
+
     covers[cover.count()] ++;
     polynomials_covered[cover.count()] += polys_covered;
+
     std::list<int> links;
     for (i=0; i<polys.size(); i++) {
-      if (polys[i] && cover) {
-	if (is_link(cover, i)) {
+      if (under_consideration[i] && (polys[i] && cover)) {
+	if (is_link(cover, i, under_consideration)) {
 	  count_of_links[cover.count()] ++;
 	  links.emplace_back(i);
 	}
