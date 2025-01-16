@@ -103,7 +103,7 @@
 # no rights reserved; you may freely copy, modify, or distribute this
 # program
 
-num_processes = 12
+num_processes = 4
 
 import itertools
 from itertools import *
@@ -157,7 +157,6 @@ except ModuleNotFoundError:
             pass
 
 postgres_connection_parameters = {
-    'host':     '192.168.2.201',
     'user':     'baccala',
 }
 
@@ -1759,20 +1758,30 @@ def SQL_stage1(eqns):
     save_global(eqns[0].parent())
     stage1and2(eqns, tuple(), 0)
 
-def SQL_stage2():
+def SQL_stage2(requested_identifier=None):
     with conn.cursor() as cursor:
         while True:
-            cursor.execute("""UPDATE staging
-                              SET current_status = 'running', pid = %s, node = %s
-                              WHERE identifier = (
-                                  SELECT identifier
-                                  FROM staging
-                                  WHERE ( current_status = 'queued' OR current_status = 'interrupted' ) AND origin = 0
-                                  ORDER BY identifier
-                                  LIMIT 1
-                                  )
-                              RETURNING system, identifier""", (os.getpid(), os.uname()[1]) )
-            conn.commit()
+            # This post explains the subquery and the use of "FOR UPDATE SKIP LOCKED"
+            # https://dba.stackexchange.com/a/69497
+            if requested_identifier:
+                cursor.execute("""UPDATE staging
+                                  SET current_status = 'running', pid = %s, node = %s
+                                  WHERE identifier = %s AND ( current_status = 'queued' OR current_status = 'interrupted' ) AND origin = 0
+                                  RETURNING system, identifier""", (os.getpid(), os.uname()[1], int(requested_identifier)) )
+                conn.commit()
+            else:
+                cursor.execute("""UPDATE staging
+                                  SET current_status = 'running', pid = %s, node = %s
+                                  WHERE identifier = (
+                                      SELECT identifier
+                                      FROM staging
+                                      WHERE ( current_status = 'queued' OR current_status = 'interrupted' ) AND origin = 0
+                                      ORDER BY identifier
+                                      LIMIT 1
+                                      FOR UPDATE SKIP LOCKED
+                                      )
+                                  RETURNING system, identifier""", (os.getpid(), os.uname()[1]) )
+                conn.commit()
             if cursor.rowcount == 0:
                 break
             pickled_system, identifier = cursor.fetchone()
