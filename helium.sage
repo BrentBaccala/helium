@@ -1324,13 +1324,22 @@ cnf2dnf_tests = [
     (['100000000', '000000001'], ['100000001']),
     # check 2c332f
     (['10000000', '00000001'], ['10000001']),
+    # tests for links and chains
+    (['110000000', '011000000', '001100000', '000001100', '000010000', '000000110', '000000011', '000010100'],
+     ['101010101', '010110101', '101011010', '101010110', '011010101', '010111010', '010110110', '011011010', '011010110']),
+    (['110000000', '011000000', '001100000', '000001100', '000010000', '000000110', '000000011', '000010100', '000001000'],
+     ['101011101', '010111101', '101011010', '011011101', '010111010', '011011010'])
 ]
 
 def test_cnf2dnf():
     for test in cnf2dnf_tests:
         inputs = [FrozenBitset(s) for s in test[0]]
         outputs = [FrozenBitset(s) for s in test[1]]
-        if sorted(cnf2dnf(inputs)) != sorted(outputs):
+        actual_outputs = cnf2dnf(inputs)
+        # why do we need to convert to str here for the sort to work?
+        if sorted(actual_outputs, key=lambda x:str(x)) != sorted(outputs, key=lambda x:str(x)):
+            print("Expected:", sorted(outputs, key=lambda x:str(x)))
+            print("Actual:", sorted(actual_outputs, key=lambda x:str(x)))
             raise RuntimeError('cnf2dnf test failed')
     print('All cnf2dnf tests passed')
 
