@@ -365,6 +365,18 @@ public:
 
 FinishedBitStrings finished_bitstrings;
 
+/* Which polynomials are to be considered in the calculations (initially all of them),
+ * but some will be removed for optimization.
+ */
+std::vector<bool> under_consideration;
+
+/* All bits for which there is a polynomial containing only that bit.  Such bits must
+ * always be present in the output bit strings, and any polynomials that depend on them
+ * can be removed from under_consideration, since they will always be satisfied.
+ */
+BitString single_bit_covers;
+int single_bit_polynomials_covered = 0;
+
 void task(void)
 {
   /* "next work" is what this thread will do after "current work".  "extra work" has to be
@@ -424,16 +436,37 @@ void task(void)
   }
 }
 
-/* Compute and display some statistics about the input data:
+/* Remove from consideration all polynomials with only a single bit set, and all others that depend on them.
  *
- * Partition the input bits into sets that completely cover a group of polynomials,
+ * Modifies global variables 'single_bit_covers' and 'under_consideration'.
+ */
+
+void compute_and_remove_single_bit_covers(void)
+{
+  single_bit_covers = BitString(polys[0].len);
+
+  for (int i=0; i<polys.size(); i++) {
+    if (under_consideration[i] && (polys[i].count() == 1)) {
+      single_bit_polynomials_covered ++;
+      under_consideration[i] = false;
+      single_bit_covers |= polys[i];
+    }
+  }
+  for (int i=0; i<polys.size(); i++) {
+    if (under_consideration[i] && (single_bit_covers && polys[i])) {
+      single_bit_polynomials_covered ++;
+      under_consideration[i] = false;
+    }
+  }
+}
+
+/* Partition the input bits into sets that completely cover a group of polynomials,
  * and display the number of bits in the set and the number of polynomials covered.
  *
  * Smaller partitions are easier to handle: 1 is a special case, and 2 through 5
  * can be handled with lookup tables (not yet implemented).
- */
-
-/* Given a cover and a set of polynomials "under consideration", expand the
+ *
+ * Given a cover and a set of polynomials "under consideration", expand the
  * cover to include any polynomials under consideration that partially
  * match the cover.  The cover argument is modified.  Once we're done,
  * all of the polynomials "under consideration" are either completely
@@ -498,10 +531,10 @@ bool is_link(BitString top_cover, int link, std::vector<bool> under_consideratio
   return ! (cover == top_cover);
 }
 
+/* Compute and display some statistics about the input data */
+
 void compute_and_display_statistics(void)
 {
-  /* Which polynomials are yet to be grouped (initially all of them) */
-  std::vector<bool> under_consideration(polys.size(), true);
   /* How many covers are there of each size, and how many polynomials are covered */
   std::vector<int> covers(polys[0].len+1, 0);
   std::vector<int> polynomials_covered(polys[0].len+1, 0);
@@ -509,20 +542,6 @@ void compute_and_display_statistics(void)
   std::vector<int> count_of_chains(polys[0].len+1, 0);
   std::vector<int> length_of_chains(polys[0].len+1, 0);
 
-  /* Step 1: eliminate polynomials with only a single bit set, and all others that depend on them */
-  for (int i=0; i<polys.size(); i++) {
-    if (under_consideration[i] && (polys[i].count() == 1)) {
-      under_consideration[i] = false;
-      covers[1] ++;
-      polynomials_covered[1] ++;
-      for (int j=0; j<polys.size(); j++) {
-	if (under_consideration[j] && (polys[i] && polys[j])) {
-	  under_consideration[j] = false;
-	  polynomials_covered[1] ++;
-	}
-      }
-    }
-  }
   /* Step 2: for each remaining polynomial, form a cover that is initially just the first polynomial.
    * Then loop over all the polynomials, OR-ing in any polynomials that match the cover.  Keep looping
    * until the cover stabilizes.  Remove all of these polynomials from consideration, and keep doing
@@ -606,6 +625,12 @@ void compute_and_display_statistics(void)
 	length_of_chains[cover.count()] = length_of_chain;
     }
   }
+
+  if (single_bit_covers.count() == 1) std::cerr << "1 single bit cover covering ";
+  else std::cerr << single_bit_covers.count() << " single bit covers covering ";
+  if (single_bit_polynomials_covered == 1) std::cerr << "1 polynomial\n";
+  else std::cerr << single_bit_polynomials_covered << " polynomials\n";
+
   for (int i = 1; i <= polys[0].len; i ++) {
     if (covers[i] == 1) {
       std::cerr << "1 " << i << "-bit cover covering " << polynomials_covered[i] << " polynomials";
@@ -692,6 +717,9 @@ int main(int argc, char ** argv)
       bs ^= rmsb;
     } while (bs);
   }
+
+  under_consideration.resize(polys.size(), true);
+  compute_and_remove_single_bit_covers();
 
   compute_and_display_statistics();
 
