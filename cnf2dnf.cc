@@ -109,6 +109,7 @@
 #include <bitset>
 #include <vector>
 #include <list>
+#include <map>
 #include <thread>
 #include <mutex>
 #include <shared_mutex>
@@ -227,7 +228,7 @@ public:
 
   BitString operator|=(const BitString& rhs)
   {
-    if (len != rhs.len) throw "incompatible lengths in operator|=";
+    if (len != rhs.len) throw std::runtime_error("incompatible lengths in operator|=");
     for (size_type i=0; i<bitstring.size(); i++) {
       bitstring[i] |= rhs.bitstring[i];
     }
@@ -363,6 +364,17 @@ public:
   }
 };
 
+class Cover
+{
+  public:
+  BitString cover;
+  std::list<int> links;
+  std::map<BitString, BitString> single_link_chains;
+  bool all_chains_are_single_links;
+};
+
+std::list<Cover> all_covers;
+
 FinishedBitStrings finished_bitstrings;
 
 /* Which polynomials are to be considered in the calculations (initially all of them),
@@ -402,7 +414,7 @@ void task(void)
     while (current_work.next_polynomial < polys.size()) {
       /* If there's any overlap here, the polynomial is already satisfied, move on */
       // std::cerr << "working on " << current_work.bitstring << "\n";
-      if (! (current_work.bitstring && polys[current_work.next_polynomial])) {
+      if (under_consideration[current_work.next_polynomial] && ! (current_work.bitstring && polys[current_work.next_polynomial])) {
 	bool have_next_work = false;
 	/* Extend backtrack queue if there's more than one factor(bit) in the polynomial */
 	for (BitString next_bit: expanded_polys[current_work.next_polynomial]) {
@@ -493,6 +505,8 @@ int expand_cover(BitString& cover, std::vector<bool> under_consideration)
 
 bool is_link(BitString top_cover, int link, std::vector<bool> under_consideration)
 {
+  /* under_consideration is a local copy of the global under_consideration */
+
   if (polys[link].count() != 2) {
     /* Links, by definition, have only two bits set */
     return false;
@@ -531,6 +545,103 @@ bool is_link(BitString top_cover, int link, std::vector<bool> under_consideratio
   return ! (cover == top_cover);
 }
 
+void compute_all_covers(void)
+{
+  /* For each remaining polynomial, form a cover that is initially just the first polynomial.
+   * Then loop over all the polynomials, OR-ing in any polynomials that match the cover.  Keep looping
+   * until the cover stabilizes.  Remove all of these polynomials from consideration, and keep doing
+   * it until we've completely partitioned the input set.
+   */
+  BitString union_of_all_covers(polys[0].len);
+
+  while (true) {
+    Cover cover;
+    int polys_covered;
+    int i;
+    for (i=0; i<polys.size(); i++) {
+      if (under_consideration[i] && ! (union_of_all_covers && polys[i])) {
+	cover.cover = polys[i];
+	break;
+      }
+    }
+    if (i == polys.size()) {
+      break;
+    }
+
+    polys_covered = expand_cover(cover.cover, under_consideration);
+    union_of_all_covers |= cover.cover;
+
+    /* Identify which polynomials are links (2-bit polynomials that partition the cover when removed) */
+    for (i=0; i<polys.size(); i++) {
+      if (under_consideration[i] && (polys[i] && cover.cover)) {
+	if (is_link(cover.cover, i, under_consideration)) {
+	  cover.links.emplace_back(i);
+	}
+      }
+    }
+
+    /* Form the links into chains.  Remove the first link from the unchained_links list, then remove
+     * all other links that it can chain with, tracking the left and right ends of the chain.
+     * Keep doing this until all links have been formed into chains.
+     */
+    std::list<int> unchained_links = cover.links;
+    cover.all_chains_are_single_links = true;
+    while (unchained_links.size() > 0) {
+      int left_of_chain = unchained_links.front();
+      int right_of_chain = unchained_links.front();
+      unchained_links.pop_front();
+      int length_of_chain = 1;
+      std::list<int>::iterator it;
+      bool attached_a_link;
+      // std::cerr << "start of chain " << left_of_chain << " " << polys[left_of_chain] << " " << polys[left_of_chain].rightmost_set_bit() << "\n";
+      do {
+	attached_a_link = false;
+	for (it = unchained_links.begin(); it != unchained_links.end(); it++) {
+	  if (polys[left_of_chain] && polys[*it].rightmost_set_bit()) {
+	    left_of_chain = *it;
+	    unchained_links.erase(it);
+	    length_of_chain ++;
+	    attached_a_link = true;
+	    // std::cerr << "attached at left " << left_of_chain << " " << polys[left_of_chain] << "\n";
+	    break;
+	  }
+	  if (polys[right_of_chain].rightmost_set_bit() && polys[*it]) {
+	    right_of_chain = *it;
+	    unchained_links.erase(it);
+	    length_of_chain ++;
+	    attached_a_link = true;
+	    // std::cerr << "attached at right " << right_of_chain << " " << polys[right_of_chain] << "\n";
+	    break;
+	  }
+	}
+      } while (attached_a_link);
+      if (length_of_chain == 1) {
+	int rightmost_bit_polys = 0;
+	BitString attachment_point;
+	BitString outlying_point;
+	for (i=0; i<polys.size(); i++) {
+	  if (under_consideration[i] && (polys[i] && polys[left_of_chain].rightmost_set_bit())) rightmost_bit_polys ++;
+	}
+	if (rightmost_bit_polys == 1) {
+	  attachment_point = polys[left_of_chain].rightmost_set_bit();
+	  outlying_point = polys[left_of_chain] & ~attachment_point;
+	} else {
+	  outlying_point = polys[left_of_chain].rightmost_set_bit();
+	  attachment_point = polys[left_of_chain] & ~outlying_point;
+	}
+	if (! cover.single_link_chains.contains(attachment_point)) {
+	  cover.single_link_chains[attachment_point] = BitString(polys[0].len);
+	}
+	cover.single_link_chains[attachment_point] |= outlying_point;
+      } else {
+	cover.all_chains_are_single_links = false;
+      }
+    }
+    all_covers.push_back(cover);
+  }
+
+}
+
 /* Compute and display some statistics about the input data */
 
 void compute_and_display_statistics(void)
@@ -542,112 +653,25 @@ void compute_and_display_statistics(void)
   std::vector<int> count_of_chains(polys[0].len+1, 0);
   std::vector<int> length_of_chains(polys[0].len+1, 0);
 
-  /* Step 2: for each remaining polynomial, form a cover that is initially just the first polynomial.
-   * Then loop over all the polynomials, OR-ing in any polynomials that match the cover.  Keep looping
-   * until the cover stabilizes.  Remove all of these polynomials from consideration, and keep doing
-   * it until we've completely partitioned the input set.
-   */
-  BitString all_covers(polys[0].len);
-  std::list<int> links;
-  while (true) {
-    BitString cover;
-    int polys_covered;
-    int i;
-    for (i=0; i<polys.size(); i++) {
-      if (under_consideration[i] && ! (all_covers && polys[i])) {
-	cover = polys[i];
-	break;
-      }
-    }
-    if (i == polys.size()) {
-      break;
-    }
-
-    polys_covered = expand_cover(cover, under_consideration);
-    all_covers |= cover;
-
-    covers[cover.count()] ++;
-    polynomials_covered[cover.count()] += polys_covered;
-
-    /* Identify which polynomials are links (2-bit polynomials that partition the cover when removed) */
-    for (i=0; i<polys.size(); i++) {
-      if (under_consideration[i] && (polys[i] && cover)) {
-	if (is_link(cover, i, under_consideration)) {
-	  count_of_links[cover.count()] ++;
-	  links.emplace_back(i);
-	}
-      }
-    }
-
-    /* Print the links */
-    // std::cerr << "Links: ";
-    // for (auto link: links) std::cerr << link << " ";
-    // std::cerr << "\n";
-
-    /* Remove all links from consideration, because we're going to repeat the cover calculation later without them. */
-    for (auto link: links) under_consideration[link] = false;
-
-    /* Form the links into chains.  Remove the first link from the links list, then remove
-     * all other links that it can chain with, tracking the left and right ends of the chain.
-     * Keep doing this until all links have been formed into chains.
-     */
-    while (links.size() > 0) {
-      int left_of_chain = links.front();
-      int right_of_chain = links.front();
-      links.pop_front();
-      int length_of_chain = 1;
-      std::list<int>::iterator it;
-      bool attached_a_link;
-      // std::cerr << "start of chain " << left_of_chain << " " << polys[left_of_chain] << " " << polys[left_of_chain].rightmost_set_bit() << "\n";
-      do {
-	attached_a_link = false;
-	for (it = links.begin(); it != links.end(); it++) {
-	  if (polys[left_of_chain] && polys[*it].rightmost_set_bit()) {
-	    left_of_chain = *it;
-	    links.erase(it);
-	    length_of_chain ++;
-	    attached_a_link = true;
-	    // std::cerr << "attached at left " << left_of_chain << " " << polys[left_of_chain] << "\n";
-	    break;
-	  }
-	  if (polys[right_of_chain].rightmost_set_bit() && polys[*it]) {
-	    right_of_chain = *it;
-	    links.erase(it);
-	    length_of_chain ++;
-	    attached_a_link = true;
-	    // std::cerr << "attached at right " << right_of_chain << " " << polys[right_of_chain] << "\n";
-	    break;
-	  }
-	}
-      } while (attached_a_link);
-      count_of_chains[cover.count()] ++;
-      if (length_of_chain > length_of_chains[cover.count()])
-	length_of_chains[cover.count()] = length_of_chain;
-    }
-  }
+  /* Remove all links from consideration, because we're going to repeat the cover calculation later without them. */
+  /* for (auto link: links) under_consideration[link] = false; */
 
   if (single_bit_covers.count() == 1) std::cerr << "1 single bit cover covering ";
   else std::cerr << single_bit_covers.count() << " single bit covers covering ";
   if (single_bit_polynomials_covered == 1) std::cerr << "1 polynomial\n";
   else std::cerr << single_bit_polynomials_covered << " polynomials\n";
 
-  for (int i = 1; i <= polys[0].len; i ++) {
-    if (covers[i] == 1) {
-      std::cerr << "1 " << i << "-bit cover covering " << polynomials_covered[i] << " polynomials";
-    } else if (covers[i] > 1) {
-      std::cerr << covers[i] << " " << i << "-bit covers covering " << polynomials_covered[i] << " polynomials";
+  for (auto cover: all_covers) {
+    std::cerr << "a " << cover.cover.count() << "-bit cover with " << cover.links.size() << " links";
+    if (cover.all_chains_are_single_links) {
+      std::cerr << " (all single links) with " << cover.single_link_chains.size() << " attachment points\n";
+    } else {
+      std::cerr << "\n";
     }
-    if (covers[i] >= 1) {
-      if (count_of_links[i] == 0) std::cerr << "; no links\n";
-      else if (count_of_links[i] == 1) std::cerr << "; 1 link\n";
-      else {
-	std::cerr << "; " << count_of_links[i] << " links; ";
-	if (count_of_chains[i] == 0) std::cerr << "no chains\n";
-	else if (count_of_chains[i] == 1) std::cerr << "1 chain of length " << length_of_chains[i] << "\n";
-	else std::cerr << count_of_chains[i] << " chains; max length " << length_of_chains[i] << "\n";
-      }
-    }
+    /* missing: print number of polynomials covered and max length of chain (if not 1) */
   }
+
+#if 0
   /* repeat the cover calculation without the links */
 
   all_covers = BitString(polys[0].len);
@@ -681,6 +705,7 @@ void compute_and_display_statistics(void)
       std::cerr << covers[i] << " " << i << "-bit covers covering " << polynomials_covered[i] << " polynomials\n";
     }
   }
+#endif
 }
 
 int main(int argc, char ** argv)
@@ -721,6 +746,7 @@ int main(int argc, char ** argv)
   under_consideration.resize(polys.size(), true);
   compute_and_remove_single_bit_covers();
 
+  compute_all_covers();
   compute_and_display_statistics();
 
   BacktrackPoint initial_work;
@@ -739,7 +765,12 @@ int main(int argc, char ** argv)
   }
 
   for (auto p:finished_bitstrings.finished_bitstrings) {
-    std::cout << p << "\n";
+    if (p.len == 0) {
+      std::cout << single_bit_covers << "\n";
+    } else {
+      p |= single_bit_covers;
+      std::cout << p << "\n";
+    }
   }
 
   return 0;
