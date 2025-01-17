@@ -114,8 +114,6 @@
 #include <shared_mutex>
 #include "LockingQueue.hpp"
 
-#include <unistd.h>
-
 // unsigned int bitstring_len = 0;
 
 class BitString
@@ -610,9 +608,9 @@ void compute_and_display_statistics(void)
   }
   for (int i = 1; i <= polys[0].len; i ++) {
     if (covers[i] == 1) {
-      std::cerr << getpid() << ": 1 " << i << "-bit cover covering " << polynomials_covered[i] << " polynomials";
+      std::cerr << "1 " << i << "-bit cover covering " << polynomials_covered[i] << " polynomials";
     } else if (covers[i] > 1) {
-      std::cerr << getpid() << ": " << covers[i] << " " << i << "-bit covers covering " << polynomials_covered[i] << " polynomials";
+      std::cerr << covers[i] << " " << i << "-bit covers covering " << polynomials_covered[i] << " polynomials";
     }
     if (covers[i] >= 1) {
       if (count_of_links[i] == 0) std::cerr << "; no links\n";
@@ -653,9 +651,9 @@ void compute_and_display_statistics(void)
   std::cerr << "After links removed:\n";
   for (int i = 1; i <= polys[0].len; i ++) {
     if (covers[i] == 1) {
-      std::cerr << getpid() << ": 1 " << i << "-bit cover covering " << polynomials_covered[i] << " polynomials\n";
+      std::cerr << "1 " << i << "-bit cover covering " << polynomials_covered[i] << " polynomials\n";
     } else if (covers[i] > 1) {
-      std::cerr << getpid() << ": " << covers[i] << " " << i << "-bit covers covering " << polynomials_covered[i] << " polynomials\n";
+      std::cerr << covers[i] << " " << i << "-bit covers covering " << polynomials_covered[i] << " polynomials\n";
     }
   }
 }
