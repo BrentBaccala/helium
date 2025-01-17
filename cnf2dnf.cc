@@ -269,7 +269,7 @@ public:
     BitString result;
     result.bitstring.resize(bitstring.size());
     result.len = len;
-    for (size_type i=0; i<bitstring.size(); i++) {
+    for (size_type i=bitstring.size()-1; i>=0; i--) {
       data_type rightmost_set_bit = bitstring[i] & (-bitstring[i]);
       if (rightmost_set_bit) {
 	result.bitstring[i] = rightmost_set_bit;
@@ -563,40 +563,46 @@ void compute_and_display_statistics(void)
     }
 
     /* Print the links */
-    std::cerr << "Links: ";
-    for (auto link: links) std::cerr << link << " ";
-    std::cerr << "\n";
+    // std::cerr << "Links: ";
+    // for (auto link: links) std::cerr << link << " ";
+    // std::cerr << "\n";
 
     /* Remove all links from consideration, because we're going to repeat the cover calculation later without them. */
     for (auto link: links) under_consideration[link] = false;
 
     /* Form the links into chains.  Remove the first link from the links list, then remove
-     * all other links that it can chain with, tracking the front and back of the chain.
+     * all other links that it can chain with, tracking the left and right ends of the chain.
      * Keep doing this until all links have been formed into chains.
      */
     while (links.size() > 0) {
-      int front_of_chain = links.front();
-      int back_of_chain = -1;
+      int left_of_chain = links.front();
+      int right_of_chain = links.front();
       links.pop_front();
       int length_of_chain = 1;
       std::list<int>::iterator it;
+      bool attached_a_link;
+      // std::cerr << "start of chain " << left_of_chain << " " << polys[left_of_chain] << " " << polys[left_of_chain].rightmost_set_bit() << "\n";
       do {
+	attached_a_link = false;
 	for (it = links.begin(); it != links.end(); it++) {
-	  if (polys[front_of_chain] && polys[*it]) {
-	    if (back_of_chain == -1) back_of_chain = front_of_chain;
-	    front_of_chain = *it;
+	  if (polys[left_of_chain] && polys[*it].rightmost_set_bit()) {
+	    left_of_chain = *it;
 	    links.erase(it);
 	    length_of_chain ++;
+	    attached_a_link = true;
+	    // std::cerr << "attached at left " << left_of_chain << " " << polys[left_of_chain] << "\n";
 	    break;
 	  }
-	  if ((back_of_chain != -1) && (polys[back_of_chain] && polys[*it])) {
-	    back_of_chain = *it;
+	  if (polys[right_of_chain].rightmost_set_bit() && polys[*it]) {
+	    right_of_chain = *it;
 	    links.erase(it);
 	    length_of_chain ++;
+	    attached_a_link = true;
+	    // std::cerr << "attached at right " << right_of_chain << " " << polys[right_of_chain] << "\n";
 	    break;
 	  }
 	}
-      } while (it != links.end());
+      } while (attached_a_link);
       count_of_chains[cover.count()] ++;
       if (length_of_chain > length_of_chains[cover.count()])
 	length_of_chains[cover.count()] = length_of_chain;
