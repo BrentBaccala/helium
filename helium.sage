@@ -1734,6 +1734,9 @@ def stage1and2(system, initial_simplifications, origin, stats=None):
             num_completed = tuple(future.done() for future in futures).count(True)
             pb.show(num_completed)
     pb.done()
+    time4a = time.time()
+    if stats:
+        stats['save_global_time'] += time4a-time4
     print()
 
     # We need to get the objects tagged with their persistent ids (they were only tagged in the ProcessPool
