@@ -371,6 +371,7 @@ class Cover
   std::list<int> links;
   std::map<BitString, BitString> single_link_chains;
   bool all_chains_are_single_links;
+  int triplets;
 };
 
 std::list<Cover> all_covers;
@@ -417,6 +418,7 @@ void task(void)
       if (under_consideration[current_work.next_polynomial] && ! (current_work.bitstring && polys[current_work.next_polynomial])) {
 	bool have_next_work = false;
 	/* Extend backtrack queue if there's more than one factor(bit) in the polynomial */
+	/* XXX should this loop use a reference for speed? */
 	for (BitString next_bit: expanded_polys[current_work.next_polynomial]) {
 
 	  // std::cerr << "adding " << next_bit << "\n";
@@ -654,6 +656,26 @@ void compute_all_covers(void)
 	cover.all_chains_are_single_links = false;
       }
     }
+
+    /* Count "triplets": Polynomials with two isolated bits and only
+     * one touching the rest of the cover.
+     */
+
+    cover.triplets = 0;
+    for (i=0; i<polys.size(); i++) {
+      if (under_consideration[i] && (polys[i] && cover.cover) && (polys[i].count() == 3)) {
+	int single_poly_bits = 0;
+	for (BitString next_bit: expanded_polys[i]) {
+	  int matching_polys = 0;
+	  for (auto j=0; j<polys.size(); j++) {
+	    if (under_consideration[j] && (polys[j] && next_bit)) matching_polys ++;
+	  }
+	  if (matching_polys == 1) single_poly_bits ++;
+	}
+	if (single_poly_bits == 2) cover.triplets ++;
+      }
+    }
+
     all_covers.push_back(cover);
   }
 
@@ -681,10 +703,10 @@ void compute_and_display_statistics(void)
   for (auto cover: all_covers) {
     std::cerr << "a " << cover.cover.count() << "-bit cover with " << cover.links.size() << " links";
     if (cover.all_chains_are_single_links) {
-      std::cerr << " (all single links) with " << cover.single_link_chains.size() << " attachment points\n";
-    } else {
-      std::cerr << "\n";
+      std::cerr << " (all single links) with " << cover.single_link_chains.size() << " attachment points";
     }
+    if (cover.triplets == 1) std::cerr << "; 1 triplet\n";
+    else std::cerr << "; " << cover.triplets << " triplets \n";
     /* missing: print number of polynomials covered and max length of chain (if not 1) */
   }
 
