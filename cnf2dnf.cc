@@ -615,24 +615,41 @@ void compute_all_covers(void)
 	  }
 	}
       } while (attached_a_link);
+      /* If the length of chain is one, there are several possibilities: either it's a "dangling link"
+       * (the case we want to optimize), or the link is itself the entire cover, or it's a link
+       * between two subcovers.  The link has two sides (left and right).  Count up how many polynomials
+       * match up with each.  A dangling link has one side matching a single polynomial (the link itself)
+       * and the other sides matches more than one.  A link between two subcovers has both sides
+       * matching more than one polynomial.  If both sides match a single polynomial, then the
+       * link is the entire cover.
+       */
       if (length_of_chain == 1) {
-	int rightmost_bit_polys = 0;
+	BitString link_right_bit = polys[left_of_chain].rightmost_set_bit();
+	BitString link_left_bit = polys[left_of_chain] & ~link_right_bit;
+	int right_bit_polys = 0;
+	int left_bit_polys = 0;
 	BitString attachment_point;
 	BitString outlying_point;
 	for (i=0; i<polys.size(); i++) {
-	  if (under_consideration[i] && (polys[i] && polys[left_of_chain].rightmost_set_bit())) rightmost_bit_polys ++;
+	  if (under_consideration[i] && (polys[i] && link_right_bit)) right_bit_polys ++;
+	  if (under_consideration[i] && (polys[i] && link_left_bit)) left_bit_polys ++;
 	}
-	if (rightmost_bit_polys == 1) {
-	  attachment_point = polys[left_of_chain].rightmost_set_bit();
-	  outlying_point = polys[left_of_chain] & ~attachment_point;
+	if ((right_bit_polys == 1) && (left_bit_polys > 1)) {
+	  attachment_point = link_left_bit;
+	  outlying_point = link_right_bit;
+	} else if ((right_bit_polys > 1) && (left_bit_polys == 1)) {
+	  attachment_point = link_right_bit;
+	  outlying_point = link_left_bit;
 	} else {
-	  outlying_point = polys[left_of_chain].rightmost_set_bit();
-	  attachment_point = polys[left_of_chain] & ~outlying_point;
+	  /* not a case we handle */
+	  cover.all_chains_are_single_links = false;
 	}
-	if (! cover.single_link_chains.contains(attachment_point)) {
-	  cover.single_link_chains[attachment_point] = BitString(polys[0].len);
+	if (attachment_point.count() > 0) {
+	  if (! cover.single_link_chains.contains(attachment_point)) {
+	    cover.single_link_chains[attachment_point] = BitString(polys[0].len);
+	  }
+	  cover.single_link_chains[attachment_point] |= outlying_point;
 	}
-	cover.single_link_chains[attachment_point] |= outlying_point;
       } else {
 	cover.all_chains_are_single_links = false;
       }
@@ -749,6 +766,15 @@ int main(int argc, char ** argv)
   compute_all_covers();
   compute_and_display_statistics();
 
+  /* If we can optimize (a single cover with all single links), remove the links from consideration */
+  bool optimize = (all_covers.size() == 1 && all_covers.front().all_chains_are_single_links);
+  optimize = false;
+  if (optimize) {
+    for (auto link: all_covers.front().links) {
+      under_consideration[link] = false;
+    }
+  }
+
   BacktrackPoint initial_work;
   initial_work.next_polynomial = 0;
   backtrack_queue.push(initial_work);
@@ -766,9 +792,22 @@ int main(int argc, char ** argv)
 
   for (auto p:finished_bitstrings.finished_bitstrings) {
     if (p.len == 0) {
-      std::cout << single_bit_covers << "\n";
+      if (optimize) {
+	/* an optimized empty cover with single link chains must be a two bit cover composed of a single link */
+	for (auto const &[key, value] : all_covers.front().single_link_chains) {
+	  std::cout << key << "\n";
+	  std::cout << value << "\n";
+	}
+      } else {
+	std::cout << single_bit_covers << "\n";
+      }
     } else {
       p |= single_bit_covers;
+      if (optimize) {
+	for (auto const &[key, value] : all_covers.front().single_link_chains) {
+	  if (! (p && key)) p|= value;
+	}
+      }
       std::cout << p << "\n";
     }
   }
