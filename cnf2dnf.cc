@@ -279,10 +279,22 @@ public:
     return result;
   }
 
+  int rightmost_set_bit_index(void) const
+  {
+    for (int i=bitstring.size()-1; i>=0; i--) {
+      for (auto j=0; j<8*sizeof(data_type); j++) {
+	if (bitstring[i] & (1<<j)) {
+	  return i*sizeof(data_type) + j;
+	}
+      }
+    }
+    return -1;
+  }
+
   int count(void) const
   {
     int count = 0;
-    for (size_type i=0; i<bitstring.size(); i++) {
+    for (int i=0; i<bitstring.size(); i++) {
       count += std::popcount(bitstring[i]);
     }
     return count;
@@ -676,6 +688,7 @@ void compute_all_covers(void)
 	  }
 	}
 	if ((attachment_point.count() > 0) && (outlying_point.count() > 0)) {
+	  std::cerr << attachment_point.rightmost_set_bit_index() << " ";
 	  if (! cover.single_link_chains.contains(attachment_point)) {
 	    cover.single_link_chains[attachment_point] = BitString(polys[0].len);
 	  }
@@ -683,6 +696,7 @@ void compute_all_covers(void)
 	}
       }
     }
+    std::cerr << "\n";
 
     /* Count "triplets": Polynomials with two isolated bits and only
      * one touching the rest of the cover.
