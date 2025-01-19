@@ -121,9 +121,9 @@ class BitString
 {
 public:
   typedef unsigned char data_type;
-  std::vector<data_type> bitstring;
   typedef std::vector<data_type>::size_type size_type;
   unsigned int len;
+  std::vector<data_type> bitstring;
 
   /* Bitstrings are represented MSB on the left, with the initial data_type in bitstring
    * using only as many bits as needed (LSBs) and the remaining data_type's fully populated.
@@ -168,6 +168,22 @@ public:
 	return false;
     }
     return true;
+  }
+
+  /* less-than comparison so we can use this class as the Key in a std::map
+   * (I'm not sure why the default operator< doesn't work, but it doesn't)
+   *
+   * Treats the BitString as one giant unsigned integer.
+   */
+
+  bool operator<(const BitString& rhs) const
+  {
+    if (len != rhs.len) return (len < rhs.len);
+    for (size_type i=0; i<bitstring.size(); i++) {
+      if (bitstring[i] != rhs.bitstring[i])
+	return (bitstring[i] < rhs.bitstring[i]);
+    }
+    return false;
   }
 
   /* Bitwise AND returning a BitString */
@@ -688,7 +704,6 @@ void compute_all_covers(void)
 	  }
 	}
 	if ((attachment_point.count() > 0) && (outlying_point.count() > 0)) {
-	  std::cerr << attachment_point.rightmost_set_bit_index() << " ";
 	  if (! cover.single_link_chains.contains(attachment_point)) {
 	    cover.single_link_chains[attachment_point] = BitString(polys[0].len);
 	  }
@@ -696,7 +711,6 @@ void compute_all_covers(void)
 	}
       }
     }
-    std::cerr << "\n";
 
     /* Count "triplets": Polynomials with two isolated bits and only
      * one touching the rest of the cover.
