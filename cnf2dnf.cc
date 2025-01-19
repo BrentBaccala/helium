@@ -646,14 +646,40 @@ void compute_all_covers(void)
 	  /* not a case we handle */
 	  cover.all_chains_are_single_links = false;
 	}
+#if 0
 	if (attachment_point.count() > 0) {
 	  if (! cover.single_link_chains.contains(attachment_point)) {
 	    cover.single_link_chains[attachment_point] = BitString(polys[0].len);
 	  }
 	  cover.single_link_chains[attachment_point] |= outlying_point;
 	}
+#endif
       } else {
 	cover.all_chains_are_single_links = false;
+      }
+    }
+
+    for (i=0; i<polys.size(); i++) {
+      if (under_consideration[i] && (polys[i] && cover.cover) && (polys[i].count() == 2)) {
+	BitString outlying_point;
+	BitString attachment_point;
+	for (BitString current_bit: expanded_polys[i]) {
+	  int matching_polys = 0;
+	  for (auto j=0; j<polys.size(); j++) {
+	    if (under_consideration[j] && (polys[j] && current_bit)) matching_polys ++;
+	  }
+	  if (matching_polys == 1) {
+	    outlying_point = current_bit;
+	  } else {
+	    attachment_point = current_bit;
+	  }
+	}
+	if ((attachment_point.count() > 0) && (outlying_point.count() > 0)) {
+	  if (! cover.single_link_chains.contains(attachment_point)) {
+	    cover.single_link_chains[attachment_point] = BitString(polys[0].len);
+	  }
+	  cover.single_link_chains[attachment_point] |= outlying_point;
+	}
       }
     }
 
