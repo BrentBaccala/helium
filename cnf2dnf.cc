@@ -252,6 +252,15 @@ public:
     return *this;
   }
 
+  BitString operator&=(const BitString& rhs)
+  {
+    if (len != rhs.len) throw std::runtime_error("incompatible lengths in operator&=");
+    for (size_type i=0; i<bitstring.size(); i++) {
+      bitstring[i] &= rhs.bitstring[i];
+    }
+    return *this;
+  }
+
   BitString operator^=(const BitString& rhs)
   {
     for (size_type i=0; i<bitstring.size(); i++) {
@@ -338,6 +347,7 @@ std::ostream& operator<<(std::ostream& stream, BitString bs)
 struct BacktrackPoint
 {
   BitString bitstring;
+  BitString allowed_bits;
   unsigned int next_polynomial;
 };
 
@@ -449,23 +459,26 @@ void task(void)
 	/* Extend backtrack queue if there's more than one factor(bit) in the polynomial */
 	/* XXX should this loop use a reference for speed? */
 	for (BitString next_bit: expanded_polys[current_work.next_polynomial]) {
-
-	  // std::cerr << "adding " << next_bit << "\n";
-	  if (! have_next_work) {
-	    /* Like this, but avoids a copy */
-	    /* next_work_bitstring = current_work.bitstring | next_bit; */
-	    current_work.bitstring.logical_or_assign(next_work_bitstring, next_bit);
-	    /* Check first if this is a superset of an existing bit string; skip it if it is */
-	    if (finished_bitstrings.contain_a_subset_of(next_work_bitstring)) continue;
-	    have_next_work = true;
-	  } else {
-	    /* Like this, but avoids a copy */
-	    /* extra_work.bitstring = current_work.bitstring | next_bit; */
-	    current_work.bitstring.logical_or_assign(extra_work.bitstring, next_bit);
-	    extra_work.next_polynomial = current_work.next_polynomial + 1;
-	    /* Check first if this is a superset of an existing bit string; skip it if it is */
-	    if (finished_bitstrings.contain_a_subset_of(extra_work.bitstring)) continue;
-	    backtrack_queue.push(extra_work);
+	  /* skip this bit if it's not in the allowed bit set */
+	  if (next_bit && current_work.allowed_bits) {
+	    // std::cerr << "adding " << next_bit << "\n";
+	    if (! have_next_work) {
+	      /* Like this, but avoids a copy */
+	      /* next_work_bitstring = current_work.bitstring | next_bit; */
+	      current_work.bitstring.logical_or_assign(next_work_bitstring, next_bit);
+	      /* Check first if this is a superset of an existing bit string; skip it if it is */
+	      if (finished_bitstrings.contain_a_subset_of(next_work_bitstring)) continue;
+	      have_next_work = true;
+	    } else {
+	      /* Like this, but avoids a copy */
+	      /* extra_work.bitstring = current_work.bitstring | next_bit; */
+	      current_work.bitstring.logical_or_assign(extra_work.bitstring, next_bit);
+	      extra_work.allowed_bits = current_work.allowed_bits;
+	      extra_work.next_polynomial = current_work.next_polynomial + 1;
+	      /* Check first if this is a superset of an existing bit string; skip it if it is */
+	      if (finished_bitstrings.contain_a_subset_of(extra_work.bitstring)) continue;
+	      backtrack_queue.push(extra_work);
+	    }
 	  }
 	}
 	if (! have_next_work) {
@@ -843,20 +856,41 @@ int main(int argc, char ** argv)
   compute_all_covers();
   compute_and_display_statistics();
 
-  /* If we can optimize (a single cover with all single links), remove the links from consideration */
-  bool optimize = (all_covers.size() == 1 && all_covers.front().all_chains_are_single_links);
-  optimize = false;
-  if (optimize) {
-    for (auto link: all_covers.front().links) {
-      under_consideration[link] = false;
-    }
-  }
-
   BacktrackPoint initial_work;
   initial_work.next_polynomial = 0;
-  backtrack_queue.push(initial_work);
-  backtrack_queue.set_num_workers(nthreads);
+  initial_work.allowed_bits = ~ BitString(bitstring_len);
 
+  /* If we can optimize (a single cover with all single links), remove the links from consideration */
+  bool optimize = (all_covers.size() == 1 && all_covers.front().all_chains_are_single_links);
+  /* optimize = false; */
+  if (optimize) {
+    Cover& cover = all_covers.front();
+    int num_attachment_points = cover.single_link_chains.size();
+    /* There's 2^num_attachment_points possible combinations of attachment point "values".
+     * For each value, either the attachment point is included and all of the outliers are excluded, or vice versa.
+     * Loop through all of them, creating a BacktrackPoint for each and adding it to the work queue.
+     */
+    for (int attachment_points_value = 0; (attachment_points_value & (1 << num_attachment_points)) == 0; attachment_points_value ++) {
+      int working_value = attachment_points_value;
+      initial_work.bitstring = BitString(bitstring_len);
+      initial_work.allowed_bits = ~ BitString(bitstring_len);
+      for (auto const &[attachment_point, value] : cover.single_link_chains) {
+	if (working_value & 1) {
+	  initial_work.bitstring |= attachment_point;
+	  initial_work.allowed_bits &= ~ value;
+	} else {
+	  initial_work.bitstring |= value;
+	  initial_work.allowed_bits &= ~ attachment_point;
+	}
+	working_value >>= 1;
+      }
+      backtrack_queue.push(initial_work);
+    }
+  } else {
+    backtrack_queue.push(initial_work);
+  }
+
+  backtrack_queue.set_num_workers(nthreads);
   std::vector<std::thread> threads;
 
   for (int i=0; i < nthreads; i++) {
