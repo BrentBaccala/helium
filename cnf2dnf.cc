@@ -162,6 +162,7 @@ public:
 
   bool operator==(const BitString& rhs) const
   {
+    if (len != rhs.len) return false;
     for (size_type i=0; i<bitstring.size(); i++) {
       if (bitstring[i] != rhs.bitstring[i])
 	return false;
