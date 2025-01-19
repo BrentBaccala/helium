@@ -1606,6 +1606,14 @@ def load_globals():
                 persistent_data[str(id)] = obj
                 persistent_data_inverse[obj] = str(id)
 
+# "persistent_data_inverse[obj]" can take a long time (on the order of ten seconds) if obj
+# is a large polynomial (it's the hash that takes so long), so we used tags in place
+# of the polynomials where we can.
+
+class PersistentIdTag:
+    def __init__(self, tag):
+        self.tag = tag
+
 # Note that no attempt is made to save objects that aren't already in the persistent data tables.
 # If you want something saved into the globals table, you have to call save_global() explicitly.
 
@@ -1613,9 +1621,10 @@ def persistent_id(obj):
     # It's hard to tell if an arbitrary Python object is hashable
     #    See https://stackoverflow.com/a/3460725/1493790
     # The stackoverflow suggestion (try/except) is quite slow
+    if isinstance(obj, PersistentIdTag):
+        return obj.tag
     if isinstance(obj, sage.rings.ring.Ring) or isinstance(obj, sage.rings.polynomial.multi_polynomial.MPolynomial):
-        if obj in persistent_data_inverse:
-            return persistent_data_inverse[obj]
+        return persistent_data_inverse.get(obj, None)
     return None
 
 # This is pretty much how the dumps code works, except that it tries first to use an optimized version from _pickle
@@ -1667,10 +1676,14 @@ def dump_bitset_to_SQL(origin, i):
     global all_factors
     global simplifications
     t = tuple(all_factors[j] for j in bitsets[i])
+    time1 = time.time()
     system = persistent_pickle((t,simplifications))
+    time2 = time.time()
     with conn.cursor() as cursor:
         cursor.execute("INSERT INTO staging (system, origin, current_status) VALUES (%s, %s, 'queued')", (system, int(origin)))
     conn.commit()
+    time3 = time.time()
+    print('pickle time:', time2 - time1, 'insert time:', time3-time2, file=sys.stderr)
 
 def save_factor_as_global(i):
     return save_global(all_factors[i])
@@ -1749,10 +1762,12 @@ def stage1and2(system, initial_simplifications, origin, stats=None):
     # process boundary (either the subprocesses or postgres).  It's precisely for this step that
     # save_global and save_factor_as_global (the function called by the future) return the persistent id.
     print('Loading persistent ids')
+    all_factors_tags = []
     for i,future in enumerate(futures):
         id = future.result()
         persistent_data[id] = all_factors[i]
         persistent_data_inverse[all_factors[i]] = id
+        all_factors_tags.append(PersistentIdTag(id))
 
     print('cnf2dnf')
     time5 = time.time()
@@ -1763,20 +1778,12 @@ def stage1and2(system, initial_simplifications, origin, stats=None):
     if stats:
         stats['cnf2dnf_time'] += time6-time5
 
-    pb = ProgressBar(label='insert systems into SQL', expected_size=len(bitsets))
-    with concurrent.futures.ProcessPoolExecutor(max_workers=num_processes, initializer=process_pool_initializer) as executor:
-        futures = [executor.submit(dump_bitset_to_SQL, origin, i) for i in range(len(bitsets))]
-        for future in futures:
-            future.add_done_callback(done_callback)
-        num_completed = 0
-        while num_completed < len(bitsets):
-            concurrent.futures.wait(futures, timeout=1)
-            num_completed = tuple(future.done() for future in futures).count(True)
-            pb.show(num_completed)
-    pb.done()
-    print()
-    for future in futures:
-        future.result()
+    print('insert systems into SQL')
+    with conn.cursor() as cursor:
+        for bs in bitsets:
+            t = tuple(all_factors_tags[j] for j in bs)
+            system = persistent_pickle((t,simplifications))
+            cursor.execute("INSERT INTO staging (system, origin, current_status) VALUES (%s, %s, 'queued')", (system, int(origin)))
     time7 = time.time()
     if stats:
         stats['insert_into_systems_time'] += time7-time6
