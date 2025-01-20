@@ -362,6 +362,7 @@ class FinishedBitStrings
 public:
   std::vector<BitString> finished_bitstrings;
   std::shared_mutex mutex;
+  int smallest_count;
 
   bool contain_a_superset_of(const BitString& bitstring)
   {
@@ -378,6 +379,13 @@ public:
   {
     std::shared_lock<std::shared_mutex> lock(mutex);
 
+    /* If bitstring has fewer bits than anything in finished_bitstrings, then
+     * there's no way that anything in finished_bitstrings is a subset of bitstring.
+     */
+    if (bitstring.count() < smallest_count) {
+      return false;
+    }
+
     for (const BitString& fbs: finished_bitstrings) {
       if (bitstring.is_superset_of(fbs))
 	return true;
@@ -387,12 +395,18 @@ public:
 
   void add(const BitString &bitstring)
   {
+    int bitstring_count = bitstring.count();
     std::unique_lock<std::shared_mutex> lock(mutex);
 
-    /* A final extra check for subsets, to avoid problems from the race condition mentioned below */
-    for (const BitString& fbs: finished_bitstrings) {
-      if (bitstring.is_superset_of(fbs))
-	return;
+    /* A final extra check for subsets, to avoid problems from the race condition mentioned below.
+     * We don't call contain_a_subset_of because it locks the object.
+     */
+
+    if (bitstring.count() >= smallest_count) {
+      for (const BitString& fbs: finished_bitstrings) {
+	if (bitstring.is_superset_of(fbs))
+	  return;
+      }
     }
 
     // std::cerr << "add " << bitstring << "\n";
@@ -400,6 +414,16 @@ public:
     std::erase_if(finished_bitstrings, [&](const BitString& fbs) { return fbs.is_superset_of(bitstring); });
 
     finished_bitstrings.push_back(bitstring);
+
+    /* We might have just removed some bitstrings from finished_bitstrings, but since they
+     * were all supersets of bitstring, they had more bits in them than bitstring.
+     * So we didn't remove anything with fewer bits than bitstring, so if smallest_count
+     * is less than bitstring, it's still valid, and we don't have to re-check everything's
+     * count.
+     */
+    if (bitstring_count < smallest_count) {
+      smallest_count = bitstring_count;
+    }
   }
 };
 
@@ -444,12 +468,13 @@ void task(void)
     /* waitAndPop returns true if we've got work; false if all the work is done */
     if (! backtrack_queue.waitAndPop(current_work)) return;
 
-    /* I put this here because while the work was on the queue, we could have added new finished bitstrings */
-    /* There's probably a race condition here, as a new finished bitstring could appear at any time! */
-    if (finished_bitstrings.contain_a_subset_of(current_work.bitstring)) {
-      // std::cerr << "detected superset\n";
-      continue;
-    }
+    /* I used to have a test here: finished_bitstrings.contain_a_subset_of(current_work.bitstring),
+     * because even though we tested for this before adding the work to the backtrack_queue,
+     * we could have added new finished bitstrings while the work was on the queue.  The program
+     * spent a lot of time here, and I decided that we don't really need this check because
+     * we're going to check contain_a_subset_of if we either add work to the work queue,
+     * or add a bitstring to finished_bitstrings.
+     */
 
     while (current_work.next_polynomial < polys.size()) {
       /* If there's any overlap here, the polynomial is already satisfied, move on */
