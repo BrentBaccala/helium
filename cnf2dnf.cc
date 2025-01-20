@@ -408,7 +408,7 @@ public:
      * is less than bitstring, it's still valid, and we don't have to re-check everything's
      * count.
      */
-    if (bitstring_count < smallest_count) {
+    if ((finished_bitstrings.size() == 1) || (bitstring_count < smallest_count)) {
       smallest_count = bitstring_count;
     }
   }
