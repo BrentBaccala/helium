@@ -932,26 +932,8 @@ int main(int argc, char ** argv)
   }
 
   for (auto p:all_covers.front().finished_bitstrings.finished_bitstrings) {
-    bool optimize = (all_covers.size() == 1 && all_covers.front().all_chains_are_single_links);
-    if (p.len == 0) {
-      if (optimize) {
-	/* an optimized empty cover with single link chains must be a two bit cover composed of a single link */
-	for (auto const &[key, value] : all_covers.front().single_link_chains) {
-	  std::cout << key << "\n";
-	  std::cout << value << "\n";
-	}
-      } else {
-	std::cout << single_bit_covers << "\n";
-      }
-    } else {
-      p |= single_bit_covers;
-      if (optimize) {
-	for (auto const &[key, value] : all_covers.front().single_link_chains) {
-	  if (! (p && key)) p|= value;
-	}
-      }
-      std::cout << p << "\n";
-    }
+    p |= single_bit_covers;
+    std::cout << p << "\n";
   }
 
   return 0;
