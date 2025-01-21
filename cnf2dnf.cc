@@ -27,14 +27,34 @@
  *
  * ALGORITHM:
  *
- * Start with a bit string of all zeros (an empty ideal) and
- * and an empty list of finished bit strings, but note that we might remove a bit string from the list of
- * finished bit strings, so they're not completely "finished".  (Or maybe not, as we don't seem to be
- * removing anything from the finished bit strings)
+ * CNF to DNF conversion is, in general, NP-complete.  We make heavy use of heuristics
+ * that have proven themselves valuable for the specific case we're optimized for
+ * (factoring ideals by factoring polynomials).
  *
- * We track the number of the polynomial we're working on.  First check to see if there's
- * any overlap between the polynomial's bit string and the working bit string (bitwise AND).
- * If so, this polynomial is satisfied; move on to the next one.
+ * We start by looking for single-bit covers, which are common because often a polynomial
+ * does not factor at all.  All of these factors are required in the output, and any
+ * polynomials that include those factors in their factorizations will be satisfied, too,
+ * although this rarely happens for any complex ideal.
+ *
+ * We partition the remaining factors into covers, which are sets of factors.  Polynomials
+ * not excluded in the first step either have all of their factors in a cover, or have
+ * none of them in that cover.  The factors in the cover are expanded until this
+ * condition is met.  Often there will only be a single cover for the entire system,
+ * but sometimes it splits into two, and that's a big win, because they can be processed
+ * independently and then combined together at the end.
+ *
+ * Within each cover, we look for a polynomials with two factors, one of which doesn't
+ * appear in any other polynomial, which I call an "outlier".  This is quite a common case,
+ * and can be optimized, since the presence of the outlier in the output systems depends
+ * only on whether the other factor (the "attachment point") is present or not.
+ *
+ * Then, given a cover with all of its outliers excluded, we start with a bit string of all zeros
+ * (an empty ideal) and an empty list of finished bit strings, but note that we might remove
+ * a bit string from the list of finished bit strings, so they're not completely "finished".
+ *
+ * We move through the entire system, tracking the number of the polynomial we're working on.
+ * First check to see if there's any overlap between the polynomial's bit string and the
+ * working bit string (bitwise AND). If so, this polynomial is satisfied; move on to the next one.
  *
  * Otherwise, we loop over the bits in polynomial's bit string.
  * If there are none, then we discard this case and backtrack.  For each one bit, we form
@@ -57,8 +77,11 @@
  * the working bit string, and move on to the next one.
  *
  * For each point in the stack of backtrack points:
+ *    - which cover we're working on
  *    - working ideal bit string
  *    - polynomial number to process next
+ *    - some other things (list of finished polynomials, set of allowed_bits)
+ *      that could be collapsed into the Cover, but just haven't been
  *
  * Keep the stack of backtrack points as a queue.
  *
@@ -68,13 +91,6 @@
  *
  * Any running thread could potentially add more stuff to the queue, so a queue
  * empty condition does not suffice for termination.
- *
- * Ordering of the bit strings is unspecified.  Should we put all of the irreducible
- * polynomials first, because they will always be in the output?  The next set should
- * be any polynomials with those irreducibles as factors, because they will always
- * be satisfied.  After that, what, all the remaining polynomials with two factors,
- * just because we started with those with single factors?  This sorting should
- * be done in the pre-processing step; not going to bother with it in this code.
  *
  * POLYNOMIAL BIT STRINGS:
  *    - polys[i] are the complete bit strings for the i'th polynomial
@@ -544,7 +560,7 @@ void compute_and_remove_single_bit_covers(void)
  * and display the number of bits in the set and the number of polynomials covered.
  *
  * Smaller partitions are easier to handle: 1 is a special case, and 2 through 5
- * can be handled with lookup tables (not yet implemented).
+ * can be handled with lookup tables (not implemented, because they don't appear in practice).
  *
  * Given a cover and a set of polynomials "under consideration", expand the
  * cover to include any polynomials under consideration that partially
@@ -767,6 +783,25 @@ int main(int argc, char ** argv)
     for (int i=0; i < nthreads; i++) {
       threads[i].join();
     }
+
+    /* We've now got the single_bit_covers, which have to appear in all output product terms,
+     * and a list of covers with their finished bitstrings.  We now want to form the product
+     * of the finished bitstrings, every possible combination of one finished bitstring from
+     * each cover.  To achieve this, we form a vector of iterators over all of the covers
+     * and advance the first across its entire vector of bitstrings, then reset the first
+     * and advance the second, and so on until we've iterated over all combinations.
+     *
+     * We form a std::vector of pointers to the finished_bitstrings because the
+     * finished_bitstrings variable in Cover is a std::list, which can't be indexed
+     * like a std::vector.  We can't change the std::list in Cover to a std::vector,
+     * because std::vector's emplace_back method requires its members to be MoveInsertable,
+     * and FinishedBitstrings includes a std::mutex, which can't be moved because
+     * threads could be waiting on it.
+     *
+     * This code assumes that all of the covers have at least one finished_bitstring.
+     * Since a vector of all one bits would satisify all possible input conditions,
+     * this seems like a valid assumption (baring a bug).
+     */
 
     std::vector<std::vector<BitString> *> finished_bitstrings;
     std::vector<std::vector<BitString>::iterator> iterators;
