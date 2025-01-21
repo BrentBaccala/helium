@@ -414,12 +414,23 @@ public:
   }
 };
 
+class Cover
+{
+  public:
+  BitString cover;                                       /* which bits form the cover */
+  std::vector<bool> under_consideration;                 /* which polynomials are candidates */
+  std::map<BitString, BitString> single_link_chains;
+  int triplets;
+  FinishedBitStrings finished_bitstrings;
+};
+
 struct BacktrackPoint
 {
   BitString bitstring;
   BitString allowed_bits;
   unsigned int next_polynomial;
   FinishedBitStrings * finished_bitstrings;
+  Cover * cover;
 };
 
 std::vector<BitString> polys;
@@ -428,21 +439,7 @@ std::vector<std::vector<BitString>> expanded_polys;
 
 LockingQueue<BacktrackPoint> backtrack_queue;
 
-class Cover
-{
-  public:
-  BitString cover;
-  std::map<BitString, BitString> single_link_chains;
-  int triplets;
-  FinishedBitStrings finished_bitstrings;
-};
-
 std::list<Cover> all_covers;
-
-/* Which polynomials are to be considered in the calculations (initially all of them),
- * but some will be removed for optimization.
- */
-std::vector<bool> under_consideration;
 
 /* All bits for which there is a polynomial containing only that bit.  Such bits must
  * always be present in the output bit strings, and any polynomials that depend on them
@@ -477,7 +474,7 @@ void task(void)
     while (current_work.next_polynomial < polys.size()) {
       /* If there's any overlap here, the polynomial is already satisfied, move on */
       // std::cerr << "working on " << current_work.bitstring << "\n";
-      if (under_consideration[current_work.next_polynomial] && ! (current_work.bitstring && polys[current_work.next_polynomial])) {
+      if (current_work.cover->under_consideration[current_work.next_polynomial] && ! (current_work.bitstring && polys[current_work.next_polynomial])) {
 	bool have_next_work = false;
 	/* Extend backtrack queue if there's more than one factor(bit) in the polynomial */
 	/* XXX should this loop use a reference for speed? */
@@ -499,6 +496,7 @@ void task(void)
 	      extra_work.allowed_bits = current_work.allowed_bits;
 	      extra_work.next_polynomial = current_work.next_polynomial + 1;
 	      extra_work.finished_bitstrings = current_work.finished_bitstrings;
+	      extra_work.cover = current_work.cover;
 	      /* Check first if this is a superset of an existing bit string; skip it if it is */
 	      if (current_work.finished_bitstrings->contain_a_subset_of(extra_work.bitstring)) continue;
 	      backtrack_queue.push(extra_work);
@@ -518,12 +516,14 @@ void task(void)
 
 /* Remove from consideration all polynomials with only a single bit set, and all others that depend on them.
  *
- * Modifies global variables 'single_bit_covers' and 'under_consideration'.
+ * Modifies global variable 'single_bit_covers'
  */
 
 void compute_and_remove_single_bit_covers(void)
 {
   single_bit_covers = BitString(polys[0].len);
+
+  std::vector<bool> under_consideration(polys.size(), true);
 
   for (int i=0; i<polys.size(); i++) {
     if (under_consideration[i] && (polys[i].count() == 1)) {
@@ -553,16 +553,16 @@ void compute_and_remove_single_bit_covers(void)
  * under the (expanded) cover, or are not under it at all.
  * Return the number of polynomials under the expanded cover.
  */
-int expand_cover(BitString& cover, std::vector<bool> under_consideration)
+int expand_cover(Cover& cover)
 {
     bool expanding_cover;
     int polys_covered = 0;
     do {
       expanding_cover = false;
       for (auto i=0; i<polys.size(); i++) {
-	if (under_consideration[i] && (cover && polys[i])) {
-	  under_consideration[i] = false;
-	  cover |= polys[i];
+	if (! cover.under_consideration[i] && ! (single_bit_covers && polys[i]) && (cover.cover && polys[i])) {
+	  cover.under_consideration[i] = true;
+	  cover.cover |= polys[i];
 	  polys_covered ++;
 	  expanding_cover = true;
 	}
@@ -578,13 +578,13 @@ void compute_all_covers(void)
    * until the cover stabilizes.  Remove all of these polynomials from consideration, and keep doing
    * it until we've completely partitioned the input set.
    */
-  BitString union_of_all_covers(polys[0].len);
+  BitString union_of_all_covers = single_bit_covers;
 
   while (true) {
     int polys_covered;
     int i;
     for (i=0; i<polys.size(); i++) {
-      if (under_consideration[i] && ! (union_of_all_covers && polys[i])) {
+      if (! (union_of_all_covers && polys[i])) {
 	break;
       }
     }
@@ -594,8 +594,9 @@ void compute_all_covers(void)
 
     Cover& cover = all_covers.emplace_back();
     cover.cover = polys[i];
+    cover.under_consideration.resize(polys.size(), false);
 
-    polys_covered = expand_cover(cover.cover, under_consideration);
+    polys_covered = expand_cover(cover);
     union_of_all_covers |= cover.cover;
 
     /* Identify which polynomials are links (2-bit polynomials).
@@ -610,13 +611,13 @@ void compute_all_covers(void)
      */
 
     for (i=0; i<polys.size(); i++) {
-      if (under_consideration[i] && (polys[i] && cover.cover) && (polys[i].count() == 2)) {
+      if (cover.under_consideration[i] && (polys[i] && cover.cover) && (polys[i].count() == 2)) {
 	BitString outlying_point;
 	BitString attachment_point;
 	for (BitString current_bit: expanded_polys[i]) {
 	  int matching_polys = 0;
 	  for (auto j=0; j<polys.size(); j++) {
-	    if (under_consideration[j] && (polys[j] && current_bit)) matching_polys ++;
+	    if (cover.under_consideration[j] && (polys[j] && current_bit)) matching_polys ++;
 	  }
 	  if (matching_polys == 1) {
 	    outlying_point = current_bit;
@@ -639,12 +640,12 @@ void compute_all_covers(void)
 
     cover.triplets = 0;
     for (i=0; i<polys.size(); i++) {
-      if (under_consideration[i] && (polys[i] && cover.cover) && (polys[i].count() == 3)) {
+      if (cover.under_consideration[i] && (polys[i] && cover.cover) && (polys[i].count() == 3)) {
 	int single_poly_bits = 0;
 	for (BitString next_bit: expanded_polys[i]) {
 	  int matching_polys = 0;
 	  for (auto j=0; j<polys.size(); j++) {
-	    if (under_consideration[j] && (polys[j] && next_bit)) matching_polys ++;
+	    if (cover.under_consideration[j] && (polys[j] && next_bit)) matching_polys ++;
 	  }
 	  if (matching_polys == 1) single_poly_bits ++;
 	}
@@ -720,7 +721,6 @@ int main(int argc, char ** argv)
     } while (bs);
   }
 
-  under_consideration.resize(polys.size(), true);
   compute_and_remove_single_bit_covers();
 
   compute_all_covers();
@@ -730,13 +730,8 @@ int main(int argc, char ** argv)
     BacktrackPoint initial_work;
     initial_work.next_polynomial = 0;
     initial_work.allowed_bits = ~ BitString(bitstring_len);
-    initial_work.finished_bitstrings = & all_covers.front().finished_bitstrings;
 
-    /* If we can optimize (a single cover with all single links), remove the links from consideration */
-    bool optimize = (all_covers.size() == 1);
-    /* optimize = false; */
-    if (optimize) {
-      Cover& cover = all_covers.front();
+    for (auto& cover: all_covers) {
       int num_attachment_points = cover.single_link_chains.size();
       /* There's 2^num_attachment_points possible combinations of attachment point "values".
        * For each value, either the attachment point is included and all of the outliers are excluded, or vice versa.
@@ -746,6 +741,8 @@ int main(int argc, char ** argv)
 	int working_value = attachment_points_value;
 	initial_work.bitstring = BitString(bitstring_len);
 	initial_work.allowed_bits = ~ BitString(bitstring_len);
+	initial_work.cover = &cover;
+	initial_work.finished_bitstrings = & cover.finished_bitstrings;
 	for (auto const &[attachment_point, value] : cover.single_link_chains) {
 	  if (working_value & 1) {
 	    initial_work.bitstring |= attachment_point;
@@ -758,8 +755,6 @@ int main(int argc, char ** argv)
 	}
 	backtrack_queue.push(initial_work);
       }
-    } else {
-      backtrack_queue.push(initial_work);
     }
 
     backtrack_queue.set_num_workers(nthreads);
@@ -773,9 +768,28 @@ int main(int argc, char ** argv)
       threads[i].join();
     }
 
-    for (auto p:all_covers.front().finished_bitstrings.finished_bitstrings) {
-      p |= single_bit_covers;
-      std::cout << p << "\n";
+    std::vector<std::vector<BitString> *> finished_bitstrings;
+    std::vector<std::vector<BitString>::iterator> iterators;
+    for (auto &cover: all_covers) {
+      finished_bitstrings.push_back(& cover.finished_bitstrings.finished_bitstrings);
+      iterators.push_back(cover.finished_bitstrings.finished_bitstrings.begin());
+    }
+    while (true) {
+      BitString result = single_bit_covers;
+      for (auto &it: iterators) {
+	result |= *it;
+      }
+      std::cout << result << "\n";
+      int i;
+      for (i=0; i<iterators.size(); i++) {
+	iterators[i] ++;
+	if (iterators[i] != finished_bitstrings[i]->end()) {
+	  break;
+	} else {
+	  iterators[i] = finished_bitstrings[i]->begin();
+	}
+      }
+      if (i == iterators.size()) break;
     }
   } else {
     std::cout << single_bit_covers << "\n";
