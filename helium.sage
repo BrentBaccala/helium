@@ -2157,7 +2157,7 @@ def GTZ_single_thread(requested_identifier=None):
                 conn.commit()
                 raise
 
-def GTZ_parallel(max_workers = 8):
+def GTZ_parallel(max_workers = num_processes):
     try:
         with concurrent.futures.ProcessPoolExecutor(max_workers=max_workers, initializer=process_pool_initializer) as executor:
             futures = [executor.submit(GTZ_single_thread) for _ in range(max_workers)]
