@@ -1947,7 +1947,7 @@ def stage3(system, simplifications, origin, stats=None):
     time2 = time.time()
     if stats:
         stats['simplifyIdeal_time'] += time2 - time1
-    simplifications = tuple(sorted(simplifications + normalize(s))
+    simplifications = tuple(sorted(simplifications + normalize(s)))
     eqns = normalize(dropZeros(eqns))
     if len(eqns) == 0:
         insert_into_systems(eqns, simplifications, origin, stats=stats)
