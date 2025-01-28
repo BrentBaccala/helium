@@ -1494,7 +1494,8 @@ CREATE INDEX ON systems(identifier) where current_status = 'queued' or current_s
 
 CREATE TABLE staging (
       identifier INTEGER GENERATED ALWAYS AS IDENTITY,
-      origin INTEGER,             -- for stage1, 0; for stage2, which identifier in stage1 this system came from
+      stage INTEGER,              -- the original system is stage 0, each system derived from it is one integer higher
+      origin INTEGER,             -- for stage 1, 0; for later stages, which identifier in the previous stage this system came from
       system BYTEA,               -- a pickle of a tuple pair of tuples of polynomials; the first complex, the second simple
       current_status status,
       node VARCHAR,
@@ -1700,6 +1701,10 @@ def normalize(eqns):
 # delay in the parallel code.
 
 def stage1and2(system, initial_simplifications, origin, stats=None):
+    if origin == 0:
+        stage = 1
+    else:
+        stage = 2
     print('simplifyIdeal')
     time1 = time.time()
     eqns,s = simplifyIdeal(list(system))
@@ -1784,7 +1789,8 @@ def stage1and2(system, initial_simplifications, origin, stats=None):
         for bs in bitsets:
             t = tuple(all_factors_tags[j] for j in bs)
             system = persistent_pickle((t,simplifications))
-            cursor.execute("INSERT INTO staging (system, origin, current_status) VALUES (%s, %s, 'queued')", (system, int(origin)))
+            cursor.execute("INSERT INTO staging (system, stage, origin, current_status) VALUES (%s, %s, %s, 'queued')",
+                           (system, int(stage), int(origin)))
     time7 = time.time()
     if stats:
         stats['insert_into_systems_time'] += time7-time6
@@ -1941,7 +1947,7 @@ def stage3(system, simplifications, origin, stats=None):
     time2 = time.time()
     if stats:
         stats['simplifyIdeal_time'] += time2 - time1
-    simplifications = simplifications + normalize(s)
+    simplifications = tuple(sorted(simplifications + normalize(s))
     eqns = normalize(dropZeros(eqns))
     if len(eqns) == 0:
         insert_into_systems(eqns, simplifications, origin, stats=stats)
@@ -1953,7 +1959,8 @@ def stage3(system, simplifications, origin, stats=None):
     time3 = time.time()
     if stats:
         stats['factor_time'] += time3-time2
-    all_factors = tuple(set(f for l in eqns_factors for f in l))
+    # sorting all_factors ensures each system in list_of_systems is sorted (see comment in stage1and2)
+    all_factors = sorted(set(f for l in eqns_factors for f in l))
     dnf_bitsets = cnf2dnf(FrozenBitset(tuple(all_factors.index(f) for f in l), capacity=len(all_factors)) for l in eqns_factors)
     list_of_systems = tuple(tuple(all_factors[i] for i in bs) for bs in dnf_bitsets)
     time4 = time.time()
