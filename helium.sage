@@ -1950,11 +1950,10 @@ def stage3(system, simplifications, origin, stats=None):
     simplifications = tuple(sorted(simplifications + normalize(s)))
     eqns = normalize(dropZeros(eqns))
     if len(eqns) == 0:
-        insert_into_systems(eqns, simplifications, origin, stats=stats)
-        return
+        return [(eqns, simplifications)]
     if any(eqn == 1 for eqn in eqns):
         # the system is inconsistent and needs no further processing
-        return
+        return []
     eqns_factors = tuple(tuple(f for f,m in factor(eqn)) for eqn in eqns)
     time3 = time.time()
     if stats:
@@ -1967,10 +1966,9 @@ def stage3(system, simplifications, origin, stats=None):
     if stats:
         stats['cnf2dnf_time'] += time4-time3
     if len(list_of_systems) == 1:
-        insert_into_systems(eqns, simplifications, origin, stats=stats)
+        return [(eqns, simplifications)]
     else:
-        for system in list_of_systems:
-            stage3(system, simplifications, origin, stats=stats)
+        return [result for subsystem in list_of_systems for result in stage3(subsystem, simplifications, origin, stats=stats)]
 
 
 def SQL_stage3_single_thread(requested_identifier=None):
@@ -2021,7 +2019,8 @@ def SQL_stage3_single_thread(requested_identifier=None):
                 system_pair = unpickle(pickled_system)
                 stats['unpickle_time'] = time.time() - start_time
 
-                stage3(system_pair[0], system_pair[1], identifier, stats)
+                for result in stage3(system_pair[0], system_pair[1], identifier, stats):
+                    insert_into_systems(result[0], result[1], identifier, stats=stats)
 
                 cursor.execute("""UPDATE staging
                                   SET current_status = 'finished'
