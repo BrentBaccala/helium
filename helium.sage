@@ -1545,7 +1545,6 @@ CREATE TABLE staging_stats (
       save_global_time INTERVAL,
       simplifyIdeal_time INTERVAL,
       insert_into_systems_time INTERVAL,
-      minprimes_time INTERVAL,
       total_time INTERVAL,
       memory_utilization BIGINT
 );
@@ -2098,17 +2097,17 @@ def GTZ_single_thread(requested_identifier=None):
     while True:
         with conn.cursor() as cursor:
             if requested_identifier:
-                cursor.execute("""UPDATE staging
+                cursor.execute("""UPDATE systems
                                   SET current_status = 'running', pid = %s, node = %s
                                   WHERE identifier = %s AND ( current_status = 'queued' OR current_status = 'interrupted' )
                                   RETURNING system, identifier""", (os.getpid(), os.uname()[1], int(requested_identifier)) )
                 conn.commit()
             else:
-                cursor.execute("""UPDATE staging
+                cursor.execute("""UPDATE systems
                                   SET current_status = 'running', pid = %s, node = %s
                                   WHERE identifier = (
                                       SELECT identifier
-                                      FROM staging
+                                      FROM systems
                                       WHERE current_status = 'queued' OR current_status = 'interrupted'
                                       ORDER BY identifier
                                       LIMIT 1
@@ -2120,27 +2119,17 @@ def GTZ_single_thread(requested_identifier=None):
                 break
             pickled_system, identifier = cursor.fetchone()
             try:
-                # The keys in this dictionary must match column names in the 'staging_stats' SQL table
-                # The keys ending in '_time' are processed differently because they correspond to SQL INTERVALs;
-                # the other keys correspond to SQL INTEGERs, BIGINTs, or VARCHARs.  For the '_time' variables,
-                # we store seconds in the dictionary, then convert them to datetime.timedelta's right
-                # before we pass them to SQL.
-
                 start_time = time.time()
                 print('Starting system', identifier)
                 system, simplifications = unpickle(pickled_system)
-                time2 = time.time()
                 if len(system) == 0:
                     subsystems = tuple((eliminateZeros(simplifications), ))
                 else:
                     minimal_primes = ideal(system).minimal_associated_primes()
                     subsystems = tuple(eliminateZeros(mp.gens() + simplifications) for mp in minimal_primes)
-                time3 = time.time()
                 for ss in subsystems:
                     for p in ss:
                         save_global(p)
-                time4 = time.time()
-                for ss in subsystems:
                     degree = max(p.degree() for p in ss)
                     p = persistent_pickle(sorted(ss))
                     cursor.execute("""INSERT INTO prime_ideals (ideal, degree, num) VALUES (%s, %s, 1)
@@ -2150,36 +2139,25 @@ def GTZ_single_thread(requested_identifier=None):
                     id = cursor.fetchone()[0]
                     cursor.execute("""INSERT INTO prime_ideals_tracking (origin, destination) VALUES (%s, %s)""",
                                    (identifier, id))
-                end_time = time.time()
                 memory_utilization = psutil.Process(os.getpid()).memory_info().rss
-                cursor.execute("""UPDATE staging
-                                  SET current_status = 'finished'
-                                  WHERE identifier = %s""", (identifier,))
-                stats = {'identifier' : identifier,
-                         'pid' : os.getpid(),
-                         'node' : os.uname()[1],
-                         'unpickle_time' : time2-start_time,
-                         'minprimes_time' : time3-time3,
-                         'save_global_time' : time4-time3,
-                         'insert_into_systems_time': end_time-time4,
-                         'total_time': end_time - start_time,
-                         'memory_utilization': memory_utilization}
-                for k in stats:
-                    if k.endswith('_time'):
-                        stats[k] = datetime.timedelta(seconds = int(stats[k]))
-                cursor.execute(f"INSERT INTO staging_stats ({','.join(stats.keys())}) VALUES %s", (tuple(stats.values()),))
+                cpu_time = datetime.timedelta(seconds = time.time() - start_time)
+                cursor.execute("""UPDATE systems
+                                  SET current_status = 'finished',
+                                      cpu_time = %s,
+                                      memory_utilization = %s
+                                  WHERE identifier = %s""", (cpu_time, memory_utilization, identifier))
                 conn.commit()
                 print('Finished system', identifier)
             except KeyboardInterrupt:
                 conn.rollback()
-                cursor.execute("""UPDATE staging
+                cursor.execute("""UPDATE systems
                                   SET current_status = 'interrupted'
                                   WHERE identifier = %s""", (identifier,))
                 conn.commit()
                 raise
             except:
                 conn.rollback()
-                cursor.execute("""UPDATE staging
+                cursor.execute("""UPDATE systems
                                   SET current_status = 'failed'
                                   WHERE identifier = %s""", (identifier,))
                 conn.commit()
@@ -2202,7 +2180,7 @@ def GTZ_parallel(max_workers = num_processes):
         # in one of the futures failed due to a TypeError because I didn't call the BrokenProcessPool constructor correctly.
         conn.rollback()
         with conn.cursor() as cursor:
-            cursor.execute("""UPDATE staging
+            cursor.execute("""UPDATE systems
                               SET current_status = 'failed'
                               WHERE current_status = 'running' AND node = %s""", (os.uname()[1],))
         conn.commit()
