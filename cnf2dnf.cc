@@ -133,6 +133,8 @@
 
 // unsigned int bitstring_len = 0;
 
+bool verbose = false;
+
 class BitString
 {
 public:
@@ -740,7 +742,7 @@ int main(int argc, char ** argv)
   compute_and_remove_single_bit_covers();
 
   compute_all_covers();
-  compute_and_display_statistics();
+  if (verbose) compute_and_display_statistics();
 
   if (all_covers.size() > 0) {
     BacktrackPoint initial_work;
