@@ -473,6 +473,7 @@ void task(void)
    */
   BacktrackPoint current_work;
   BitString next_work_bitstring;
+  BitString next_work_allowed_bits;
   BacktrackPoint extra_work;
 
   while (true) {
@@ -504,6 +505,8 @@ void task(void)
 	      /* Like this, but avoids a copy */
 	      /* next_work_bitstring = current_work.bitstring | next_bit; */
 	      current_work.bitstring.logical_or_assign(next_work_bitstring, next_bit);
+	      /* remove all of the current polynomial's bits from the allowed bits for future work */
+	      next_work_allowed_bits = current_work.allowed_bits;
 	      /* Check first if this is a superset of an existing bit string; skip it if it is */
 	      if (current_work.finished_bitstrings->contain_a_subset_of(next_work_bitstring)) continue;
 	      have_next_work = true;
@@ -519,12 +522,17 @@ void task(void)
 	      if (current_work.finished_bitstrings->contain_a_subset_of(extra_work.bitstring)) continue;
 	      backtrack_queue.push(extra_work);
 	    }
+	    /* If the current polynomial's bits are 111, we want to create future work 1xx, 01x, 001,
+	     * (not 1xx, x1x, xx1), so we now remove the current bit from the allowed bits.
+	     */
+	    current_work.allowed_bits &= ~next_bit;
 	  }
 	}
 	if (! have_next_work) {
 	  goto get_next_work_from_queue;
 	}
 	current_work.bitstring = next_work_bitstring;
+	current_work.allowed_bits = next_work_allowed_bits;
       }
       current_work.next_polynomial ++;
     }

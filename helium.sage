@@ -1293,7 +1293,7 @@ def cnf2dnf_espresso(cnf_bitsets, parallel=False):
     return retval
 
 def cnf2dnf_external(cnf_bitsets, parallel=False):
-    # we sort cnf_bitsets so that the bitsets with a single one bit come first, to speed processing in build_systems
+    # we sort cnf_bitsets so that the bitsets with a single one bit come first, to speed processing in cnf2dnf
     cnf_bitsets = sorted(cnf_bitsets, key=lambda x:len(x))
     cmd = ['./cnf2dnf', str(num_processes if parallel else 1)]
     proc = subprocess.Popen(cmd, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=sys.stderr)
@@ -1306,7 +1306,7 @@ def cnf2dnf_external(cnf_bitsets, parallel=False):
     retval = tuple(FrozenBitset(bs.decode().strip()) for bs in proc.stdout)
     proc.wait()
     if proc.returncode != 0:
-        raise subprocess.CalledProcessError(proc.returncode, './build_systems')
+        raise subprocess.CalledProcessError(proc.returncode, './cnf2dnf')
     return retval
 
 # Which version of cnf2dnf should we use?  cnf2dnf_espresso or cnf2dnf_external
@@ -1320,6 +1320,7 @@ cnf2dnf_tests = [
     (['11'], ['01', '10']),
     (['11', '01'], ['01']),
     (['11', '01', '10'], ['11']),
+    (['111'], ['100', '010', '001']),
     # check 5f28bf
     (['100000000', '000000001'], ['100000001']),
     # check 2c332f
