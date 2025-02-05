@@ -138,7 +138,7 @@ bool verbose = false;
 class BitString
 {
 public:
-  typedef unsigned char data_type;
+  typedef unsigned long long int data_type;
   typedef std::vector<data_type>::size_type size_type;
   unsigned int len;
   std::vector<data_type> bitstring;
