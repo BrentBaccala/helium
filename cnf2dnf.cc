@@ -126,6 +126,7 @@
 #include <vector>
 #include <list>
 #include <map>
+#include <set>
 #include <thread>
 #include <mutex>
 #include <shared_mutex>
@@ -362,19 +363,30 @@ std::ostream& operator<<(std::ostream& stream, BitString bs)
   return stream;
 }
 
+class CompareByCount {
+  public:
+  bool operator()(const BitString &lhs, const BitString &rhs) const
+  {
+    return (lhs.count() < rhs.count());
+  }
+};
+
+typedef std::multiset<BitString, CompareByCount> FinishedBitStrings2;
+
 class FinishedBitStrings
 {
 public:
-  std::vector<BitString> finished_bitstrings;
+  FinishedBitStrings2 finished_bitstrings;
   std::shared_mutex mutex;
-  int smallest_count;
 
   bool contain_a_superset_of(const BitString& bitstring)
   {
     std::shared_lock<std::shared_mutex> lock(mutex);
 
-    for (const BitString& fbs: finished_bitstrings) {
-      if (fbs.is_superset_of(bitstring))
+    for (auto it = finished_bitstrings.rbegin(); it != finished_bitstrings.rend(); it ++) {
+      if (bitstring.count() > it->count())
+	return false;
+      if (it->is_superset_of(bitstring))
 	return true;
     }
     return false;
@@ -387,11 +399,10 @@ public:
     /* If bitstring has fewer bits than anything in finished_bitstrings, then
      * there's no way that anything in finished_bitstrings is a subset of bitstring.
      */
-    if (bitstring.count() < smallest_count) {
-      return false;
-    }
 
     for (const BitString& fbs: finished_bitstrings) {
+      if (bitstring.count() < fbs.count())
+	return false;
       if (bitstring.is_superset_of(fbs))
 	return true;
     }
@@ -407,28 +418,18 @@ public:
      * We don't call contain_a_subset_of because it locks the object.
      */
 
-    if (bitstring.count() >= smallest_count) {
-      for (const BitString& fbs: finished_bitstrings) {
-	if (bitstring.is_superset_of(fbs))
-	  return;
-      }
+    for (const BitString& fbs: finished_bitstrings) {
+      if (bitstring.count() < fbs.count())
+	break;
+      if (bitstring.is_superset_of(fbs))
+	return;
     }
 
     // std::cerr << "add " << bitstring << "\n";
     /* remove any supersets */
     std::erase_if(finished_bitstrings, [&](const BitString& fbs) { return fbs.is_superset_of(bitstring); });
 
-    finished_bitstrings.push_back(bitstring);
-
-    /* We might have just removed some bitstrings from finished_bitstrings, but since they
-     * were all supersets of bitstring, they had more bits in them than bitstring.
-     * So we didn't remove anything with fewer bits than bitstring, so if smallest_count
-     * is less than bitstring, it's still valid, and we don't have to re-check everything's
-     * count.
-     */
-    if ((finished_bitstrings.size() == 1) || (bitstring_count < smallest_count)) {
-      smallest_count = bitstring_count;
-    }
+    finished_bitstrings.insert(bitstring);
   }
 };
 
@@ -813,8 +814,8 @@ int main(int argc, char ** argv)
      * this seems like a valid assumption (baring a bug).
      */
 
-    std::vector<std::vector<BitString> *> finished_bitstrings;
-    std::vector<std::vector<BitString>::iterator> iterators;
+    std::vector<FinishedBitStrings2 *> finished_bitstrings;
+    std::vector<FinishedBitStrings2::iterator> iterators;
     for (auto &cover: all_covers) {
       finished_bitstrings.push_back(& cover.finished_bitstrings.finished_bitstrings);
       iterators.push_back(cover.finished_bitstrings.finished_bitstrings.begin());
