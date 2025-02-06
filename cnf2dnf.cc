@@ -141,15 +141,23 @@ class BitString
 public:
   typedef unsigned long long int data_type;
   typedef std::vector<data_type>::size_type size_type;
+  /* len - the number of bits in this BitString */
   unsigned int len;
+  /* count() computes the number of one bits in a BitString.  It's used often enough
+   * that we cache its value here (-1 if no value is cached).  "mutable" because
+   * we need count() to be declared "const" so that it can be used in a std::multiset's
+   * compare function, yet "cached_count" will be set in count() if it hasn't
+   * been computed already.
+   */
+  mutable int cached_count;
   std::vector<data_type> bitstring;
 
   /* Bitstrings are represented MSB on the left, with the initial data_type in bitstring
    * using only as many bits as needed (LSBs) and the remaining data_type's fully populated.
    */
 
-  BitString() {len = 0;}
-  BitString(unsigned int l) : bitstring((l+8*sizeof(data_type)-1)/(8*sizeof(data_type))), len(l) {}
+  BitString() {len = 0; cached_count = 0;}
+  BitString(unsigned int l) : bitstring((l+8*sizeof(data_type)-1)/(8*sizeof(data_type))), len(l), cached_count(0) {}
   BitString(std::string str)
   {
     len = str.length();
@@ -162,6 +170,7 @@ public:
       int offset = j%(8*sizeof(data_type));
       bitstring[index] |= val << offset;
     }
+    cached_count = -1;
   }
 
   friend std::ostream& operator<<(std::ostream& stream, BitString bs);
@@ -174,6 +183,7 @@ public:
     for (size_type i=0; i<bitstring.size(); i++) {
       rv->bitstring[i] = ~ bitstring[i];
     }
+    rv->cached_count = -1;
     return *rv;
   }
 
@@ -213,6 +223,7 @@ public:
     for (size_type i=0; i<bitstring.size(); i++) {
       rv->bitstring[i] = bitstring[i] & rhs.bitstring[i];
     }
+    rv->cached_count = -1;
     return *rv;
   }
 
@@ -260,6 +271,7 @@ public:
 	lhs.bitstring[i] = bitstring[i] | rhs.bitstring[i];
       }
     }
+    lhs.cached_count = -1;
   }
 
   BitString operator|=(const BitString& rhs)
@@ -268,6 +280,7 @@ public:
     for (size_type i=0; i<bitstring.size(); i++) {
       bitstring[i] |= rhs.bitstring[i];
     }
+    cached_count = -1;
     return *this;
   }
 
@@ -277,6 +290,7 @@ public:
     for (size_type i=0; i<bitstring.size(); i++) {
       bitstring[i] &= rhs.bitstring[i];
     }
+    cached_count = -1;
     return *this;
   }
 
@@ -285,11 +299,14 @@ public:
     for (size_type i=0; i<bitstring.size(); i++) {
       bitstring[i] ^= rhs.bitstring[i];
     }
+    cached_count = -1;
     return *this;
   }
 
+  /* superset test - not strict; calling this method on self will return true */
   bool is_superset_of(const BitString& rhs) const
   {
+    if (count() < rhs.count()) return false;
     for (size_type i=0; i<bitstring.size(); i++) {
       // std::cerr << "superset test " << bitstring[i] << " " << rhs.bitstring[i] << "\n";
       if ((bitstring[i] & rhs.bitstring[i]) != rhs.bitstring[i]) {
@@ -313,10 +330,12 @@ public:
     BitString result;
     result.bitstring.resize(bitstring.size());
     result.len = len;
+    result.cached_count = 0;
     for (size_type i=bitstring.size()-1; i>=0; i--) {
       data_type rightmost_set_bit = bitstring[i] & (-bitstring[i]);
       if (rightmost_set_bit) {
 	result.bitstring[i] = rightmost_set_bit;
+	result.cached_count = 1;
 	return result;
       }
     }
@@ -337,11 +356,13 @@ public:
 
   int count(void) const
   {
-    int count = 0;
-    for (int i=0; i<bitstring.size(); i++) {
-      count += std::popcount(bitstring[i]);
+    if (cached_count == -1) {
+      cached_count = 0;
+      for (int i=0; i<bitstring.size(); i++) {
+	cached_count += std::popcount(bitstring[i]);
+      }
     }
-    return count;
+    return cached_count;
   }
 };
 
