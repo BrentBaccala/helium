@@ -485,6 +485,7 @@ class FinishedBitStrings
 {
 public:
   std::vector<std::atomic<LinkedBitString *>> by_count;
+  std::atomic<int> valid_bitstrings = 0;
 
   FinishedBitStrings(int max_count) : by_count(max_count+1) { }
 
@@ -529,6 +530,8 @@ public:
 						  std::memory_order_relaxed))
       ; // the body of the loop is empty
 
+    valid_bitstrings ++;
+
     /* Let's run a final check for subsets that were added after our last subset check.
      * We can no longer delete the node, but we can invalidate it.
      */
@@ -537,6 +540,7 @@ public:
 	for (auto& fbs: *by_count[i]) {
 	  if (bitstring.is_superset_of(fbs)) {
 	    new_node->valid = false;
+	    valid_bitstrings --;
 	    return;
 	  }
 	}
@@ -547,8 +551,10 @@ public:
     for (count ++; count < by_count.size(); count ++) {
       if (by_count[count]) {
 	for (auto& fbs: *by_count[count]) {
-	  if (fbs.is_superset_of(bitstring))
+	  if (fbs.is_superset_of(bitstring)) {
 	    fbs.valid = false;
+	    valid_bitstrings --;
+	  }
 	}
       }
     }
