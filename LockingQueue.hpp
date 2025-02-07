@@ -78,6 +78,10 @@ public:
 	return true;
     }
 
+    std::queue<T>::size_type size(void)
+    {
+      return queue.size();
+    }
 private:
     std::queue<T> queue;
     mutable std::mutex guard;

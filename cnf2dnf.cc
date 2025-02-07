@@ -130,6 +130,8 @@
 #include <thread>
 #include <mutex>
 #include <shared_mutex>
+#include <csignal>
+#include <unistd.h>
 #include "LockingQueue.hpp"
 
 // unsigned int bitstring_len = 0;
@@ -937,6 +939,18 @@ void compute_and_display_statistics(void)
 
 }
 
+// Signal handler
+void signalHandler(int signum) {
+    if (signum == SIGQUIT) {
+        std::cerr << "Backtrack queue: " << backtrack_queue.size() << "\n";
+        std::cerr << "Finished bitstrings: ";
+	for (auto &cover: all_covers) {
+	  std::cerr << cover.finished_bitstrings.valid_bitstrings << " ";
+	}
+	std::cerr << "\n";
+    }
+}
+
 int main(int argc, char ** argv)
 {
   int nthreads = 1;
@@ -1005,6 +1019,16 @@ int main(int argc, char ** argv)
 	}
 	backtrack_queue.push(initial_work);
       }
+    }
+
+    // Set up the signal handler
+    struct sigaction sa;
+    sa.sa_handler = signalHandler; // Use custom signal handler
+    sa.sa_flags = 0;               // Use default flags
+    sigemptyset(&sa.sa_mask);      // No signals blocked during handler
+    if (sigaction(SIGQUIT, &sa, nullptr) == -1) {
+        perror("sigaction");
+        return 1;
     }
 
     backtrack_queue.set_num_workers(nthreads);
