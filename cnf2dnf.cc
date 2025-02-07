@@ -385,14 +385,6 @@ std::ostream& operator<<(std::ostream& stream, BitString bs)
   return stream;
 }
 
-class CompareByCount {
-  public:
-  bool operator()(const BitString &lhs, const BitString &rhs) const
-  {
-    return (lhs.count() < rhs.count());
-  }
-};
-
 class LinkedBitString : public BitString {
   public:
   LinkedBitString * next = nullptr;
