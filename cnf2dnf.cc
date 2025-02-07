@@ -396,9 +396,17 @@ std::vector<std::vector<BitString>> expanded_polys;
 BitString single_bit_covers;
 int single_bit_polynomials_covered = 0;
 
+/* A basic linked list of BitString's, with a twist: we want to do thread-safe list operations
+ * without lock synchronization delays.  Inserting at the head of the list isn't a problem
+ * (we'll just use atomics in FinishedBitStrings), but deleting is more difficult.
+ * The simplest solution: don't delete, just flag nodes invalid so they get skipped
+ * during iteration.
+ */
+
 class LinkedBitString : public BitString {
   public:
   LinkedBitString * next = nullptr;
+  bool valid = true;
 
   LinkedBitString(const BitString& bs) : BitString(bs) {}
 
@@ -413,7 +421,12 @@ class LinkedBitString : public BitString {
     using reference = LinkedBitString&;
 
     // Constructor
-    explicit iterator(pointer ptr = nullptr) : current(ptr) {}
+    explicit iterator(pointer ptr = nullptr) : current(ptr) {
+      // do this in case the list starts with one or more invalid nodes
+      while (current && ! current->valid) {
+	current = current->next;
+      }
+    }
 
     // Dereference operator
     reference operator*() const {
@@ -428,6 +441,9 @@ class LinkedBitString : public BitString {
     iterator& operator++() {
       if (current) {
         current = current->next; // Move to the next node
+	while (current && ! current->valid) {
+	  current = current->next;  // skip invalid nodes
+	}
       }
       return *this;
     }
@@ -493,6 +509,10 @@ public:
 
   void add(const BitString &bitstring)
   {
+    /* This will back a copy of bitstring, which is what we want, because the current_work.bitstring
+     * that was passed in (by reference) will get copy-assigned when we pull the next work item
+     * off of backtrack_queue.
+     */
     LinkedBitString * new_node = new LinkedBitString(bitstring);
     auto count = bitstring.count();
 
@@ -508,6 +528,30 @@ public:
 						  std::memory_order_release,
 						  std::memory_order_relaxed))
       ; // the body of the loop is empty
+
+    /* Let's run a final check for subsets that were added after our last subset check.
+     * We can no longer delete the node, but we can invalidate it.
+     */
+    for (auto i=0; i<count; i++) {
+      if (by_count[i]) {
+	for (auto& fbs: *by_count[i]) {
+	  if (bitstring.is_superset_of(fbs)) {
+	    new_node->valid = false;
+	    return;
+	  }
+	}
+      }
+    }
+
+    /* Now let's run over finished bitstrings with more bits and invalidate those that are supersets of the new one */
+    for (count ++; count < by_count.size(); count ++) {
+      if (by_count[count]) {
+	for (auto& fbs: *by_count[count]) {
+	  if (fbs.is_superset_of(bitstring))
+	    fbs.valid = false;
+	}
+      }
+    }
   }
 
   // Nested iterator Class (written mostly by GPT-4o)
