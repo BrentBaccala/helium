@@ -502,7 +502,6 @@ struct BacktrackPoint
   BitString bitstring;
   BitString allowed_bits;
   unsigned int next_polynomial;
-  FinishedBitStrings * finished_bitstrings;
   Cover * cover;
 };
 
@@ -565,7 +564,7 @@ void task(void)
 	      /* remove all of the current polynomial's bits from the allowed bits for future work */
 	      next_work_allowed_bits = current_work.allowed_bits;
 	      /* Check first if this is a superset of an existing bit string; skip it if it is */
-	      if (current_work.finished_bitstrings->contain_a_subset_of(next_work_bitstring)) continue;
+	      if (current_work.cover->finished_bitstrings.contain_a_subset_of(next_work_bitstring)) continue;
 	      have_next_work = true;
 	    } else {
 	      /* Like this, but avoids a copy */
@@ -573,10 +572,9 @@ void task(void)
 	      current_work.bitstring.logical_or_assign(extra_work.bitstring, next_bit);
 	      extra_work.allowed_bits = current_work.allowed_bits;
 	      extra_work.next_polynomial = current_work.next_polynomial + 1;
-	      extra_work.finished_bitstrings = current_work.finished_bitstrings;
 	      extra_work.cover = current_work.cover;
 	      /* Check first if this is a superset of an existing bit string; skip it if it is */
-	      if (current_work.finished_bitstrings->contain_a_subset_of(extra_work.bitstring)) continue;
+	      if (current_work.cover->finished_bitstrings.contain_a_subset_of(extra_work.bitstring)) continue;
 	      backtrack_queue.push(extra_work);
 	    }
 	    /* If the current polynomial's bits are 111, we want to create future work 1xx, 01x, 001,
@@ -593,7 +591,7 @@ void task(void)
       }
       current_work.next_polynomial ++;
     }
-    current_work.finished_bitstrings->add(current_work.bitstring);
+    current_work.cover->finished_bitstrings.add(current_work.bitstring);
   }
 }
 
@@ -825,7 +823,6 @@ int main(int argc, char ** argv)
 	initial_work.bitstring = BitString(bitstring_len);
 	initial_work.allowed_bits = ~ BitString(bitstring_len);
 	initial_work.cover = &cover;
-	initial_work.finished_bitstrings = & cover.finished_bitstrings;
 	for (auto const &[attachment_point, value] : cover.single_link_chains) {
 	  if (working_value & 1) {
 	    initial_work.bitstring |= attachment_point;
