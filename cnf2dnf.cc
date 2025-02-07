@@ -123,10 +123,10 @@
 
 #include <iostream>
 #include <bitset>
+#include <atomic>
 #include <vector>
 #include <list>
 #include <map>
-#include <set>
 #include <thread>
 #include <mutex>
 #include <shared_mutex>
@@ -392,38 +392,83 @@ class CompareByCount {
   }
 };
 
-typedef std::multiset<BitString, CompareByCount> FinishedBitStrings2;
+class LinkedBitString : public BitString {
+  public:
+  LinkedBitString * next = nullptr;
+
+  LinkedBitString(const BitString& bs) : BitString(bs) {}
+
+  // Nested iterator class (written mostly by GPT-4o)
+  class iterator {
+  public:
+    // Iterator traits
+    using iterator_category = std::forward_iterator_tag;
+    using value_type = LinkedBitString;
+    using difference_type = std::ptrdiff_t;
+    using pointer = LinkedBitString*;
+    using reference = LinkedBitString&;
+
+    // Constructor
+    explicit iterator(pointer ptr = nullptr) : current(ptr) {}
+
+    // Dereference operator
+    reference operator*() const {
+      return *current;
+    }
+
+    pointer operator->() const {
+      return current;
+    }
+
+    // Prefix increment
+    iterator& operator++() {
+      if (current) {
+        current = current->next; // Move to the next node
+      }
+      return *this;
+    }
+
+    // Postfix increment
+    iterator operator++(int) {
+      if (current) {
+        current = current->next; // Move to the next node
+      }
+      return *this;
+    }
+
+    // Equality operator
+    bool operator==(const iterator& other) const {
+      return current == other.current;
+    }
+
+    // Inequality operator
+    bool operator!=(const iterator& other) const {
+      return !(*this == other);
+    }
+
+  private:
+    pointer current; // Pointer to the current node
+  };
+
+  // Begin iterator
+  iterator begin() {
+    return iterator(this);
+  }
+
+  // End iterator (nullptr represents the end)
+  iterator end() {
+    return iterator(nullptr);
+  }
+};
 
 class FinishedBitStrings
 {
 public:
-  FinishedBitStrings2 finished_bitstrings;
-  std::shared_mutex mutex;
-
-  bool contain_a_superset_of(const BitString& bitstring)
-  {
-    std::shared_lock<std::shared_mutex> lock(mutex);
-
-    for (auto it = finished_bitstrings.rbegin(); it != finished_bitstrings.rend(); it ++) {
-      if (bitstring.count() > it->count())
-	return false;
-      if (it->is_superset_of(bitstring))
-	return true;
-    }
-    return false;
-  }
+  std::atomic<LinkedBitString *> finished_bitstrings;
 
   bool contain_a_subset_of(const BitString& bitstring)
   {
-    std::shared_lock<std::shared_mutex> lock(mutex);
-
-    /* If bitstring has fewer bits than anything in finished_bitstrings, then
-     * there's no way that anything in finished_bitstrings is a subset of bitstring.
-     */
-
-    for (const BitString& fbs: finished_bitstrings) {
-      if (bitstring.count() < fbs.count())
-	return false;
+    for (auto& fbs: *finished_bitstrings) {
       if (bitstring.is_superset_of(fbs))
 	return true;
     }
@@ -432,25 +477,20 @@ public:
 
   void add(const BitString &bitstring)
   {
-    int bitstring_count = bitstring.count();
-    std::unique_lock<std::shared_mutex> lock(mutex);
+    LinkedBitString * new_node = new LinkedBitString(bitstring);
 
-    /* A final extra check for subsets, to avoid problems from the race condition mentioned below.
-     * We don't call contain_a_subset_of because it locks the object.
-     */
+    /* This code is cribbed from: https://en.cppreference.com/w/cpp/atomic/atomic/compare_exchange */
+    // put the current value of head into new_node->next
+    new_node->next = finished_bitstrings.load(std::memory_order_relaxed);
 
-    for (const BitString& fbs: finished_bitstrings) {
-      if (bitstring.count() < fbs.count())
-	break;
-      if (bitstring.is_superset_of(fbs))
-	return;
-    }
-
-    // std::cerr << "add " << bitstring << "\n";
-    /* remove any supersets */
-    std::erase_if(finished_bitstrings, [&](const BitString& fbs) { return fbs.is_superset_of(bitstring); });
-
-    finished_bitstrings.insert(bitstring);
+    // now make new_node the new head, but if the head
+    // is no longer what's stored in new_node->next
+    // (some other thread must have inserted a node just now)
+    // then put that new head into new_node->next and try again
+    while (!finished_bitstrings.compare_exchange_weak(new_node->next, new_node,
+						      std::memory_order_release,
+						      std::memory_order_relaxed))
+      ; // the body of the loop is empty
   }
 };
 
@@ -509,7 +549,9 @@ void task(void)
      * we could have added new finished bitstrings while the work was on the queue.  The program
      * spent a lot of time here, and I decided that we don't really need this check because
      * we're going to check contain_a_subset_of if we either add work to the work queue,
-     * or add a bitstring to finished_bitstrings.
+     * or add a bitstring to finished_bitstrings.  So the only cost of not doing a
+     * subset test at this point is avoiding a single additional pass through this
+     * while loop, and that doesn't seem to be worth it.
      */
 
     while (current_work.next_polynomial < polys.size()) {
@@ -835,11 +877,11 @@ int main(int argc, char ** argv)
      * this seems like a valid assumption (baring a bug).
      */
 
-    std::vector<FinishedBitStrings2 *> finished_bitstrings;
-    std::vector<FinishedBitStrings2::iterator> iterators;
+    std::vector<LinkedBitString *> finished_bitstrings;
+    std::vector<LinkedBitString::iterator> iterators;
     for (auto &cover: all_covers) {
-      finished_bitstrings.push_back(& cover.finished_bitstrings.finished_bitstrings);
-      iterators.push_back(cover.finished_bitstrings.finished_bitstrings.begin());
+      finished_bitstrings.push_back(cover.finished_bitstrings.finished_bitstrings.load());
+      iterators.push_back(cover.finished_bitstrings.finished_bitstrings.load()->begin());
     }
     while (true) {
       BitString result = single_bit_covers;
