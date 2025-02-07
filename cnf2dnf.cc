@@ -357,10 +357,11 @@ public:
   int count(void) const
   {
     if (cached_count == -1) {
-      cached_count = 0;
+      int value = 0;
       for (int i=0; i<bitstring.size(); i++) {
-	cached_count += std::popcount(bitstring[i]);
+	value += std::popcount(bitstring[i]);
       }
+      cached_count = value;
     }
     return cached_count;
   }
