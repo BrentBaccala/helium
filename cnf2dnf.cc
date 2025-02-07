@@ -385,6 +385,17 @@ std::ostream& operator<<(std::ostream& stream, BitString bs)
   return stream;
 }
 
+std::vector<BitString> polys;
+std::vector<BitString> inverted_polys;
+std::vector<std::vector<BitString>> expanded_polys;
+
+/* All bits for which there is a polynomial containing only that bit.  Such bits must
+ * always be present in the output bit strings, and any polynomials that depend on them
+ * can be removed from under_consideration, since they will always be satisfied.
+ */
+BitString single_bit_covers;
+int single_bit_polynomials_covered = 0;
+
 class LinkedBitString : public BitString {
   public:
   LinkedBitString * next = nullptr;
@@ -458,6 +469,9 @@ class FinishedBitStrings
 {
 public:
   std::atomic<LinkedBitString *> finished_bitstrings;
+  std::vector<std::atomic<LinkedBitString *>> by_count;
+
+  FinishedBitStrings(int max_count) : by_count(max_count) { }
 
   bool contain_a_subset_of(const BitString& bitstring)
   {
@@ -495,6 +509,89 @@ class Cover
   std::map<BitString, BitString> single_link_chains;
   int triplets;
   FinishedBitStrings finished_bitstrings;
+
+  /* FinishedBitStrings is a bit difficult to initialize because it includes a vector of atomics,
+   * which can't be resized, so we need to know its size at initialization time.  We use a trick
+   * recommended here: https://stackoverflow.com/a/61033668/1493790
+   * which is to use a delegating constructor to calculate the cover in the initializer list.
+   */
+
+  static std::pair<std::vector<bool>, BitString> expand_cover(BitString starting_poly)
+  {
+    bool expanding_cover;
+    std::vector<bool> under_consideration(polys.size(), false);
+    BitString cover = starting_poly;
+    do {
+      expanding_cover = false;
+      for (auto i=0; i<polys.size(); i++) {
+	if (! under_consideration[i] && ! (single_bit_covers && polys[i]) && (cover && polys[i])) {
+	  under_consideration[i] = true;
+	  cover |= polys[i];
+	  expanding_cover = true;
+	}
+      }
+    } while (expanding_cover);
+    return make_pair(under_consideration, cover);
+  }
+
+  Cover(BitString starting_poly) : Cover(expand_cover(starting_poly)) { }
+
+  Cover(std::pair<std::vector<bool>, BitString> pair) : cover(pair.second), under_consideration(pair.first), finished_bitstrings(cover.count())
+  {
+    /* Identify which polynomials are links (2-bit polynomials).
+     *
+     * If so, there are several possibilities: either it's a "outlier"
+     * (the case we want to optimize), or the link is itself the entire cover, or it's a link
+     * between two subcovers.  The link has two sides (left and right).  Count up how many polynomials
+     * match up with each.  An outlier has one side matching a single polynomial (the link itself)
+     * and the other side matches more than one.  A link between two subcovers has both sides
+     * matching more than one polynomial.  If both sides match a single polynomial, then the
+     * link is the entire cover.
+     */
+
+    for (auto i=0; i<polys.size(); i++) {
+      if (under_consideration[i] && (polys[i] && cover) && (polys[i].count() == 2)) {
+	BitString outlying_point;
+	BitString attachment_point;
+	for (BitString current_bit: expanded_polys[i]) {
+	  int matching_polys = 0;
+	  for (auto j=0; j<polys.size(); j++) {
+	    if (under_consideration[j] && (polys[j] && current_bit)) matching_polys ++;
+	  }
+	  if (matching_polys == 1) {
+	    outlying_point = current_bit;
+	  } else {
+	    attachment_point = current_bit;
+	  }
+	}
+	if ((attachment_point.count() > 0) && (outlying_point.count() > 0)) {
+	  if (! single_link_chains.contains(attachment_point)) {
+	    single_link_chains[attachment_point] = BitString(polys[0].len);
+	  }
+	  single_link_chains[attachment_point] |= outlying_point;
+	}
+      }
+    }
+
+    /* Count "triplets": Polynomials with two isolated bits and only
+     * one touching the rest of the cover.
+     */
+
+    triplets = 0;
+    for (auto i=0; i<polys.size(); i++) {
+      if (under_consideration[i] && (polys[i] && cover) && (polys[i].count() == 3)) {
+	int single_poly_bits = 0;
+	for (BitString next_bit: expanded_polys[i]) {
+	  int matching_polys = 0;
+	  for (auto j=0; j<polys.size(); j++) {
+	    if (under_consideration[j] && (polys[j] && next_bit)) matching_polys ++;
+	  }
+	  if (matching_polys == 1) single_poly_bits ++;
+	}
+	if (single_poly_bits == 2) triplets ++;
+      }
+    }
+  }
 };
 
 struct BacktrackPoint
@@ -505,20 +602,9 @@ struct BacktrackPoint
   Cover * cover;
 };
 
-std::vector<BitString> polys;
-std::vector<BitString> inverted_polys;
-std::vector<std::vector<BitString>> expanded_polys;
-
 LockingQueue<BacktrackPoint> backtrack_queue;
 
 std::list<Cover> all_covers;
-
-/* All bits for which there is a polynomial containing only that bit.  Such bits must
- * always be present in the output bit strings, and any polynomials that depend on them
- * can be removed from under_consideration, since they will always be satisfied.
- */
-BitString single_bit_covers;
-int single_bit_polynomials_covered = 0;
 
 void task(void)
 {
@@ -673,66 +759,8 @@ void compute_all_covers(void)
       break;
     }
 
-    Cover& cover = all_covers.emplace_back();
-    cover.cover = polys[i];
-    cover.under_consideration.resize(polys.size(), false);
-
-    polys_covered = expand_cover(cover);
+    Cover& cover = all_covers.emplace_back(polys[i]);
     union_of_all_covers |= cover.cover;
-
-    /* Identify which polynomials are links (2-bit polynomials).
-     *
-     * If so, there are several possibilities: either it's a "outlier"
-     * (the case we want to optimize), or the link is itself the entire cover, or it's a link
-     * between two subcovers.  The link has two sides (left and right).  Count up how many polynomials
-     * match up with each.  An outlier has one side matching a single polynomial (the link itself)
-     * and the other side matches more than one.  A link between two subcovers has both sides
-     * matching more than one polynomial.  If both sides match a single polynomial, then the
-     * link is the entire cover.
-     */
-
-    for (i=0; i<polys.size(); i++) {
-      if (cover.under_consideration[i] && (polys[i] && cover.cover) && (polys[i].count() == 2)) {
-	BitString outlying_point;
-	BitString attachment_point;
-	for (BitString current_bit: expanded_polys[i]) {
-	  int matching_polys = 0;
-	  for (auto j=0; j<polys.size(); j++) {
-	    if (cover.under_consideration[j] && (polys[j] && current_bit)) matching_polys ++;
-	  }
-	  if (matching_polys == 1) {
-	    outlying_point = current_bit;
-	  } else {
-	    attachment_point = current_bit;
-	  }
-	}
-	if ((attachment_point.count() > 0) && (outlying_point.count() > 0)) {
-	  if (! cover.single_link_chains.contains(attachment_point)) {
-	    cover.single_link_chains[attachment_point] = BitString(polys[0].len);
-	  }
-	  cover.single_link_chains[attachment_point] |= outlying_point;
-	}
-      }
-    }
-
-    /* Count "triplets": Polynomials with two isolated bits and only
-     * one touching the rest of the cover.
-     */
-
-    cover.triplets = 0;
-    for (i=0; i<polys.size(); i++) {
-      if (cover.under_consideration[i] && (polys[i] && cover.cover) && (polys[i].count() == 3)) {
-	int single_poly_bits = 0;
-	for (BitString next_bit: expanded_polys[i]) {
-	  int matching_polys = 0;
-	  for (auto j=0; j<polys.size(); j++) {
-	    if (cover.under_consideration[j] && (polys[j] && next_bit)) matching_polys ++;
-	  }
-	  if (matching_polys == 1) single_poly_bits ++;
-	}
-	if (single_poly_bits == 2) cover.triplets ++;
-      }
-    }
   }
 
 }
