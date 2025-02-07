@@ -468,16 +468,25 @@ class LinkedBitString : public BitString {
 class FinishedBitStrings
 {
 public:
-  std::atomic<LinkedBitString *> finished_bitstrings;
   std::vector<std::atomic<LinkedBitString *>> by_count;
 
-  FinishedBitStrings(int max_count) : by_count(max_count) { }
+  FinishedBitStrings(int max_count) : by_count(max_count+1) { }
 
   bool contain_a_subset_of(const BitString& bitstring)
   {
-    for (auto& fbs: *finished_bitstrings) {
-      if (bitstring.is_superset_of(fbs))
-	return true;
+    auto count = bitstring.count();
+
+    /* We're checking for subsets of bitstring, so we only need to check
+     * finished_bitstrings with fewer bits than bitstring.
+     */
+
+    for (auto i=0; i<count; i++) {
+      if (by_count[i]) {
+	for (auto& fbs: *by_count[i]) {
+	  if (bitstring.is_superset_of(fbs))
+	    return true;
+	}
+      }
     }
     return false;
   }
@@ -485,20 +494,103 @@ public:
   void add(const BitString &bitstring)
   {
     LinkedBitString * new_node = new LinkedBitString(bitstring);
+    auto count = bitstring.count();
 
     /* This code is cribbed from: https://en.cppreference.com/w/cpp/atomic/atomic/compare_exchange */
     // put the current value of head into new_node->next
-    new_node->next = finished_bitstrings.load(std::memory_order_relaxed);
+    new_node->next = by_count[count].load(std::memory_order_relaxed);
 
     // now make new_node the new head, but if the head
     // is no longer what's stored in new_node->next
     // (some other thread must have inserted a node just now)
     // then put that new head into new_node->next and try again
-    while (!finished_bitstrings.compare_exchange_weak(new_node->next, new_node,
-						      std::memory_order_release,
-						      std::memory_order_relaxed))
+    while (!by_count[count].compare_exchange_weak(new_node->next, new_node,
+						  std::memory_order_release,
+						  std::memory_order_relaxed))
       ; // the body of the loop is empty
   }
+
+  // Nested iterator Class (written mostly by GPT-4o)
+  class iterator
+  {
+  public:
+    // Type aliases for standard iterator traits
+    using iterator_category = std::forward_iterator_tag;
+    using value_type = LinkedBitString;
+    using difference_type = std::ptrdiff_t;
+    using pointer = LinkedBitString*;
+    using reference = LinkedBitString&;
+
+  private:
+    FinishedBitStrings* finishedBitStrings;
+    size_t outerIndex;                         // Index in `by_count`
+    LinkedBitString::iterator innerIterator;   // Iterator for the current LinkedBitString's data
+    LinkedBitString::iterator innerEnd;        // End iterator for the current LinkedBitString's data
+
+    // Helper to advance to the next valid LinkedBitString and set up its iterator
+    void advanceToNextValid()
+    {
+      while (outerIndex < finishedBitStrings->by_count.size()) {
+	LinkedBitString* current = finishedBitStrings->by_count[outerIndex].load();
+	if (current) {
+	  innerIterator = current->begin();
+	  innerEnd = current->end();
+	  if (innerIterator != innerEnd) {
+	    return; // Found a valid LinkedBitString with data to iterate over
+	  }
+	}
+	++outerIndex; // Move to the next element in by_count
+      }
+    }
+
+  public:
+    // Constructor
+    iterator(FinishedBitStrings* finishedBitStrings, size_t start)
+      : finishedBitStrings(finishedBitStrings), outerIndex(start)
+    {
+      advanceToNextValid(); // Ensure we start at the first valid element
+    }
+
+    // Dereference operator
+    reference operator*() { return *innerIterator; }
+
+    // Arrow operator
+    pointer operator->() { return &(*innerIterator); }
+
+    // Pre-increment operator
+    iterator& operator++()
+    {
+      ++innerIterator;
+      if (innerIterator == innerEnd) {
+	++outerIndex;
+	advanceToNextValid();
+      }
+      return *this;
+    }
+
+    // Post-increment operator
+    iterator operator++(int)
+    {
+      iterator temp = *this;
+      ++(*this);
+      return temp;
+    }
+
+    // Equality operator
+    bool operator==(const iterator& other) const
+    {
+      return outerIndex == other.outerIndex &&
+	innerIterator == other.innerIterator &&
+	finishedBitStrings == other.finishedBitStrings;
+    }
+
+    // Inequality operator
+    bool operator!=(const iterator& other) const { return !(*this == other); }
+  };
+
+  // Begin and End methods for the iterator
+  iterator begin() { return iterator(this, 0); }
+  iterator end() { return iterator(this, by_count.size()); }
 };
 
 class Cover
@@ -883,23 +975,16 @@ int main(int argc, char ** argv)
      * and advance the first across its entire vector of bitstrings, then reset the first
      * and advance the second, and so on until we've iterated over all combinations.
      *
-     * We form a std::vector of pointers to the finished_bitstrings because the
-     * finished_bitstrings variable in Cover is a std::list, which can't be indexed
-     * like a std::vector.  We can't change the std::list in Cover to a std::vector,
-     * because std::vector's emplace_back method requires its members to be MoveInsertable,
-     * and FinishedBitstrings includes a std::mutex, which can't be moved because
-     * threads could be waiting on it.
-     *
      * This code assumes that all of the covers have at least one finished_bitstring.
      * Since a vector of all one bits would satisify all possible input conditions,
      * this seems like a valid assumption (baring a bug).
      */
 
-    std::vector<LinkedBitString *> finished_bitstrings;
-    std::vector<LinkedBitString::iterator> iterators;
+    std::vector<FinishedBitStrings *> finished_bitstrings;
+    std::vector<FinishedBitStrings::iterator> iterators;
     for (auto &cover: all_covers) {
-      finished_bitstrings.push_back(cover.finished_bitstrings.finished_bitstrings.load());
-      iterators.push_back(cover.finished_bitstrings.finished_bitstrings.load()->begin());
+      finished_bitstrings.push_back(&cover.finished_bitstrings);
+      iterators.push_back(cover.finished_bitstrings.begin());
     }
     while (true) {
       BitString result = single_bit_covers;
