@@ -645,6 +645,16 @@ public:
   iterator end() { return iterator(this, by_count.size()); }
 };
 
+/* Covers
+ *
+ * We partition the input bits into sets that completely cover a group of polynomials,
+ * and display the number of bits in the set and the number of polynomials covered.
+ *
+ * Smaller partitions are easier to handle: 1 is a special case, and 2 through 5
+ * can be handled with lookup tables (not implemented, because they don't appear in practice).
+ *
+ */
+
 class Cover
 {
   public:
@@ -658,6 +668,11 @@ class Cover
    * which can't be resized, so we need to know its size at initialization time.  We use a trick
    * recommended here: https://stackoverflow.com/a/61033668/1493790
    * which is to use a delegating constructor to calculate the cover in the initializer list.
+   *
+   * expand_cover: Given a cover and an initial polynomial "under consideration", expand the
+   * cover to include any polynomials under consideration that partially match the cover.
+   * Once we're done, all of the polynomials "under consideration" are either completely
+   * under the (expanded) cover, or are not under it at all.
    */
 
   static std::pair<std::vector<bool>, BitString> expand_cover(BitString starting_poly)
@@ -849,37 +864,6 @@ void compute_and_remove_single_bit_covers(void)
       under_consideration[i] = false;
     }
   }
-}
-
-/* Partition the input bits into sets that completely cover a group of polynomials,
- * and display the number of bits in the set and the number of polynomials covered.
- *
- * Smaller partitions are easier to handle: 1 is a special case, and 2 through 5
- * can be handled with lookup tables (not implemented, because they don't appear in practice).
- *
- * Given a cover and a set of polynomials "under consideration", expand the
- * cover to include any polynomials under consideration that partially
- * match the cover.  The cover argument is modified.  Once we're done,
- * all of the polynomials "under consideration" are either completely
- * under the (expanded) cover, or are not under it at all.
- * Return the number of polynomials under the expanded cover.
- */
-int expand_cover(Cover& cover)
-{
-    bool expanding_cover;
-    int polys_covered = 0;
-    do {
-      expanding_cover = false;
-      for (auto i=0; i<polys.size(); i++) {
-	if (! cover.under_consideration[i] && ! (single_bit_covers && polys[i]) && (cover.cover && polys[i])) {
-	  cover.under_consideration[i] = true;
-	  cover.cover |= polys[i];
-	  polys_covered ++;
-	  expanding_cover = true;
-	}
-      }
-    } while (expanding_cover);
-    return polys_covered;
 }
 
 void compute_all_covers(void)
