@@ -488,6 +488,7 @@ class FinishedBitStrings
 public:
   std::vector<std::atomic<LinkedBitString *>> by_count;
   std::atomic<int> valid_bitstrings = 0;
+  std::atomic<int> invalid_bitstrings = 0;
 
   FinishedBitStrings(int max_count) : by_count(max_count+1) { }
 
@@ -543,6 +544,7 @@ public:
 	  if (bitstring.is_superset_of(fbs)) {
 	    new_node->valid = false;
 	    valid_bitstrings --;
+	    invalid_bitstrings ++;
 	    return;
 	  }
 	}
@@ -556,6 +558,7 @@ public:
 	  if (fbs.is_superset_of(bitstring)) {
 	    fbs.valid = false;
 	    valid_bitstrings --;
+	    invalid_bitstrings ++;
 	  }
 	}
       }
@@ -929,7 +932,7 @@ void signalHandler(int signum) {
         std::cerr << "Backtrack queue: " << backtrack_queue.size() << "\n";
         std::cerr << "Finished bitstrings: ";
 	for (auto &cover: all_covers) {
-	  std::cerr << cover.finished_bitstrings.valid_bitstrings << " ";
+	  std::cerr << cover.finished_bitstrings.valid_bitstrings << " (plus " << cover.finished_bitstrings.invalid_bitstrings << " invalid) ";
 	}
 	std::cerr << "\n";
     }
