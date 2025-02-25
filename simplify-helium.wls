@@ -1,8 +1,14 @@
 #!/opt/Wolfram/WolframScript/bin/wolframscript -format OutputForm
 
-Psif := Psi[x1, y1, z1, x2, y2, z2]
+(* Psif := Psi[x1, y1, z1, x2, y2, z2] *)
+Psif := Psi[r1, r2, r12]
 r[x_, y_, z_] = Sqrt[x^2 + y^2 + z^2]
-eqn = - 1/2*Laplacian[Psif, {x1, y1, z1}] - 1/2*Laplacian[Psif, {x2, y2, z2}] - (2/r[x1, y1, z1] + 2/r[x2, y2, z2] - 1/r[x2-x1, y2-y1, z2-z1]) * Psif == 0
+r1 = r[x1, y1, z1]
+r2 = r[x2, y2, z2]
+r12 = r[x2-x1, y2-y1, z2-z1]
+eqn = - 1/2*Laplacian[Psif, {x1, y1, z1}] - 1/2*Laplacian[Psif, {x2, y2, z2}] - (2/r1 + 2/r2 - 1/r12) * Psif == 0
+
+(* Print[eqn] *)
 
 (* Hylleraas coordinates
  * r1, theta1, psi1, r2, r12, 
@@ -36,36 +42,52 @@ r12 := Sqrt[(x2-x1)^2 + (y2-y1)^2 + (z2-z1)^2]
 uu := u[r1, r2, r12]
 uu[r1_, r2_, r12_] := u[r1, r2, r12]
 
-(* /: is TagSet; its use is suggested in the Dt documentation *)
-(* I originally had them listed out like this: *)
-(* y1 /: Dt[y1, x1] = 0 *)
-(* z1 /: Dt[z1, x1] = 0 *)
-(* gpt-4o suggested the use of Scan, like this: *)
-(* Scan[(# /: Dt[#, x1] = 0) &, {y1, z1, x2, y2, z2}] *)
-(* gpt-4o also suggested the use of If *)
-(* Scan[If[# =!= x1, (# /: Dt[#, x1] = 0)] &, {x1, y1, z1, x2, y2, z2}] *)
-(* gpt-4o suggested Subsets to form pairs: *)
+(* Now we want to set a bunch of partial derivatives.  We set TagSet (/:);
+ * its use is suggested in the Dt documentation
+ *
+ * I originally had the partial derivatives listed out like this:
+ * y1 /: Dt[y1, x1] = 0
+ * z1 /: Dt[z1, x1] = 0
+ * (you can't assign Dt[y1, x1] globally; you have to TagSet it on y1)
+ *
+ * But there are so many of them, I don't want to list them all out.
+ * gpt-4o suggested the use of Scan, like this:
+ *
+ * Scan[(# /: Dt[#, x1] = 0) &, {y1, z1, x2, y2, z2}]
+ *
+ * gpt-4o also suggested the use of If, so I can include x1 in the list:
+ * Scan[If[# =!= x1, (# /: Dt[#, x1] = 0)] &, {x1, y1, z1, x2, y2, z2}]
+ *
+ * gpt-4o suggested Subsets to form pairs and scan over the pairs:
+ *
+ * pairs = Tuples[vars, 2];
+ * Scan[Function[{pair}, If[pair[[1]] =!= pair[[2]], Evaluate[pair[[1]]] /: Dt[pair[[1]], pair[[2]]] = 0]], pairs]
+ *
+ * Another gpt-4o prompt or two gets us to the final form (@@ is Apply and =!= is UnsameQ):
+ *)
 
 vars = {x1, y1, z1, x2, y2, z2};
-
-(* Form all pairs *)
 pairs = Tuples[vars, 2];
 
-(* Scan over the pairs *)
-Scan[Function[{pair}, If[pair[[1]] =!= pair[[2]], Evaluate[pair[[1]]] /: Dt[pair[[1]], pair[[2]]] = 0]], pairs]
+TagSetDifferential[a_, b_] :=
+  If[a =!= b,
+    a /: Dt[a, b] = 0
+  ]
 
-(* Scan[If[# =!= x1, (# /: Dt[#, x1] = 0)] &, {x1, y1, z1, x2, y2, z2}] *)
-(* Scan[Function[var, If[var =!= x1, (var /: Dt[var, x1] = 0)]], {x1, y1, z1, x2, y2, z2}] *)
-(* Scan[Function[{pair}, If[pair[[1]] =!= x1, Evaluate[pair[[1]]] /: Dt[pair[[1]], x1] = 0]], pairs] *)
+Scan[TagSetDifferential @@ # &, pairs]
 
-(* //. is ReplaceRepeated *)
-(* This doesn't work: *)
-(* Print[Dt[uu, x1] //. {r12 -> R12, r1 -> R1, r2 -> R2} // FullForm] *)
-(* https://mathematica.stackexchange.com/a/84909 suggests using FullForm to diagnose this, like this: *)
-(* Print[expr // FullForm] *)
-(* The reason it doesn't work is because some of the square roots appear to the -(1/2) power, not the (1/2) power *)
+(* //. is ReplaceRepeated
+ * This doesn't work:
+ * Print[Dt[uu, x1] //. {r12 -> R12, r1 -> R1, r2 -> R2}]
+ *
+ * https://mathematica.stackexchange.com/a/84909 suggests using FullForm to diagnose this, like this:
+ * Print[expr // FullForm]
+ *
+ * The reason it doesn't work is because some of the square roots appear to the -(1/2) power, not the (1/2) power
+ *
+ * So we include need to include negative powers (and third powers)
+ *)
 
-(* So do this: *)
-bwb = Dt[uu,x1]
-rules = {r12 -> R12, r1 -> R1, r2 -> R2, 1/r1 -> 1/R1, 1/r2 -> 1/R2, 1/r12 -> 1/R12}
-Print[bwb //. rules]
+rules = {r12 -> R12, r1 -> R1, r2 -> R2, 1/r1 -> 1/R1, 1/r2 -> 1/R2, 1/r12 -> 1/R12, 1/r1^3 -> 1/R1^3, 1/r2^3 -> 1/R2^3, 1/r12^3 -> 1/R12^3}
+
+Print[eqn //. rules // Simplify]
