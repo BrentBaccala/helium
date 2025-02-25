@@ -1,4 +1,4 @@
-#!/opt/Wolfram/WolframScript/bin/wolframscript
+#!/opt/Wolfram/WolframScript/bin/wolframscript -format OutputForm
 (*
  * Given the PDE: x^2 u_xx - u_yy + u_y = 0
  *
