@@ -6,7 +6,7 @@ r[x_, y_, z_] = Sqrt[x^2 + y^2 + z^2]
 r1 = r[x1, y1, z1]
 r2 = r[x2, y2, z2]
 r12 = r[x2-x1, y2-y1, z2-z1]
-eqn = - 1/2*Laplacian[Psif, {x1, y1, z1}] - 1/2*Laplacian[Psif, {x2, y2, z2}] - (2/r1 + 2/r2 - 1/r12) * Psif == 0
+eqn = - 1/2*Laplacian[Psif, {x1, y1, z1}] - 1/2*Laplacian[Psif, {x2, y2, z2}] - (2/r1 + 2/r2 - 1/r12) * Psif
 
 (* Print[eqn] *)
 
@@ -90,4 +90,31 @@ Scan[TagSetDifferential @@ # &, pairs]
 
 rules = {r12 -> R12, r1 -> R1, r2 -> R2, 1/r1 -> 1/R1, 1/r2 -> 1/R2, 1/r12 -> 1/R12, 1/r1^3 -> 1/R1^3, 1/r2^3 -> 1/R2^3, 1/r12^3 -> 1/R12^3}
 
-Print[eqn //. rules // Simplify]
+LHS[f_] := f[[1]]
+
+(* This doesn't do what I want:
+ * eqn //. rules // Simplify //. x1^2 -> X1^2
+ *
+ * For operator precedence table, see https://reference.wolfram.com/language/tutorial/OperatorInputForms.html.en
+ * //. is ReplaceRepeated; it has higher precedence than // (right apply)
+ * So the expression nests like this:
+ * (eqn //. rules) // (Simplify //. x1^2 -> X1^2)
+ *
+ * The right parenthesized expression just evaluates to Simplify:
+ * Print[Simplify // x1^2 -> X1^2]
+ * so the net effect is to drop the right hand rule completely.
+ *)
+
+eqnsimp = eqn //. rules // Simplify
+
+(* Print[(eqn //. rules // Simplify) //. x1^2 -> X1^2] *)
+
+Print[(eqn //. rules // Simplify)]
+(* Print[(eqn //. rules // Simplify) /. {x1^2 -> (X1^2 - r12^2 + R12^2 // Expand)} /. {x1^2 -> X1^2}] *)
+Print[(eqn //. rules // Simplify) /. {x1^2 -> (X1^2 - r12^2 + R12^2 // Expand)} /. {x1^2 -> X1^2} /. {x2^2 -> (X2^2 - r2^2 + R2^2 // Expand)} /. {X2^2 -> x2^2}]
+(* Print[(eqn //. rules // Simplify) /. {x1^2 -> (X1^2 - r12^2 + R12^2 // Expand)} /. {x1^2 -> X1^2} /. {x2^2 -> (X2^2 - r2^2 + R2^2 // Expand)} /. {X2^2 -> x2^2} /. {x1*x2 -> X1*X2 - (1/2*(r1^2 + r2^2 - r12^2 // Expand)) + 1/2*(R1^2 + R2^2 - R12^2)}] *)
+(* Print[(eqn //. rules // Simplify) /. {x1^2 -> (X1^2 - r12^2 + R12^2 // Expand)} /. {x1^2 -> X1^2} /. {x2^2 -> (X2^2 - r2^2 + R2^2 // Expand)} /. {X2^2 -> x2^2} /. {x1*x2 + y1*y2 + z1*z2 -> - 1/2*(R1^2 + R2^2 - R12^2)}] *)
+bwb = (eqn //. rules // Simplify) /. {x1^2 -> (X1^2 - r12^2 + R12^2 // Expand)} /. {x1^2 -> X1^2} /. {x2^2 -> (X2^2 - r2^2 + R2^2 // Expand)} /. {X2^2 -> x2^2} //. {x1*x2 -> - 1/2*(R1^2 + R2^2 - R12^2) - y1*y2 - z1*z2}
+Print[Distribute /@ (Simplify /@ bwb)]
+
+(* Print[Psif + (R2^2*(-3*R12^3 + Expand[r12^2])*Derivative[0,0,1][Psi][r1, r2, r12])/(R12^2) //. rules //. x1^2 -> X1^2] *)
