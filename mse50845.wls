@@ -1,5 +1,7 @@
 #!/opt/Wolfram/WolframScript/bin/wolframscript -format OutputForm
 (*
+ * From Mathematica Stack Exchange #50845   https://mathematica.stackexchange.com/questions/50845
+ *
  * Given the PDE: x^2 u_xx - u_yy + u_y = 0
  *
  * We want to change to s(x,y) = x e^y
