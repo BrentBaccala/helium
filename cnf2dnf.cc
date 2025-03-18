@@ -136,7 +136,7 @@
 #include <shared_mutex>
 #include <csignal>
 #include <unistd.h>
-#include "LockingQueue.hpp"
+#include "LockingStack.hpp"
 
 // unsigned int bitstring_len = 0;
 
@@ -768,7 +768,7 @@ struct BacktrackPoint
   Cover * cover;
 };
 
-LockingQueue<BacktrackPoint> backtrack_queue;
+LockingStack<BacktrackPoint> backtrack_queue;
 
 std::list<Cover> all_covers;
 
