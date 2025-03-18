@@ -5,9 +5,13 @@
  *
  * USAGE: ./cnf2dnf NUM_THREADS < input-bit-strings > output-bit-strings
  *
- * GOAL: Given a set of polynomials (that form an ideal), we want to factor them all and
- * form a set of ideals, all formed from irreducible polynomials.  The essence of
- * this operation is converting a logical expression from CNF to DNF.
+ * GOAL: Given an ideal defined by a set of polynomial generators, we want to factor the ideal
+ * into an intersection of ideals.  We factor all of the polynomial generators, treat
+ * each unique irreducible factor as a logical variable, and convert the resulting
+ * logical system from CNF to DNF.  This will map to a set of ideals whose intersection
+ * forms the original ideal.  This isn't yet a complete irreducible decomposition,
+ * as each resulting ideal would have to be processed by something like the GTZ
+ * algorithm to find its complete decomposition.
  *
  * PREPROCESS: Sage factors the polynomials and forms a list of factors.
  *
@@ -792,6 +796,30 @@ void task(void)
      * or add a bitstring to finished_bitstrings.  So the only cost of not doing a
      * subset test at this point is avoiding a single additional pass through this
      * while loop, and that doesn't seem to be worth it.
+     */
+
+    /* current_work contains next_polynomial, and the bitstring is obtained from the polys[] array.
+     *
+     * We could instead put next_polynomial in current_work.  So we pull out next_polynomial
+     * and polynomial_bitstring (a truncated version) from current_work.  Or we pull out
+     * an index into expanded_polys, which is a std::vector of std::vector<BitString>s.
+     *
+     * We have next_polynomial and next_index.  We loop next_bit over expanded_polys
+     * from next_index to its last entry.
+     *
+     * for (BitString next_bit) loop:
+     *   needs to start at zero most of the time, but if we're just coming in from
+     *   the waitAndPop above we start at current_work.next_index
+     *   So, at the end of the loop, where we increment next_polynomial, we set next_index to zero
+     *   The first next_bit that's allowed we find,
+     *      we set extra_work's bitstring to current_work.bitstring
+     *      we update current_work.bitstring with an assignment, and continue to the next polynomial
+     *   The second next_bit that's allowed we find,
+     *      we save the unmodified bitstring to extra_work (that's why we set it above)
+     *      along with the allowed_bits, cover, and next_index (the index we found)
+     *      break out of the loop and keep going to process next_bit
+     *   If we didn't find any next_bit's, we goto get_next_work_from_queue
+     *   Otherwise, keep going with current_work
      */
 
     while (current_work.next_polynomial < polys.size()) {
