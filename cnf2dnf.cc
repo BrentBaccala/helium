@@ -412,7 +412,7 @@ int single_bit_polynomials_covered = 0;
 class LinkedBitString : public BitString {
   public:
   LinkedBitString * next = nullptr;
-  bool valid = true;
+  std::atomic<bool> valid = true;
 
   LinkedBitString(const BitString& bs) : BitString(bs) {}
 
@@ -541,14 +541,20 @@ public:
 
     /* Let's run a final check for subsets that were added after our last subset check.
      * We can no longer delete the node, but we can invalidate it.
+     *
+     * We do have to do the entire atomic compare_exchange_strong bit because we can't
+     * assume that new_node is still valid!  After all, another thread could be in
+     * the next loop below this one and invalidate it.
      */
     for (auto i=0; i<count; i++) {
       if (by_count[i]) {
 	for (auto& fbs: *by_count[i]) {
-	  if (bitstring.is_superset_of(fbs)) {
-	    new_node->valid = false;
-	    valid_bitstrings --;
-	    invalid_bitstrings ++;
+	  if (new_node->valid && bitstring.is_superset_of(fbs)) {
+	    bool true_value = true;
+	    if (new_node->valid.compare_exchange_strong(true_value, false)) {
+	      valid_bitstrings --;
+	      invalid_bitstrings ++;
+	    }
 	    return;
 	  }
 	}
@@ -559,10 +565,12 @@ public:
     for (count ++; count < by_count.size(); count ++) {
       if (by_count[count]) {
 	for (auto& fbs: *by_count[count]) {
-	  if (fbs.is_superset_of(bitstring)) {
-	    fbs.valid = false;
-	    valid_bitstrings --;
-	    invalid_bitstrings ++;
+	  if (fbs.valid && fbs.is_superset_of(bitstring)) {
+	    bool true_value = true;
+	    if (fbs.valid.compare_exchange_strong(true_value, false)) {
+	      valid_bitstrings --;
+	      invalid_bitstrings ++;
+	    }
 	  }
 	}
       }
