@@ -1295,7 +1295,7 @@ def cnf2dnf_espresso(cnf_bitsets, parallel=False):
 def cnf2dnf_external(cnf_bitsets, parallel=False):
     # we sort cnf_bitsets so that the bitsets with a single one bit come first, to speed processing in cnf2dnf
     cnf_bitsets = sorted(cnf_bitsets, key=lambda x:len(x))
-    cmd = ['./cnf2dnf', str(num_processes if parallel else 1)]
+    cmd = ['./cnf2dnf', '-t', str(num_processes if parallel else 1)]
     proc = subprocess.Popen(cmd, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=sys.stderr)
     for bs in cnf_bitsets:
         proc.stdin.write(str(bs).encode())
@@ -1339,11 +1339,11 @@ cnf2dnf_tests = [
      ['01001', '10101', '10010', '01010']),
 ]
 
-def test_cnf2dnf():
+def test_cnf2dnf(parallel=False):
     for test in cnf2dnf_tests:
         inputs = [FrozenBitset(s) for s in test[0]]
         outputs = [FrozenBitset(s) for s in test[1]]
-        actual_outputs = cnf2dnf(inputs)
+        actual_outputs = cnf2dnf(inputs, parallel)
         # why do we need to convert to str here for the sort to work?
         if sorted(actual_outputs, key=lambda x:str(x)) != sorted(outputs, key=lambda x:str(x)):
             print("Expected:", sorted(outputs, key=lambda x:str(x)))

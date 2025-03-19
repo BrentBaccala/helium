@@ -998,9 +998,25 @@ int main(int argc, char ** argv)
 {
   int nthreads = 1;
   int bitstring_len = 0;
+  int opt;
 
-  if (argc > 1) {
-    nthreads = std::stoi(argv[1]);
+  while ((opt = getopt(argc, argv, "vt:")) != -1) {
+    switch (opt) {
+    case 'v':
+      verbose = true;
+      break;
+    case 't':
+      nthreads = atoi(optarg);
+      break;
+    default: /* '?' */
+      fprintf(stderr, "Usage: %s [-v] [-t nthreads]\n", argv[0]);
+      exit(EXIT_FAILURE);
+    }
+  }
+
+  if (optind < argc) {
+    fprintf(stderr, "Usage: %s [-v] [-t nthreads]\n", argv[0]);
+    exit(EXIT_FAILURE);
   }
 
   std::string bitstring;
