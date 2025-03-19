@@ -772,6 +772,7 @@ struct BacktrackPoint
 {
   BitString bitstring;
   BitString allowed_bits;
+  unsigned int next_index;
   unsigned int next_polynomial;
   Cover * cover;
 };
@@ -780,14 +781,19 @@ LockingStack<BacktrackPoint> backtrack_queue;
 
 std::list<Cover> all_covers;
 
+/* task() - the main processing routine.  Should be called with at least one
+ * BacktrackPoint (probably polynomial 0, index 0) already pushed onto backtrack_queue.
+ * Multiple threads can call task() even if only one BacktrackPoint is pushed;
+ * it's designed to wait until a BacktrackPoint is available, unless backtrack_queue
+ * detects that there is no more work to be done.
+ */
+
 void task(void)
 {
-  /* "next work" is what this thread will do after "current work".  "extra work" has to be
-   * pushed on the queue for later processing, either by this thread or by another.
+  /* "current work" is what we're doing now.  "extra work" has to be pushed on
+   * the backtrack queue for later processing, either by this thread or by another.
    */
   BacktrackPoint current_work;
-  BitString next_work_bitstring;
-  BitString next_work_allowed_bits;
   BacktrackPoint extra_work;
 
   while (true) {
@@ -804,6 +810,15 @@ void task(void)
      * or add a bitstring to finished_bitstrings.  So the only cost of not doing a
      * subset test at this point is avoiding a single additional pass through this
      * while loop, and that doesn't seem to be worth it.
+     *
+     * Update: I'm not checking before we add to the backtrack queue currently, because
+     * I'm no longer adding the bit to the bitstring before pushing on the backtrack queue.
+     * I could add the bit in a temporary just to check if we should add it to the
+     * backtrack queue, or maybe it makes more sense to check it here (when we pull it
+     * off the backtrack queue), but I haven't put the code back in yet.
+     *
+     * It's all an optimization, because the FinishedBitStrings add() method makes sure
+     * that any supersets get invalidated in favor of their subsets.
      */
 
     /* current_work contains next_polynomial, and the bitstring is obtained from the polys[] array.
@@ -812,22 +827,26 @@ void task(void)
      * and polynomial_bitstring (a truncated version) from current_work.  Or we pull out
      * an index into expanded_polys, which is a std::vector of std::vector<BitString>s.
      *
-     * We have next_polynomial and next_index.  We loop next_bit over expanded_polys
+     * We have next_polynomial and next_index.  We loop next_bit over expanded_polys[next_polynomial]
      * from next_index to its last entry.
      *
      * for (BitString next_bit) loop:
      *   needs to start at zero most of the time, but if we're just coming in from
-     *   the waitAndPop above we start at current_work.next_index
+     *     a new BacktrackPoint we start at current_work.next_index
      *   So, at the end of the loop, where we increment next_polynomial, we set next_index to zero
-     *   The first next_bit that's allowed we find,
+     *   The first next_bit we find,
      *      we set extra_work's bitstring to current_work.bitstring
-     *      we update current_work.bitstring with an assignment, and continue to the next polynomial
-     *   The second next_bit that's allowed we find,
+     *      we update current_work.bitstring with an assignment, and continue to see if there's a second next_bit
+     *   The second next_bit we find,
      *      we save the unmodified bitstring to extra_work (that's why we set it above)
-     *      along with the allowed_bits, cover, and next_index (the index we found)
-     *      break out of the loop and keep going to process next_bit
+     *      along with the allowed_bits, cover, and next_index (the index of the second next_bit, as we haven't processed it yet)
+     *      push extra_work (it's a BacktrackPoint) to the backtrack_queue
+     *      break out of the loop and keep going to process the first next_bit
+     *   Another additional next_bit's (three or more) will get processed when the BacktrackPoint is processed.
+     *      At that point, the second next_bit will now be the first next_bit, so the third next_bit would become the second next_bit
+     *      and yet another BacktrackPoint would be created.
      *   If we didn't find any next_bit's, we goto get_next_work_from_queue
-     *   Otherwise, keep going with current_work
+     *   Otherwise, keep going with current_work and move on to the next polynomial
      */
 
     while (current_work.next_polynomial < polys.size()) {
@@ -837,43 +856,44 @@ void task(void)
 	bool have_next_work = false;
 	/* Extend backtrack queue if there's more than one factor(bit) in the polynomial */
 	/* XXX should this loop use a reference for speed? */
-	for (BitString next_bit: expanded_polys[current_work.next_polynomial]) {
+	for (; current_work.next_index < expanded_polys[current_work.next_polynomial].size(); current_work.next_index ++) {
+	  auto& next_bit = expanded_polys[current_work.next_polynomial][current_work.next_index];
 	  /* skip this bit if it's not in the allowed bit set */
 	  if (next_bit && current_work.allowed_bits) {
 	    // std::cerr << "adding " << next_bit << "\n";
 	    if (! have_next_work) {
-	      /* Like this, but avoids a copy */
-	      /* next_work_bitstring = current_work.bitstring | next_bit; */
-	      current_work.bitstring.logical_or_assign(next_work_bitstring, next_bit);
-	      /* remove all of the current polynomial's bits from the allowed bits for future work */
-	      next_work_allowed_bits = current_work.allowed_bits;
+	      extra_work.bitstring = current_work.bitstring;
+	      current_work.bitstring |= next_bit;
 	      /* Check first if this is a superset of an existing bit string; skip it if it is */
-	      if (current_work.cover->finished_bitstrings.contain_a_subset_of(next_work_bitstring)) continue;
+	      if (current_work.cover->finished_bitstrings.contain_a_subset_of(current_work.bitstring)) {
+		/* put things back the way they were, and skip this solution */
+		current_work.bitstring = extra_work.bitstring;
+		continue;
+	      }
+	      /* If the current polynomial's bits are 111, we want to create future work 1xx, 01x, 001,
+	       * (not 1xx, x1x, xx1), so we now remove the current bit from the allowed bits.
+	       */
+	      current_work.allowed_bits &= ~next_bit;
 	      have_next_work = true;
 	    } else {
-	      /* Like this, but avoids a copy */
-	      /* extra_work.bitstring = current_work.bitstring | next_bit; */
-	      current_work.bitstring.logical_or_assign(extra_work.bitstring, next_bit);
+	      /* extra_work.bitstring was already set above the first time through this loop */
 	      extra_work.allowed_bits = current_work.allowed_bits;
-	      extra_work.next_polynomial = current_work.next_polynomial + 1;
+	      extra_work.next_index = current_work.next_index;
+	      extra_work.next_polynomial = current_work.next_polynomial;
 	      extra_work.cover = current_work.cover;
 	      /* Check first if this is a superset of an existing bit string; skip it if it is */
-	      if (current_work.cover->finished_bitstrings.contain_a_subset_of(extra_work.bitstring)) continue;
+	      /* if (current_work.cover->finished_bitstrings.contain_a_subset_of(extra_work.bitstring)) continue; */
 	      backtrack_queue.push(extra_work);
+	      break;
 	    }
-	    /* If the current polynomial's bits are 111, we want to create future work 1xx, 01x, 001,
-	     * (not 1xx, x1x, xx1), so we now remove the current bit from the allowed bits.
-	     */
-	    current_work.allowed_bits &= ~next_bit;
 	  }
 	}
 	if (! have_next_work) {
 	  goto get_next_work_from_queue;
 	}
-	current_work.bitstring = next_work_bitstring;
-	current_work.allowed_bits = next_work_allowed_bits;
       }
       current_work.next_polynomial ++;
+      current_work.next_index = 0;
     }
     current_work.cover->finished_bitstrings.add(current_work.bitstring);
   }
@@ -1017,6 +1037,7 @@ int main(int argc, char ** argv)
   if (all_covers.size() > 0) {
     BacktrackPoint initial_work;
     initial_work.next_polynomial = 0;
+    initial_work.next_index = 0;
     initial_work.allowed_bits = ~ BitString(bitstring_len);
 
     for (auto& cover: all_covers) {
