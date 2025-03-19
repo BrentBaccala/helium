@@ -360,6 +360,20 @@ public:
     return -1;
   }
 
+  /* Simple (but inefficient) method for iterating over all one bits in a BitString */
+  std::vector<BitString> all_one_bits(void) const
+  {
+    std::vector<BitString> result;
+    BitString bs = *this;
+    BitString rmsb;
+    do {
+      rmsb = bs.rightmost_set_bit();
+      result.emplace_back(rmsb);
+      bs ^= rmsb;
+    } while (bs);
+    return result;
+  }
+
   int count(void) const
   {
     if (cached_count == -1) {
@@ -895,6 +909,19 @@ void task(void)
       current_work.next_polynomial ++;
       current_work.next_index = 0;
     }
+    /* We've now got a bitstring that's in the DNF.  See if any of its subsets are also in the DNF. */
+    for (BitString sb: current_work.bitstring.all_one_bits()) {
+      BitString trial_bitstring = current_work.bitstring & ~sb;
+      int i;
+      for (i=0; i<polys.size(); i++) {
+	if (current_work.cover->under_consideration[i] && ! (polys[i] && trial_bitstring)) break;
+      }
+      if (i == polys.size()) {
+	current_work.bitstring = trial_bitstring;
+      }
+    }
+    /* We've now got a prime bitstring in the DNF.  Add it to the finished DNF. */
+    /* XXX probably should check first to see if the bitstring is already in finished_bitstrings */
     current_work.cover->finished_bitstrings.add(current_work.bitstring);
   }
 }
