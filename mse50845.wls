@@ -25,6 +25,7 @@ expr = x^2 D[u[x, y], {x, 2}] - D[u[x, y], {y, 2}] + D[u[x, y], y]
 
 (* This doesn't work; why? *)
 (* Print[Solve[s == x Exp[y] && t == x Exp[-y], x]] *)
+Print[Solve[x > 0 && y > 0 && s == x Exp[y] && t == x Exp[-y], {x,y}]]
 
 $Assumptions = {s > 0, t > 0}
 (* /. is ReplaceAll
