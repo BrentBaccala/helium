@@ -870,6 +870,7 @@ void task(void)
 	bool have_next_work = false;
 	/* Extend backtrack queue if there's more than one factor(bit) in the polynomial */
 	/* XXX should this loop use a reference for speed? */
+	unsigned int initial_index = current_work.next_index;
 	for (; current_work.next_index < expanded_polys[current_work.next_polynomial].size(); current_work.next_index ++) {
 	  auto& next_bit = expanded_polys[current_work.next_polynomial][current_work.next_index];
 	  /* skip this bit if it's not in the allowed bit set */
@@ -888,6 +889,48 @@ void task(void)
 	       * (not 1xx, x1x, xx1), so we now remove the current bit from the allowed bits.
 	       */
 	      current_work.allowed_bits &= ~next_bit;
+
+	      /* Check for forced assignments
+	       *
+	       * All I'm interested in for current purposes are the 01x type assignments, that actually
+	       * assign a zero somewhere, since that's the only thing that can trigger forced assignments,
+	       * as we have a monotone function, with no negations in the CNF.
+	       *
+	       * Monotone function: only zeros can trigger forced assignments, and all forced assignments are ones.
+	       *
+	       * If initial_index is zero, then this is the first bit we're assigning for this polynomial,
+	       * and there are no forced assignments, since we're assigning something like "1xx".
+	       *
+	       * Otherwise (initial_work != 0), this is a later bit in the polynomial, we're assigning
+	       * something like "01x" or "001", and the zeros might trigger forced assignments.
+	       *
+	       * Due to the monotone nature of our CNF, the forced assignments will always be one bits,
+	       * so there's no need to loop or recurse here to check for additional forced assignments.
+	       *
+	       * We want to put the forced ones into current_work, by setting them in bitstring
+	       * and clearing them in allowed_bits.
+	       *
+	       * All polynomials earlier than current_work.next_polynomial have already been satisfied,
+	       * so we start our check with current_work.next_polynomial + 1.
+	       */
+
+	      if (initial_index != 0) {
+		for (int check_poly = current_work.next_polynomial + 1; check_poly < polys.size(); check_poly ++) {
+		  /* only check polys in our Cover */
+		  if (current_work.cover->under_consideration[check_poly]) {
+		    /* if it isn't already satisfied... */
+		    if (! (current_work.bitstring && polys[check_poly])) {
+		      /* ...and there's only one bit left than can satisfy it... */
+		      BitString possible_bits = current_work.allowed_bits & polys[check_poly];
+		      if (possible_bits.count() == 1) {
+			/* ...then that bit is a forced assignment */
+			current_work.bitstring |= possible_bits;
+			current_work.allowed_bits &= ~possible_bits;
+		      }
+		    }
+		  }
+		}
+	      }
 	      have_next_work = true;
 	    } else {
 	      /* extra_work.bitstring was already set above the first time through this loop */
