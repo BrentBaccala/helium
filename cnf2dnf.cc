@@ -531,25 +531,42 @@ public:
 
   void add(const BitString &bitstring)
   {
-    /* This will back a copy of bitstring, which is what we want, because the current_work.bitstring
+    /* This will make a copy of bitstring, which is what we want, because the current_work.bitstring
      * that was passed in (by reference) will get copy-assigned when we pull the next work item
      * off of backtrack_queue.
      */
     LinkedBitString * new_node = new LinkedBitString(bitstring);
     auto count = bitstring.count();
 
-    /* This code is cribbed from: https://en.cppreference.com/w/cpp/atomic/atomic/compare_exchange */
-    // put the current value of head into new_node->next
-    new_node->next = by_count[count].load(std::memory_order_relaxed);
+    /* This code is cribbed from: https://en.cppreference.com/w/cpp/atomic/atomic/compare_exchange
+     *
+     * We're going to put new_node on the top of the linked list after checking to make sure
+     * that it doesn't duplicate anything already on the linked list.  If the head isn't
+     * what's stored in new_node->next (either because it's the first time through the loop
+     * or because some other thread inserted a node just now) we check for duplicates
+     * and try again.  Keep track of the first node on the list that we checked for a duplicate
+     * so we don't check twice if we have to run the loop multiple times.
+     *
+     * If there's anything at all on the list, the compare_exchange_weak will fail the first
+     * time through the loop (because new_node->next is NULL and by_count[count] isn't NULL),
+     * and we'll check everything on the list for duplicates (because last_checked_node is NULL).
+     * Further failures of compare_exchange_weak will only check newly added nodes.
+     */
 
-    // now make new_node the new head, but if the head
-    // is no longer what's stored in new_node->next
-    // (some other thread must have inserted a node just now)
-    // then put that new head into new_node->next and try again
+    new_node->next = NULL;
+    LinkedBitString * last_checked_node = NULL;
+
     while (!by_count[count].compare_exchange_weak(new_node->next, new_node,
 						  std::memory_order_release,
-						  std::memory_order_relaxed))
-      ; // the body of the loop is empty
+						  std::memory_order_relaxed)) {
+      for (auto check_node = new_node->next; check_node != last_checked_node; check_node = check_node->next) {
+	if (*check_node == bitstring) {
+	  delete new_node;
+	  return;
+	}
+      }
+      last_checked_node = new_node->next;
+    }
 
     valid_bitstrings ++;
 
@@ -964,7 +981,7 @@ void task(void)
       }
     }
     /* We've now got a prime bitstring in the DNF.  Add it to the finished DNF. */
-    /* XXX probably should check first to see if the bitstring is already in finished_bitstrings */
+    /* add() will check first to see if the bitstring is already in finished_bitstrings */
     current_work.cover->finished_bitstrings.add(current_work.bitstring);
   }
 }
