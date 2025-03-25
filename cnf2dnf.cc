@@ -142,6 +142,11 @@
 
 bool verbose = false;
 
+struct {
+  std::vector<unsigned int> subset_checks_made;
+  std::vector<unsigned int> subset_checks_succeeded;
+} statistics;
+
 class BitString
 {
 public:
@@ -848,7 +853,7 @@ void task(void)
      * backtrack queue, or maybe it makes more sense to check it here (when we pull it
      * off the backtrack queue), but I haven't put the code back in yet.
      *
-     * It's all an optimization, because the FinishedBitStrings add() method makes sure
+     * It's an optimization, because the FinishedBitStrings add() method makes sure
      * that any supersets get invalidated in favor of their subsets.
      */
 
@@ -897,8 +902,11 @@ void task(void)
 	      extra_work.bitstring = current_work.bitstring;
 	      current_work.bitstring |= next_bit;
 	      /* Check first if this is a superset of an existing bit string; skip it if it is */
+	      /* XXX this check is optional and time consuming, so we should be more clever about how often we do this */
+	      statistics.subset_checks_made[current_work.next_polynomial] ++;
 	      if (current_work.cover->finished_bitstrings.contain_a_subset_of(current_work.bitstring)) {
 		/* put things back the way they were, and skip this solution */
+		statistics.subset_checks_succeeded[current_work.next_polynomial] ++;
 		current_work.bitstring = extra_work.bitstring;
 		continue;
 	      }
@@ -929,6 +937,11 @@ void task(void)
 	       *
 	       * All polynomials earlier than current_work.next_polynomial have already been satisfied,
 	       * so we start our check with current_work.next_polynomial + 1.
+	       */
+
+	      /* XXX this is another optional step that we should collect statistics on
+	       * If we didn't do this on every pass, it would still pick up all of the
+	       * forced assignments next time; i.e, it won't miss any.
 	       */
 
 	      if (initial_index != 0) {
@@ -1131,6 +1144,9 @@ int main(int argc, char ** argv)
       bs ^= rmsb;
     } while (bs);
   }
+
+  statistics.subset_checks_made.resize(polys.size());
+  statistics.subset_checks_succeeded.resize(polys.size());
 
   compute_and_remove_single_bit_covers();
 
