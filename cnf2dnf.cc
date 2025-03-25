@@ -575,6 +575,7 @@ public:
 
     valid_bitstrings ++;
 
+#ifdef DEBUG
     /* Let's run a final check for subsets that were added after our last subset check.
      * We can no longer delete the node, but we can invalidate it.
      *
@@ -611,6 +612,7 @@ public:
 	}
       }
     }
+#endif
   }
 
   // Nested iterator Class (written mostly by GPT-4o)
@@ -901,6 +903,7 @@ void task(void)
 	    if (! have_next_work) {
 	      extra_work.bitstring = current_work.bitstring;
 	      current_work.bitstring |= next_bit;
+#ifdef SLOW
 	      /* Check first if this is a superset of an existing bit string; skip it if it is */
 	      /* XXX this check is optional and time consuming, so we should be more clever about how often we do this */
 	      statistics.subset_checks_made[current_work.next_polynomial] ++;
@@ -910,6 +913,7 @@ void task(void)
 		current_work.bitstring = extra_work.bitstring;
 		continue;
 	      }
+#endif
 	      /* If the current polynomial's bits are 111, we want to create future work 1xx, 01x, 001,
 	       * (not 1xx, x1x, xx1), so we now remove the current bit from the allowed bits.
 	       */
