@@ -100,6 +100,7 @@
  *    - polys[i] are the complete bit strings for the i'th polynomial
  *    - inverted_polys[i] are the bit-wise complements of polys[i]
  *    - expanded_polys[i] is a vector of bit strings, one vector for each polynomial, each bit string with a single bit set
+ *    - expanded_polys_bits[i] is a vector of ints, one vector for each polynomial, each a list of bit positions that are one in the polynomial
  *
  * FINISHED BIT STRINGS:
  *    - linked list of bit strings
@@ -187,11 +188,21 @@ public:
   friend std::ostream& operator<<(std::ostream& stream, BitString bs);
 
   void set_bit(int bit) {
-    bitstring[bitstring.size() - bit/(8*sizeof(BitString::data_type)) - 1] |= 1 << (bit%(8*sizeof(BitString::data_type)));
+    int index_in_bitstring = bitstring.size() - bit/(8*sizeof(BitString::data_type)) - 1;
+    int bit_in_integer = bit%(8*sizeof(BitString::data_type));
+    bitstring[index_in_bitstring] |= (BitString::data_type(1) << bit_in_integer);
   }
 
   void clear_bit(int bit) {
-    bitstring[bitstring.size() - bit/(8*sizeof(BitString::data_type)) - 1] &= ~(1 << (bit%(8*sizeof(BitString::data_type))));
+    int index_in_bitstring = bitstring.size() - bit/(8*sizeof(BitString::data_type)) - 1;
+    int bit_in_integer = bit%(8*sizeof(BitString::data_type));
+    bitstring[index_in_bitstring] &= ~(BitString::data_type(1) << bit_in_integer);
+  }
+
+  bool test_bit(int bit) {
+    int index_in_bitstring = bitstring.size() - bit/(8*sizeof(BitString::data_type)) - 1;
+    int bit_in_integer = bit%(8*sizeof(BitString::data_type));
+    return ((bitstring[index_in_bitstring] & (BitString::data_type(1) << bit_in_integer)) != 0);
   }
 
   /* Bitwise NOT */
@@ -483,6 +494,7 @@ std::ostream& operator<<(std::ostream& stream, BitString bs)
 std::vector<BitString> polys;
 std::vector<BitString> inverted_polys;
 std::vector<std::vector<BitString>> expanded_polys;
+std::vector<std::vector<int>> expanded_polys_bits;
 
 /* All bits for which there is a polynomial containing only that bit.  Such bits must
  * always be present in the output bit strings, and any polynomials that depend on them
@@ -977,14 +989,14 @@ void task(void)
 	/* Extend backtrack queue if there's more than one factor(bit) in the polynomial */
 	/* XXX should this loop use a reference for speed? */
 	unsigned int initial_index = current_work.next_index;
-	for (; current_work.next_index < expanded_polys[current_work.next_polynomial].size(); current_work.next_index ++) {
-	  auto& next_bit = expanded_polys[current_work.next_polynomial][current_work.next_index];
+	for (; current_work.next_index < expanded_polys_bits[current_work.next_polynomial].size(); current_work.next_index ++) {
+	  int next_bit = expanded_polys_bits[current_work.next_polynomial][current_work.next_index];
 	  /* skip this bit if it's not in the allowed bit set */
-	  if (next_bit && current_work.allowed_bits) {
+	  if (current_work.allowed_bits.test_bit(next_bit)) {
 	    // std::cerr << "adding " << next_bit << "\n";
 	    if (! have_next_work) {
 	      extra_work.bitstring = current_work.bitstring;
-	      current_work.bitstring |= next_bit;
+	      current_work.bitstring.set_bit(next_bit);
 #ifdef SLOW
 	      /* Check first if this is a superset of an existing bit string; skip it if it is */
 	      /* XXX this check is optional and time consuming, so we should be more clever about how often we do this */
@@ -999,7 +1011,7 @@ void task(void)
 	      /* If the current polynomial's bits are 111, we want to create future work 1xx, 01x, 001,
 	       * (not 1xx, x1x, xx1), so we now remove the current bit from the allowed bits.
 	       */
-	      current_work.allowed_bits &= ~next_bit;
+	      current_work.allowed_bits.clear_bit(next_bit);
 
 	      /* Check for forced assignments
 	       *
@@ -1228,10 +1240,12 @@ int main(int argc, char ** argv)
 
     /* Put an empty list at the back of expanded_polys and fill it with the individual bits */
     expanded_polys.emplace_back();
+    expanded_polys_bits.emplace_back();
     BitString rmsb;
     do {
       rmsb = bs.rightmost_set_bit();
       expanded_polys.back().emplace_back(rmsb);
+      expanded_polys_bits.back().emplace_back(bs.rightmost_set_bit_index());
       bs ^= rmsb;
     } while (bs);
   }
