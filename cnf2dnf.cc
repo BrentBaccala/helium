@@ -186,6 +186,14 @@ public:
 
   friend std::ostream& operator<<(std::ostream& stream, BitString bs);
 
+  void set_bit(int bit) {
+    bitstring[bitstring.size() - bit/(8*sizeof(BitString::data_type)) - 1] |= 1 << (bit%(8*sizeof(BitString::data_type)));
+  }
+
+  void clear_bit(int bit) {
+    bitstring[bitstring.size() - bit/(8*sizeof(BitString::data_type)) - 1] &= ~(1 << (bit%(8*sizeof(BitString::data_type))));
+  }
+
   /* Bitwise NOT */
 
   BitString operator~() const
@@ -389,6 +397,68 @@ public:
       cached_count = value;
     }
     return cached_count;
+  }
+
+  // Iterator to loop over all one bits in a bitstring
+
+  class bititerator {
+
+  private:
+    BitString * bitstring;
+    int bit;
+
+  public:
+
+    // Constructor used for begin iterator (bit starts at rightmost one bit)
+    explicit bititerator(BitString * ptr) : bitstring(ptr) {
+      bit = ptr->rightmost_set_bit_index();
+    }
+
+    // Constructor used for end iterator (bit explicitly set to -1)
+    explicit bititerator(BitString * ptr, int bit) : bitstring(ptr), bit(bit) {
+    }
+
+    // Prefix increment (advance bit to next one bit, or -1 if there is none)
+    bititerator& operator++() {
+      for (int i=bitstring->bitstring.size()-bit/(8*sizeof(BitString::data_type))-1; i>=0; i--) {
+	for (auto j=bit%(8*sizeof(BitString::data_type)) + 1; j<8*sizeof(BitString::data_type); j++) {
+	  if (bitstring->bitstring[i] & (1<<j)) {
+	    bit = i*sizeof(BitString::data_type) + j;
+	    return *this;
+	  }
+	}
+      }
+      bit = -1;
+      return *this;
+    }
+
+    // Dereference operator
+    //
+    // Used by a C++ range-based for loop to construct the loop item
+    int operator*() const {
+      return bit;
+    }
+
+    // Equality operator
+    bool operator==(const bititerator& other) const {
+      return (bitstring == other.bitstring) && (bit == other.bit);
+    }
+
+    // Inequality operator
+    bool operator!=(const bititerator& other) const {
+      return !(*this == other);
+    }
+
+  };
+
+  // Begin iterator to loop over all one bits in a bitstring
+  bititerator begin() {
+    return bititerator(this);
+  }
+
+  // End iterator
+  bititerator end() {
+    return bititerator(this, -1);
   }
 };
 
@@ -998,15 +1068,20 @@ void task(void)
       current_work.next_polynomial ++;
       current_work.next_index = 0;
     }
-    /* We've now got a bitstring that's in the DNF.  See if any of its subsets are also in the DNF. */
-    for (BitString sb: current_work.bitstring.all_one_bits()) {
-      BitString trial_bitstring = current_work.bitstring & ~sb;
+    /* We've now got a bitstring that's in the DNF.  See if any of its subsets are also in the DNF,
+     * by clearing each one bit and checking to see if the bitstring still works.  Does the order
+     * of the bits affect the result?  Yes, but we don't expect the final result of the entire
+     * program to depend on exactly which subset is selected at this point, since we'll eventually
+     * find all solutions.
+     */
+    for (auto bit: current_work.bitstring) {
+      current_work.bitstring.clear_bit(bit);
       int i;
       for (i=0; i<polys.size(); i++) {
-	if (current_work.cover->under_consideration[i] && ! (polys[i] && trial_bitstring)) break;
+	if (current_work.cover->under_consideration[i] && ! (polys[i] && current_work.bitstring)) break;
       }
-      if (i == polys.size()) {
-	current_work.bitstring = trial_bitstring;
+      if (i != polys.size()) {
+	current_work.bitstring.set_bit(bit);
       }
     }
     /* We've now got a prime bitstring in the DNF.  Add it to the finished DNF. */
