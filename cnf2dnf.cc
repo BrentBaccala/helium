@@ -190,12 +190,12 @@ public:
 
   BitString operator~() const
   {
-    BitString *rv = new BitString(len);
+    BitString rv(len);
     for (size_type i=0; i<bitstring.size(); i++) {
-      rv->bitstring[i] = ~ bitstring[i];
+      rv.bitstring[i] = ~ bitstring[i];
     }
-    rv->cached_count = -1;
-    return *rv;
+    rv.cached_count = -1;
+    return BitString(rv);
   }
 
   /* Bitwise equality */
@@ -230,12 +230,12 @@ public:
 
   BitString operator&(const BitString& rhs) const
   {
-    BitString *rv = new BitString(len);
+    BitString rv(len);
     for (size_type i=0; i<bitstring.size(); i++) {
-      rv->bitstring[i] = bitstring[i] & rhs.bitstring[i];
+      rv.bitstring[i] = bitstring[i] & rhs.bitstring[i];
     }
-    rv->cached_count = -1;
-    return *rv;
+    rv.cached_count = -1;
+    return BitString(rv);
   }
 
   /* Bitwise AND returning a boolean */
@@ -514,6 +514,18 @@ public:
   std::atomic<int> invalid_bitstrings = 0;
 
   FinishedBitStrings(int max_count) : by_count(max_count+1) { }
+
+  ~FinishedBitStrings()
+  {
+    for (auto& albs: by_count) {
+      auto lbs = albs.load();
+      while (lbs) {
+	auto lbsnext = lbs->next;
+	delete lbs;
+	lbs = lbsnext;
+      }
+    }
+  }
 
   bool contain_a_subset_of(const BitString& bitstring)
   {
