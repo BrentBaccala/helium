@@ -1319,13 +1319,17 @@ int main(int argc, char ** argv)
      *
      * This code assumes that all of the covers have at least one finished_bitstring.
      * Since a vector of all one bits would satisify all possible input conditions,
-     * this seems like a valid assumption (baring a bug).
+     * this seems like a valid assumption (baring a bug).  Since I've hit such a bug,
+     * we now check for this condition and throw a runtime error if it happens.
      */
 
     std::vector<FinishedBitStrings *> finished_bitstrings;
     std::vector<FinishedBitStrings::iterator> iterators;
     for (auto &cover: all_covers) {
       finished_bitstrings.push_back(&cover.finished_bitstrings);
+      if (cover.finished_bitstrings.begin() == cover.finished_bitstrings.end()) {
+	throw std::runtime_error("Cover with no finished bitstrings");
+      }
       iterators.push_back(cover.finished_bitstrings.begin());
     }
     while (true) {
