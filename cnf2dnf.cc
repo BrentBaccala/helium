@@ -181,7 +181,7 @@ public:
       int j = len - i - 1;
       int index = bitstring_size - j/(8*sizeof(data_type)) - 1;
       int offset = j%(8*sizeof(data_type));
-      bitstring[index] |= val << offset;
+      bitstring[index] |= data_type(val) << offset;
     }
     cached_count = -1;
   }
@@ -377,8 +377,8 @@ public:
   {
     for (int i=bitstring.size()-1; i>=0; i--) {
       for (auto j=0; j<8*sizeof(data_type); j++) {
-	if (bitstring[i] & (1<<j)) {
-	  return i*sizeof(data_type) + j;
+	if (bitstring[i] & (data_type(1) << j)) {
+	  return (bitstring.size() - i - 1)*8*sizeof(data_type) + j;
 	}
       }
     }
@@ -439,10 +439,10 @@ public:
 
     // Prefix increment (advance bit to next one bit, or -1 if there is none)
     bititerator& operator++() {
-      for (int i=bitstring->bitstring.size()-bit/(8*sizeof(BitString::data_type))-1; i>=0; i--) {
-	for (auto j=bit%(8*sizeof(BitString::data_type)) + 1; j<8*sizeof(BitString::data_type); j++) {
-	  if (bitstring->bitstring[i] & (1<<j)) {
-	    bit = i*sizeof(BitString::data_type) + j;
+      for (int i=bitstring->bitstring.size()-(bit+1)/(8*sizeof(BitString::data_type))-1; i>=0; i--) {
+	for (auto j=(bit+1)%(8*sizeof(BitString::data_type)); j<8*sizeof(BitString::data_type); j++) {
+	  if (bitstring->bitstring[i] & (BitString::data_type(1) << j)) {
+	    bit = (bitstring->bitstring.size() - i - 1)*8*sizeof(BitString::data_type) + j;
 	    return *this;
 	  }
 	}
@@ -484,7 +484,7 @@ public:
 std::ostream& operator<<(std::ostream& stream, BitString bs)
 {
   for (int i=0; i < bs.bitstring.size(); i++) {
-    auto str = std::bitset<sizeof(BitString::data_type)*8>(bs.bitstring[i]).to_string();
+    auto str = std::bitset<8*sizeof(BitString::data_type)>(bs.bitstring[i]).to_string();
     if (i == 0) {
       auto bits_in_this_str = bs.len % (8*sizeof(BitString::data_type));
       if (bits_in_this_str > 0) {
