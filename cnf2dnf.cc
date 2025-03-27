@@ -1207,20 +1207,31 @@ void signalHandler(int signum) {
 
 void run_some_basic_tests(void)
 {
-  BitString bs("100000000");
-  BitString bs2("1000000000");
-  BitString bs3("010000000");
-  BitString bs64("10000000000000000000000000000000000000000000000000000000000000000");
-  BitString bs65("100000000000000000000000000000000000000000000000000000000000000000");
-  assert(std::vector<int>(bs.begin(), bs.end()) == std::vector<int>({8}));
-  assert(std::vector<int>(bs2.begin(), bs2.end()) == std::vector<int>({9}));
-  assert(std::vector<int>(bs3.begin(), bs3.end()) == std::vector<int>({7}));
+  // std::cout << sizeof(BitString::data_type) << "\n";
+  BitString bs7("010000000");
+  BitString bs8("100000000");
+  BitString bs9("1000000000");
+  BitString bs6364("11000000000000000000000000000000000000000000000000000000000000000");
+  BitString bs64  ("10000000000000000000000000000000000000000000000000000000000000000");
+  BitString bs65 ("100000000000000000000000000000000000000000000000000000000000000000");
+  BitString bs3132("110000000000000000000000000000000");
+  BitString bs32  ("100000000000000000000000000000000");
+  BitString bs33 ("1000000000000000000000000000000000");
+  // std::vector<int> bwb(bs6364.begin(), bs6364.end());
+  assert(std::vector<int>(bs7.begin(), bs7.end()) == std::vector<int>({7}));
+  assert(std::vector<int>(bs8.begin(), bs8.end()) == std::vector<int>({8}));
+  assert(std::vector<int>(bs9.begin(), bs9.end()) == std::vector<int>({9}));
+  assert(std::vector<int>(bs6364.begin(), bs6364.end()) == std::vector<int>({63,64}));
   assert(std::vector<int>(bs64.begin(), bs64.end()) == std::vector<int>({64}));
   assert(std::vector<int>(bs65.begin(), bs65.end()) == std::vector<int>({65}));
-  assert(bs.test_bit(8));
-  assert(bs2.test_bit(9));
-  assert(bs3.test_bit(7));
-  assert(! bs2.test_bit(7));
+  assert(std::vector<int>(bs3132.begin(), bs3132.end()) == std::vector<int>({31,32}));
+  assert(std::vector<int>(bs32.begin(), bs32.end()) == std::vector<int>({32}));
+  assert(std::vector<int>(bs33.begin(), bs33.end()) == std::vector<int>({33}));
+  assert(bs8.test_bit(8));
+  assert(bs9.test_bit(9));
+  assert(bs7.test_bit(7));
+  assert(! bs9.test_bit(7));
+  BitString bs(bs8);
   bs.clear_bit(8);
   assert(! bs.test_bit(8));
   bs.set_bit(7);
