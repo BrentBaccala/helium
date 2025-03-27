@@ -136,6 +136,7 @@
 #include <mutex>
 #include <shared_mutex>
 #include <csignal>
+#include <cassert>
 #include <unistd.h>
 #include "LockingStack.hpp"
 
@@ -419,6 +420,13 @@ public:
     int bit;
 
   public:
+
+    // These are here to ensure that we can use a bititerator to initialize a std::vector<int> (for testing)
+    using difference_type = std::ptrdiff_t;
+    using value_type = int;
+    using pointer = const int*;
+    using reference = const int&;
+    using iterator_category = std::input_iterator_tag;
 
     // Constructor used for begin iterator (bit starts at rightmost one bit)
     explicit bititerator(BitString * ptr) : bitstring(ptr) {
@@ -1197,11 +1205,37 @@ void signalHandler(int signum) {
     }
 }
 
+void run_some_basic_tests(void)
+{
+  BitString bs("100000000");
+  BitString bs2("1000000000");
+  BitString bs3("010000000");
+  BitString bs64("10000000000000000000000000000000000000000000000000000000000000000");
+  BitString bs65("100000000000000000000000000000000000000000000000000000000000000000");
+  assert(std::vector<int>(bs.begin(), bs.end()) == std::vector<int>({8}));
+  assert(std::vector<int>(bs2.begin(), bs2.end()) == std::vector<int>({9}));
+  assert(std::vector<int>(bs3.begin(), bs3.end()) == std::vector<int>({7}));
+  assert(std::vector<int>(bs64.begin(), bs64.end()) == std::vector<int>({64}));
+  assert(std::vector<int>(bs65.begin(), bs65.end()) == std::vector<int>({65}));
+  assert(bs.test_bit(8));
+  assert(bs2.test_bit(9));
+  assert(bs3.test_bit(7));
+  assert(! bs2.test_bit(7));
+  bs.clear_bit(8);
+  assert(! bs.test_bit(8));
+  bs.set_bit(7);
+  bs.set_bit(0);
+  assert(bs.test_bit(0));
+  assert(std::vector<int>(bs.begin(), bs.end()) == std::vector<int>({0,7}));
+}
+
 int main(int argc, char ** argv)
 {
   int nthreads = 1;
   int bitstring_len = 0;
   int opt;
+
+  run_some_basic_tests();
 
   while ((opt = getopt(argc, argv, "vt:")) != -1) {
     switch (opt) {
