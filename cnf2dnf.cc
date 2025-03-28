@@ -1251,6 +1251,17 @@ void signalHandler(int signum) {
 	    std::cerr << indicators[indicator];
 	  }
 	}
+	std::cerr << "\n";
+	last_seen = 1;
+	for (int i = 0; i < polys.size(); i ++) {
+	  // std::cerr << (*statistics.last_count_pushed)[i] << " " << (*statistics.last_count_popped)[i] << " ";
+	  unsigned int last_pushed = (*statistics.last_count_pushed)[i];
+	  // if (last_pushed > last_popped) std::cerr << last_pushed << " ";
+	  if (last_pushed > last_seen) {
+	    last_seen = last_pushed;
+	    std::cerr << last_pushed << " ";
+	  }
+	}
 #endif
 	std::cerr << "\n";
     }
