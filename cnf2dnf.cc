@@ -134,6 +134,8 @@
  */
 
 #include <iostream>
+#include <string>
+#include <format>
 #include <bitset>
 #include <atomic>
 #include <vector>
@@ -1218,32 +1220,21 @@ void compute_and_display_statistics(void)
 // Signal handler
 void signalHandler(int signum) {
     if (signum == SIGQUIT) {
-        std::cerr << "Backtrack queue: " << backtrack_queue.size() << "\n";
         std::cerr << "Finished bitstrings: ";
 	for (auto &cover: all_covers) {
-	  std::cerr << cover.finished_bitstrings.valid_bitstrings << " (plus " << cover.finished_bitstrings.invalid_bitstrings << " invalid) ";
+	  std::cerr << cover.finished_bitstrings.valid_bitstrings << " ";
 	}
 	std::cerr << "\n";
 	std::cerr << "Candidate solutions: " << statistics.candidate_solutions << "\n";
-#if 0
-	/* One way of printing the last popped counts: print them all out */
-	for (int i = 0; i < polys.size(); i ++) {
-	  // std::cerr << (*statistics.last_count_pushed)[i] << " " << (*statistics.last_count_popped)[i] << " ";
-	  unsigned int last_pushed = (*statistics.last_count_pushed)[i];
-	  unsigned int last_popped = (*statistics.last_count_popped)[i];
-	  // if (last_pushed > last_popped) std::cerr << last_pushed << " ";
-	  std::cerr << last_pushed << " ";
-	  if (i%8 == 7) std::cerr << "\n";
-	}
-#else
-	/* The way I prefer (at the moment): a short indicator string */
+	/* How do we print a progress message for the backtrack queue? */
+	/* The way I prefer (at the moment): one line filled with one character for each backtrack point,
+	 * and the character changes any time the "last pushed" count (it's like a timestamp) changes.
+	 */
 	unsigned int last_seen = 1;
 	char indicators[] = {'.', ';', '!', '|'};
 	int indicator = 0;
 	for (int i = 0; i < polys.size(); i ++) {
-	  // std::cerr << (*statistics.last_count_pushed)[i] << " " << (*statistics.last_count_popped)[i] << " ";
 	  unsigned int last_pushed = (*statistics.last_count_pushed)[i];
-	  // if (last_pushed > last_popped) std::cerr << last_pushed << " ";
 	  if (last_pushed == last_seen) std::cerr << indicators[indicator];
 	  else if (last_pushed > last_seen) {
 	    last_seen = last_pushed;
@@ -1252,17 +1243,26 @@ void signalHandler(int signum) {
 	  }
 	}
 	std::cerr << "\n";
+	/* Now another line with the transitions from the previous line labelled with the "last pushed" count */
 	last_seen = 1;
+	int field_width = 0;
 	for (int i = 0; i < polys.size(); i ++) {
-	  // std::cerr << (*statistics.last_count_pushed)[i] << " " << (*statistics.last_count_popped)[i] << " ";
 	  unsigned int last_pushed = (*statistics.last_count_pushed)[i];
-	  // if (last_pushed > last_popped) std::cerr << last_pushed << " ";
-	  if (last_pushed > last_seen) {
+	  if (last_pushed == last_seen) field_width ++;
+	  else if (last_pushed > last_seen) {
+	    field_width ++;
 	    last_seen = last_pushed;
-	    std::cerr << last_pushed << " ";
+	    std::string basic_value = std::to_string(last_pushed);
+	    /* (basic_value.size() + 1) because we want a space after basic_value */
+	    if (int(basic_value.size() + 1) > field_width) {
+	      std::cerr << basic_value << " ";
+	      field_width -= basic_value.size() + 1;
+	    } else {
+	      std::cerr << std::format("{:{}d} ", last_pushed, field_width-1);
+	      field_width = 0;
+	    }
 	  }
 	}
-#endif
 	std::cerr << "\n";
     }
 }
