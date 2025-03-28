@@ -144,9 +144,14 @@
 
 bool verbose = false;
 
+// #define SLOW 1
+
 struct {
-  std::vector<unsigned int> subset_checks_made;
-  std::vector<unsigned int> subset_checks_succeeded;
+  std::atomic<unsigned int> candidate_solutions;
+  std::vector<std::atomic<unsigned int>> * subset_checks_made;
+  std::vector<std::atomic<unsigned int>> * subset_checks_succeeded;
+  std::vector<std::atomic<unsigned int>> * last_count_pushed;
+  std::vector<std::atomic<unsigned int>> * last_count_popped;
 } statistics;
 
 class BitString
@@ -942,6 +947,9 @@ void task(void)
     /* waitAndPop returns true if we've got work; false if all the work is done */
     if (! backtrack_queue.waitAndPop(current_work)) return;
 
+    (*statistics.last_count_popped)[current_work.next_polynomial] = statistics.candidate_solutions.load();
+    (*statistics.last_count_pushed)[current_work.next_polynomial] = 0;
+
     /* I used to have a test here: finished_bitstrings.contain_a_subset_of(current_work.bitstring),
      * because even though we tested for this before adding the work to the backtrack_queue,
      * we could have added new finished bitstrings while the work was on the queue.  The program
@@ -1008,10 +1016,10 @@ void task(void)
 #ifdef SLOW
 	      /* Check first if this is a superset of an existing bit string; skip it if it is */
 	      /* XXX this check is optional and time consuming, so we should be more clever about how often we do this */
-	      statistics.subset_checks_made[current_work.next_polynomial] ++;
+	      (*statistics.subset_checks_made)[current_work.next_polynomial] ++;
 	      if (current_work.cover->finished_bitstrings.contain_a_subset_of(current_work.bitstring)) {
 		/* put things back the way they were, and skip this solution */
-		statistics.subset_checks_succeeded[current_work.next_polynomial] ++;
+		(*statistics.subset_checks_succeeded)[current_work.next_polynomial] ++;
 		current_work.bitstring = extra_work.bitstring;
 		continue;
 	      }
@@ -1076,6 +1084,7 @@ void task(void)
 	      extra_work.cover = current_work.cover;
 	      /* Check first if this is a superset of an existing bit string; skip it if it is */
 	      /* if (current_work.cover->finished_bitstrings.contain_a_subset_of(extra_work.bitstring)) continue; */
+	      (*statistics.last_count_pushed)[extra_work.next_polynomial] = statistics.candidate_solutions.load() + 1;
 	      backtrack_queue.push(extra_work);
 	      break;
 	    }
@@ -1106,6 +1115,7 @@ void task(void)
     }
     /* We've now got a prime bitstring in the DNF.  Add it to the finished DNF. */
     /* add() will check first to see if the bitstring is already in finished_bitstrings */
+    statistics.candidate_solutions ++;
     current_work.cover->finished_bitstrings.add(current_work.bitstring);
   }
 }
@@ -1202,6 +1212,35 @@ void signalHandler(int signum) {
 	  std::cerr << cover.finished_bitstrings.valid_bitstrings << " (plus " << cover.finished_bitstrings.invalid_bitstrings << " invalid) ";
 	}
 	std::cerr << "\n";
+	std::cerr << "Candidate solutions: " << statistics.candidate_solutions << "\n";
+#if 0
+	/* One way of printing the last popped counts: print them all out */
+	for (int i = 0; i < polys.size(); i ++) {
+	  // std::cerr << (*statistics.last_count_pushed)[i] << " " << (*statistics.last_count_popped)[i] << " ";
+	  unsigned int last_pushed = (*statistics.last_count_pushed)[i];
+	  unsigned int last_popped = (*statistics.last_count_popped)[i];
+	  // if (last_pushed > last_popped) std::cerr << last_pushed << " ";
+	  std::cerr << last_pushed << " ";
+	  if (i%8 == 7) std::cerr << "\n";
+	}
+#else
+	/* The way I prefer (at the moment): a short indicator string */
+	unsigned int last_seen = 1;
+	char indicators[] = {'.', ';', '!', '|'};
+	int indicator = 0;
+	for (int i = 0; i < polys.size(); i ++) {
+	  // std::cerr << (*statistics.last_count_pushed)[i] << " " << (*statistics.last_count_popped)[i] << " ";
+	  unsigned int last_pushed = (*statistics.last_count_pushed)[i];
+	  // if (last_pushed > last_popped) std::cerr << last_pushed << " ";
+	  if (last_pushed == last_seen) std::cerr << indicators[indicator];
+	  else if (last_pushed > last_seen) {
+	    last_seen = last_pushed;
+	    if (indicator + 1 < sizeof(indicators)) indicator ++;
+	    std::cerr << indicators[indicator];
+	  }
+	}
+#endif
+	std::cerr << "\n";
     }
 }
 
@@ -1295,8 +1334,10 @@ int main(int argc, char ** argv)
     } while (bs);
   }
 
-  statistics.subset_checks_made.resize(polys.size());
-  statistics.subset_checks_succeeded.resize(polys.size());
+  statistics.subset_checks_made = new std::vector<std::atomic<unsigned int>>(polys.size());
+  statistics.subset_checks_succeeded = new std::vector<std::atomic<unsigned int>>(polys.size());
+  statistics.last_count_pushed = new std::vector<std::atomic<unsigned int>>(polys.size());
+  statistics.last_count_popped = new std::vector<std::atomic<unsigned int>>(polys.size());
 
   compute_and_remove_single_bit_covers();
 
