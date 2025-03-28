@@ -121,7 +121,14 @@
  *    - PROTECTED with pthread_rwlock_t
  *
  * BACKTRACK QUEUE:
- *    - linked list of bit string and polynomial number to process next
+ *    - priority queue of bit string, polynomial number and index of factor within polynomial to process next
+ *    - sorting function is standard numeric on the polynomial number; the largest polynomial number is always
+ *      on top to be popped off.  It's "almost" a FILO stack, because each different thread will push
+ *      items in increasing order until it backtracks onto the last one it pushed.  But collectively, the
+ *      different threads might not push in increasing order, so we use a priority queue to keep the
+ *      highest numbered polynomials on the top of the queue.  I don't think this is strictly needed
+ *      for anything other than having a consistent organization of the backtrack queue to facilitate
+ *      printing progress messages.
  *    - threads wait on the queue until either it's got something in it, or all threads are waiting on
  *      an empty queue, in which case we're done, the threads exit, and we join them
  */
@@ -138,7 +145,7 @@
 #include <csignal>
 #include <cassert>
 #include <unistd.h>
-#include "LockingStack.hpp"
+#include "LockingPriorityQueue.hpp"
 
 // unsigned int bitstring_len = 0;
 
@@ -922,7 +929,12 @@ struct BacktrackPoint
   Cover * cover;
 };
 
-LockingStack<BacktrackPoint> backtrack_queue;
+struct BacktrackQueueLess
+{
+  bool operator()(const BacktrackPoint& l, const BacktrackPoint& r) const { return l.next_polynomial < r.next_polynomial; }
+};
+
+LockingPriorityQueue<BacktrackPoint, BacktrackQueueLess> backtrack_queue;
 
 std::list<Cover> all_covers;
 
