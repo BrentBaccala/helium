@@ -11,10 +11,11 @@
 #pragma once
 #include <queue>
 #include <mutex>
+#include <functional>
 #include <condition_variable>
 
-template<typename T>
-class LockingQueue
+template<class T, class Compare = std::less<T>>
+class LockingPriorityQueue
 {
 public:
     void set_num_workers(int num_workers)
@@ -45,7 +46,7 @@ public:
             return false;
         }
 
-        _value = queue.front();
+        _value = queue.top();
         queue.pop();
         return true;
     }
@@ -73,7 +74,7 @@ public:
 
 	waiting_workers --;
 
-        _value = queue.front();
+        _value = queue.top();
         queue.pop();
 	return true;
     }
@@ -84,7 +85,7 @@ public:
       return queue.size();
     }
 private:
-    std::queue<T> queue;
+    std::priority_queue<T, std::vector<T>, Compare> queue;
     mutable std::mutex guard;
     std::condition_variable signal;
     int total_workers;
