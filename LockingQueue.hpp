@@ -80,6 +80,7 @@ public:
 
     std::queue<T>::size_type size(void)
     {
+      std::lock_guard<std::mutex> lock(guard);
       return queue.size();
     }
 private:

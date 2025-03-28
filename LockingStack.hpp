@@ -82,6 +82,7 @@ public:
 
     std::stack<T>::size_type size(void)
     {
+      std::lock_guard<std::mutex> lock(guard);
       return stack.size();
     }
 private:
