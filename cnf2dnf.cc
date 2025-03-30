@@ -1,7 +1,9 @@
 /*
  * cnf2dnf - conjunctive normal form (CNF) to disjunctive normal form (DNF) converter
  *
- * BUILD: g++ -std=c++2a -march=native -O3 -o cnf2dnf cnf2dnf.cc -lpthread
+ * LANGUAGE: C++20.  The <format> library and std::popcount (new C++20 features) are used.
+ *
+ * BUILD: g++ -std=c++20 -march=native -O3 -o cnf2dnf cnf2dnf.cc -lpthread
  *
  * USAGE: ./cnf2dnf NUM_THREADS < input-bit-strings > output-bit-strings
  *
