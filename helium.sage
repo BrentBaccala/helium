@@ -113,6 +113,9 @@ import threading
 import pickle
 import io
 
+# for running cnf2dnf tests
+import re
+
 import os
 import psutil
 import datetime
@@ -1313,6 +1316,19 @@ def cnf2dnf_external(cnf_bitsets, parallel=False):
 
 cnf2dnf = cnf2dnf_external
 
+# CNF to DNF tests
+#
+# Each test is a pair of lists of strings (input and output)
+#
+# Converting CNF to DNF in this format is almost exactly inverse to itself,
+# so we run these tests in both direction - each list of strings is used
+# as both the input and the output.
+#
+# Some of these lists include duplicates (11 and 11) and subsets (11 and 10)
+# for testing purposes in the input, but duplicates and subsets should never
+# appear in the output, so a little bit of processing is done on the output
+# strings before we check them.
+
 cnf2dnf_tests = [
     (['1'], ['1']),
     (['1', '1'], ['1']),
@@ -1339,16 +1355,31 @@ cnf2dnf_tests = [
      ['01001', '10101', '10010', '01010']),
 ]
 
+def make_unique_and_discard_subsets(iter):
+    retval = set(iter)
+    discards = []
+    # we can't discard while iterating over the set
+    for s in retval:
+        regex = re.compile(s.replace('0','.'))
+        for s2 in retval:
+            if s != s2 and regex.match(s2):
+                discards.append(s2)
+    for s2 in set(discards):
+        retval.remove(s2)
+    return retval
+
 def test_cnf2dnf(parallel=False):
     for test in cnf2dnf_tests:
-        inputs = [FrozenBitset(s) for s in test[0]]
-        outputs = [FrozenBitset(s) for s in test[1]]
-        actual_outputs = cnf2dnf(inputs, parallel)
-        # why do we need to convert to str here for the sort to work?
-        if sorted(actual_outputs, key=lambda x:str(x)) != sorted(outputs, key=lambda x:str(x)):
-            print("Expected:", sorted(outputs, key=lambda x:str(x)))
-            print("Actual:", sorted(actual_outputs, key=lambda x:str(x)))
-            raise RuntimeError('cnf2dnf test failed')
+        for input,output in ((0,1), (1,0)):
+            inputs = [FrozenBitset(s) for s in test[input]]
+            outputs = [FrozenBitset(s) for s in make_unique_and_discard_subsets(test[output])]
+            actual_outputs = cnf2dnf(inputs, parallel)
+            # why do we need to convert to str here for the sort to work?
+            if sorted(actual_outputs, key=lambda x:str(x)) != sorted(outputs, key=lambda x:str(x)):
+                print("Input:", inputs)
+                print("Expected:", sorted(outputs, key=lambda x:str(x)))
+                print("Actual:", sorted(actual_outputs, key=lambda x:str(x)))
+                raise RuntimeError('cnf2dnf test failed')
     print('All cnf2dnf tests passed')
 
 # Once we've built all of the systems, then we do this:
