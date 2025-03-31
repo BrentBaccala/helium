@@ -136,6 +136,7 @@
  */
 
 #include <iostream>
+#include <fstream>
 #include <string>
 #include <format>
 #include <bitset>
@@ -1308,30 +1309,36 @@ void run_some_basic_tests(void)
   assert(std::vector<int>(bs.begin(), bs.end()) == std::vector<int>({0,7}));
 }
 
-int main(int argc, char ** argv)
+int main(const int argc, char * const * const argv)
 {
+  bool verify = false;
+  const char * verify_filename = nullptr;
   int nthreads = 1;
   int bitstring_len = 0;
   int opt;
 
   run_some_basic_tests();
 
-  while ((opt = getopt(argc, argv, "vt:")) != -1) {
+  while ((opt = getopt(argc, argv, "vV:t:")) != -1) {
     switch (opt) {
     case 'v':
       verbose = true;
+      break;
+    case 'V':
+      verify = true;
+      verify_filename = optarg;
       break;
     case 't':
       nthreads = atoi(optarg);
       break;
     default: /* '?' */
-      fprintf(stderr, "Usage: %s [-v] [-t nthreads]\n", argv[0]);
+      fprintf(stderr, "Usage: %s [-v] [-V outfile] [-t nthreads]\n", argv[0]);
       exit(EXIT_FAILURE);
     }
   }
 
   if (optind < argc) {
-    fprintf(stderr, "Usage: %s [-v] [-t nthreads]\n", argv[0]);
+    fprintf(stderr, "Usage: %s [-v] [-V outfile] [-t nthreads]\n", argv[0]);
     exit(EXIT_FAILURE);
   }
 
@@ -1361,6 +1368,20 @@ int main(int argc, char ** argv)
       expanded_polys_bits.back().emplace_back(bs.rightmost_set_bit_index());
       bs ^= rmsb;
     } while (bs);
+  }
+
+  /* This verification of the output only checks if each implicant in the DNF solves the CNF;
+   * it doesn't completely verify the solution (after all, it runs in polynomial time).
+   */
+  if (verify) {
+    std::ifstream verifyFile(verify_filename);
+    while (std::getline(verifyFile, bitstring)) {
+      BitString bs(bitstring);
+      for (auto &poly: polys) {
+	assert(poly && bs);
+      }
+    }
+    return 0;
   }
 
   statistics.subset_checks_made = new std::vector<std::atomic<unsigned int>>(polys.size());
