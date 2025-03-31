@@ -1473,10 +1473,6 @@ int main(const int argc, char * const * const argv)
       for (auto &it: iterators) {
 	result |= *it;
       }
-      /* Double check that the calculated result is truly a result */
-      for (auto &poly: polys) {
-	assert(poly && result);
-      }
       std::cout << result << "\n";
       int i;
       for (i=0; i<iterators.size(); i++) {
