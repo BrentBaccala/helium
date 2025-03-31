@@ -1311,6 +1311,7 @@ void run_some_basic_tests(void)
 
 int main(const int argc, char * const * const argv)
 {
+  bool simplify = false;
   bool verify = false;
   const char * verify_filename = nullptr;
   int nthreads = 1;
@@ -1319,10 +1320,13 @@ int main(const int argc, char * const * const argv)
 
   run_some_basic_tests();
 
-  while ((opt = getopt(argc, argv, "vV:t:")) != -1) {
+  while ((opt = getopt(argc, argv, "svV:t:")) != -1) {
     switch (opt) {
     case 'v':
       verbose = true;
+      break;
+    case 's':
+      simplify = true;
       break;
     case 'V':
       verify = true;
@@ -1332,13 +1336,13 @@ int main(const int argc, char * const * const argv)
       nthreads = atoi(optarg);
       break;
     default: /* '?' */
-      fprintf(stderr, "Usage: %s [-v] [-V outfile] [-t nthreads]\n", argv[0]);
+      fprintf(stderr, "Usage: %s [-s] [-v] [-V outfile] [-t nthreads]\n", argv[0]);
       exit(EXIT_FAILURE);
     }
   }
 
   if (optind < argc) {
-    fprintf(stderr, "Usage: %s [-v] [-V outfile] [-t nthreads]\n", argv[0]);
+    fprintf(stderr, "Usage: %s [-s] [-v] [-V outfile] [-t nthreads]\n", argv[0]);
     exit(EXIT_FAILURE);
   }
 
@@ -1368,6 +1372,27 @@ int main(const int argc, char * const * const argv)
       expanded_polys_bits.back().emplace_back(bs.rightmost_set_bit_index());
       bs ^= rmsb;
     } while (bs);
+  }
+
+  /* If -s is specified, all we do is simplify the input, to construct a unique equivalent system. */
+  if (simplify) {
+    for (int i=0; i < polys.size(); i++) {
+      for (int j=i+1; j < polys.size(); j++) {
+	/* remove duplicates and supersets */
+	if (polys[j].is_superset_of(polys[i])) {
+	  polys.erase(polys.begin() + j);
+	  j --;
+	} else if (polys[i].is_superset_of(polys[j])) {
+	  polys.erase(polys.begin() + i);
+	  i --;
+	  break;
+	}
+      }
+    }
+    for (auto &poly: polys) {
+      std::cout << poly << "\n";
+    }
+    return 0;
   }
 
   /* This verification of the output only checks if each implicant in the DNF solves the CNF;
