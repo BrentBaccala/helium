@@ -207,12 +207,16 @@ public:
   void set_bit(int bit) {
     int index_in_bitstring = bitstring.size() - bit/(8*sizeof(BitString::data_type)) - 1;
     int bit_in_integer = bit%(8*sizeof(BitString::data_type));
+    if (! (bitstring[index_in_bitstring] & (BitString::data_type(1) << bit_in_integer)) && (cached_count != -1))
+      cached_count ++;
     bitstring[index_in_bitstring] |= (BitString::data_type(1) << bit_in_integer);
   }
 
   void clear_bit(int bit) {
     int index_in_bitstring = bitstring.size() - bit/(8*sizeof(BitString::data_type)) - 1;
     int bit_in_integer = bit%(8*sizeof(BitString::data_type));
+    if ((bitstring[index_in_bitstring] & (BitString::data_type(1) << bit_in_integer)) && (cached_count != -1))
+      cached_count --;
     bitstring[index_in_bitstring] &= ~(BitString::data_type(1) << bit_in_integer);
   }
 
