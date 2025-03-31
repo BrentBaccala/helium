@@ -460,13 +460,15 @@ public:
 
     // Prefix increment (advance bit to next one bit, or -1 if there is none)
     bititerator& operator++() {
+      auto starting_bit = (bit+1)%(8*sizeof(BitString::data_type));
       for (int i=bitstring->bitstring.size()-(bit+1)/(8*sizeof(BitString::data_type))-1; i>=0; i--) {
-	for (auto j=(bit+1)%(8*sizeof(BitString::data_type)); j<8*sizeof(BitString::data_type); j++) {
+	for (auto j=starting_bit; j<8*sizeof(BitString::data_type); j++) {
 	  if (bitstring->bitstring[i] & (BitString::data_type(1) << j)) {
 	    bit = (bitstring->bitstring.size() - i - 1)*8*sizeof(BitString::data_type) + j;
 	    return *this;
 	  }
 	}
+	starting_bit = 0;
       }
       bit = -1;
       return *this;
@@ -1281,6 +1283,7 @@ void run_some_basic_tests(void)
   BitString bs8("100000000");
   BitString bs9("1000000000");
   BitString bs6364("11000000000000000000000000000000000000000000000000000000000000000");
+  BitString bs6264("10100000000000000000000000000000000000000000000000000000000000000");
   BitString bs64  ("10000000000000000000000000000000000000000000000000000000000000000");
   BitString bs65 ("100000000000000000000000000000000000000000000000000000000000000000");
   BitString bs3132("110000000000000000000000000000000");
@@ -1290,6 +1293,7 @@ void run_some_basic_tests(void)
   assert(std::vector<int>(bs7.begin(), bs7.end()) == std::vector<int>({7}));
   assert(std::vector<int>(bs8.begin(), bs8.end()) == std::vector<int>({8}));
   assert(std::vector<int>(bs9.begin(), bs9.end()) == std::vector<int>({9}));
+  assert(std::vector<int>(bs6264.begin(), bs6264.end()) == std::vector<int>({62,64}));
   assert(std::vector<int>(bs6364.begin(), bs6364.end()) == std::vector<int>({63,64}));
   assert(std::vector<int>(bs64.begin(), bs64.end()) == std::vector<int>({64}));
   assert(std::vector<int>(bs65.begin(), bs65.end()) == std::vector<int>({65}));
