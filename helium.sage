@@ -1837,6 +1837,7 @@ def SQL_stage1(eqns):
              'save_global_time' : 0,
              'simplifyIdeal_time' : 0}
     stage1and2(eqns, tuple(), 0, stats)
+    conn.commit()
     print(stats)
 
 def SQL_stage2(requested_identifier=None):
