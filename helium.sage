@@ -1296,8 +1296,7 @@ def cnf2dnf_espresso(cnf_bitsets, parallel=False):
     return retval
 
 def cnf2dnf_external(cnf_bitsets, parallel=False):
-    # we sort cnf_bitsets so that the bitsets with a single one bit come first, to speed processing in cnf2dnf
-    cnf_bitsets = sorted(cnf_bitsets, key=lambda x:len(x))
+
     cmd = ['./cnf2dnf', '-t', str(num_processes if parallel else 1)]
     proc = subprocess.Popen(cmd, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=sys.stderr)
     for bs in cnf_bitsets:
