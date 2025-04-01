@@ -1829,7 +1829,15 @@ def stage1and2(system, initial_simplifications, origin, stats=None):
 def SQL_stage1(eqns):
     # To keep the size of the pickles down, we save the ring as a global since it's referred to constantly.
     save_global(eqns[0].parent())
-    stage1and2(eqns, tuple(), 0)
+    # This is pre-initialized so we can do stats['cnf2dnf_time'] += VAL
+    # stats could be done with a custom class that implemented += with non-existent keys
+    stats = {'factor_time' : 0,
+             'insert_into_systems_time': 0,
+             'cnf2dnf_time' : 0,
+             'save_global_time' : 0,
+             'simplifyIdeal_time' : 0}
+    stage1and2(eqns, tuple(), 0, stats)
+    print(stats)
 
 def SQL_stage2(requested_identifier=None):
     with conn.cursor() as cursor:
