@@ -1971,7 +1971,7 @@ def insert_into_systems(system, simplifications, origin, stats=None):
 # staging into SQL and just recurse until we're done is dependent on the complexity of the system.
 # I've picked stage 3 arbitrarily because it seems to work for helium ansatz -16.6.
 
-def stage3(system, simplifications, origin, stats=None):
+def stage3(system, simplifications, origin, parallel=False, stats=None):
     time1 = time.time()
     eqns,s = simplifyIdeal(list(system))
     time2 = time.time()
@@ -1990,7 +1990,7 @@ def stage3(system, simplifications, origin, stats=None):
         stats['factor_time'] += time3-time2
     # sorting all_factors ensures each system in list_of_systems is sorted (see comment in stage1and2)
     all_factors = sorted(set(f for l in eqns_factors for f in l))
-    dnf_bitsets = cnf2dnf(FrozenBitset(tuple(all_factors.index(f) for f in l), capacity=len(all_factors)) for l in eqns_factors)
+    dnf_bitsets = cnf2dnf((FrozenBitset(tuple(all_factors.index(f) for f in l), capacity=len(all_factors)) for l in eqns_factors), parallel)
     list_of_systems = tuple(tuple(all_factors[i] for i in bs) for bs in dnf_bitsets)
     time4 = time.time()
     if stats:
@@ -1998,10 +1998,10 @@ def stage3(system, simplifications, origin, stats=None):
     if len(list_of_systems) == 1:
         return [(eqns, simplifications)]
     else:
-        return [result for subsystem in list_of_systems for result in stage3(subsystem, simplifications, origin, stats=stats)]
+        return [result for subsystem in list_of_systems for result in stage3(subsystem, simplifications, origin, parallel, stats)]
 
 
-def SQL_stage3_single_thread(requested_identifier=None):
+def SQL_stage3_single_system(requested_identifier=None, parallel=False):
     with conn.cursor() as cursor:
         while True:
             # This post explains the subquery and the use of "FOR UPDATE SKIP LOCKED"
@@ -2049,7 +2049,7 @@ def SQL_stage3_single_thread(requested_identifier=None):
                 system_pair = unpickle(pickled_system)
                 stats['unpickle_time'] = time.time() - start_time
 
-                for result in stage3(system_pair[0], system_pair[1], identifier, stats):
+                for result in stage3(system_pair[0], system_pair[1], identifier, parallel, stats):
                     insert_into_systems(result[0], result[1], identifier, stats=stats)
 
                 cursor.execute("""UPDATE staging
@@ -2091,7 +2091,7 @@ def SQL_stage3_single_thread(requested_identifier=None):
 def SQL_stage3_parallel(max_workers = num_processes):
     try:
         with concurrent.futures.ProcessPoolExecutor(max_workers=max_workers, initializer=process_pool_initializer) as executor:
-            futures = [executor.submit(SQL_stage3_single_thread) for _ in range(max_workers)]
+            futures = [executor.submit(SQL_stage3_single_system) for _ in range(max_workers)]
             for future in futures:
                 future.add_done_callback(done_callback)
             num_completed = 0
