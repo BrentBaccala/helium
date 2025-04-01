@@ -30,6 +30,7 @@
 # load('helium.sage')
 # prep_hydrogen(5)
 # init()
+# delete_database()    # only needed to remove a previous run
 # create_database()
 # SQL_stage1(eqns_RQQ)
 # SQL_stage2()
