@@ -1770,6 +1770,18 @@ def process_pool_initializer():
     conn = psycopg2.connect(**postgres_connection_parameters)
     conn2 = psycopg2.connect(**postgres_connection_parameters)
 
+# Statistics is like a dict, but with the ability to call += on non-existent keys,
+# so we can do things like stats['cnf2dnf_time'] += time6-time5
+# Can be initialized by passing it a dictionary.
+
+class Statistics(dict):
+    def __init__(self, d=None):
+        if d:
+            assert type(d) == dict
+            self.update(d)
+    def __getitem__(self, key):
+        return self.setdefault(key, 0)
+
 def dump_bitset_to_SQL(origin, i):
     global bitsets
     global all_factors
@@ -1920,13 +1932,7 @@ def stage1and2(system, initial_simplifications, origin, parallel=False, stats=No
 def SQL_stage1(eqns):
     # To keep the size of the pickles down, we save the ring as a global since it's referred to constantly.
     save_global(eqns[0].parent())
-    # This is pre-initialized so we can do stats['cnf2dnf_time'] += VAL
-    # stats could be done with a custom class that implemented += with non-existent keys
-    stats = {'factor_time' : 0,
-             'insert_into_systems_time': 0,
-             'cnf2dnf_time' : 0,
-             'save_global_time' : 0,
-             'simplifyIdeal_time' : 0}
+    stats = Statistics()
     parallel = False
     stage1and2(eqns, tuple(), 0, parallel, stats)
     conn.commit()
@@ -1970,15 +1976,10 @@ def SQL_stage2(requested_identifier=None, parallel=False):
                 # the other keys correspond to SQL INTEGERs, BIGINTs, or VARCHARs.  For the '_time' variables,
                 # we store seconds in the dictionary, then convert them to datetime.timedelta's right
                 # before we pass them to SQL.
-                stats = {'identifier' : identifier,
-                         'pid' : os.getpid(),
-                         'node' : os.uname()[1],
-                         'unpickle_time' : unpickle_time,
-                         'factor_time' : 0,
-                         'insert_into_systems_time': 0,
-                         'cnf2dnf_time' : 0,
-                         'save_global_time' : 0,
-                         'simplifyIdeal_time' : 0}
+                stats = Statistics({'identifier' : identifier,
+                                    'pid' : os.getpid(),
+                                    'node' : os.uname()[1],
+                                    'unpickle_time' : unpickle_time})
 
                 stage1and2(system, simplifications, identifier, parallel, stats)
 
@@ -2159,15 +2160,9 @@ def SQL_stage3_single_system(requested_identifier=None, parallel=False):
                 # the other keys correspond to SQL INTEGERs, BIGINTs, or VARCHARs.  For the '_time' variables,
                 # we store seconds in the dictionary, then convert them to datetime.timedelta's right
                 # before we pass them to SQL.
-                stats = {'identifier' : identifier,
-                         'pid' : os.getpid(),
-                         'node' : os.uname()[1],
-                         'unpickle_time' : 0,
-                         'factor_time' : 0,
-                         'insert_into_systems_time': 0,
-                         'cnf2dnf_time' : 0,
-                         'save_global_time' : 0,
-                         'simplifyIdeal_time' : 0}
+                stats = Statistics({'identifier' : identifier,
+                                    'pid' : os.getpid(),
+                                    'node' : os.uname()[1]})
 
                 start_time = time.time()
                 print('Starting stage 2 system', identifier)
