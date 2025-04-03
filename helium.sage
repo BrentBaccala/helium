@@ -1782,20 +1782,6 @@ class Statistics(dict):
     def __getitem__(self, key):
         return self.setdefault(key, 0)
 
-def dump_bitset_to_SQL(origin, i):
-    global bitsets
-    global all_factors
-    global simplifications
-    t = tuple(all_factors[j] for j in bitsets[i])
-    time1 = time.time()
-    system = persistent_pickle((t,simplifications))
-    time2 = time.time()
-    with conn.cursor() as cursor:
-        cursor.execute("INSERT INTO staging (system, origin, current_status) VALUES (%s, %s, 'queued')", (system, int(origin)))
-    conn.commit()
-    time3 = time.time()
-    print('pickle time:', time2 - time1, 'insert time:', time3-time2, file=sys.stderr)
-
 def save_factor_as_global(i):
     return save_global(all_factors[i])
 
@@ -1827,7 +1813,6 @@ def stage1and2(system, initial_simplifications, origin, parallel=False, stats=No
     print('system', origin, ':', len(s), 'simplifications')
     # See comment below for why we like to keep things sorted
     # We need simplifications to be a tuple because we're going to pickle it
-    # simplifications is global so dump_bitset_to_SQL can access from the subprocesses in the second ProcessPool
     global simplifications
     simplifications = tuple(sorted(initial_simplifications + normalize(s)))
     # We can't save simplifications itself, since persistent_id() only works on rings and polynomials, not tuples
@@ -1856,7 +1841,7 @@ def stage1and2(system, initial_simplifications, origin, parallel=False, stats=No
     # all_factors is global so that the subprocesses in the next two ProcessPools can access it
     global all_factors
     # By sorting all_factors, we ensure that the systems inserted into stage2 are sorted,
-    # because iterating over a FrozenBitset (in dump_bitset_to_SQL) generates integers
+    # because iterating over a FrozenBitset generates integers
     # in ascending order, which are then used as indices to all_factors.
     # We like sorted systems because they help us detect duplicate systems and reduce duplicate work.
     all_factors = set(f for l in eqns_factors for f in l)
