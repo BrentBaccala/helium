@@ -24,8 +24,20 @@
 # polynomial systems.  In the case, we can run a series of
 # simplification steps that produce a family of simpler systems that
 # are stored in a PostgreSQL database, processed in parallel, then
-# recombined for the final result.  In this case, the command sequence
-# looks like this:
+# recombined for the final result.
+#
+# The basic simplication step is to look for simple variable
+# substitutions (i.e, if "a=0" is in the system, set a equal to zero
+# everywhere in the system), then factor the polynomials, then
+# run a cnf-to-dnf (conjunctive normal form to disjunctive normal form)
+# conversion to obtain a set of factored ideals.  We'll recurse and repeat
+# the basic simplification step again on every output ideal.  Once
+# we've obtained an ideal that can't be simplified further using
+# this procedure, run the GTZ algorithm of minimal_associated_primes()
+# to complete the calculation.  The final result is the union
+# of all of the ideals so obtained.
+#
+# To operate in this mode, the command sequence looks like this:
 #
 # load('helium.sage')
 # prep_hydrogen(5)
@@ -33,19 +45,20 @@
 # delete_database()    # only needed to remove a previous run
 # create_database()
 # SQL_stage1(eqns_RQQ)
-# SQL_stage2()
-# SQL_stage3_single_thread()
-# GTZ_single_thread()
+# SQL_stage2_parallel()
+# SQL_stage3_parallel()
+# GTZ_parallel()
 # consolidate_ideals(load_prime_ideals())
 #
-# SQL_stage3_single_thread() and GTZ_single_thread() have parallelized
-# variants SQL_stage3_parallel() and GTZ_parallel().  Additionally,
+# SQL_stage2/3_parallel() and GTZ_parallel() have single threaded
+# variants SQL_stage2(), SQL_stage3_single_system() and GTZ_single_thread().  Additionally,
 # these routines can be run on a cluster, using the SQL database as a
 # centralized data store.
 #
-# SQL_stage1() and SQL_stage2() run in parallel (multiple threads) on
-# a single node.  SQL_stage2() can be run on multiple nodes in
-# parallel.
+# SQL_stage1(eqns) runs single-threaded, accepts the initial
+# system of equations, runs a single iteration of the
+# variable substitution / factor / cnf2dnf algorithm to
+# populate multiple systems in SQL database 'staging'.
 #
 # For speed, the SQL version of the code should be run with the
 # espresso program compiled and available in the current working
@@ -1225,6 +1238,19 @@ def init():
 
 # Parallelized Singular polynomial factorization
 
+def factor_eqns(eqns, verbose=False):
+    retval = []
+    if verbose:
+        pb = ProgressBar(label='factor equations', expected_size=len(eqns))
+    for i, eqn in enumerate(eqns):
+        retval.append(tuple(f for f,m in eqn.factor()))
+        if verbose:
+            pb.show(i)
+    if verbose:
+        pb.done()
+        print()
+    return tuple(retval)
+
 def factor_eqn(eqn):
     return eqn.factor()
 
@@ -1731,18 +1757,22 @@ def normalize(eqns):
 # index into those lists (instead of passing one of the factors or bitsets) is done to avoid serialization
 # delay in the parallel code.
 
-def stage1and2(system, initial_simplifications, origin, stats=None):
+def stage1and2(system, initial_simplifications, origin, parallel=False, stats=None):
+    # If parallel == True, then we're only calling stage1and2 once, so we're verbose
+    # If parallel == False, then we're probably calling it in multiple threads in parallel, so we're not verbose
+    verbose = parallel
     if origin == 0:
         stage = 1
     else:
         stage = 2
-    print('simplifyIdeal')
+    if verbose:
+        print('simplifyIdeal')
     time1 = time.time()
     eqns,s = simplifyIdeal(list(system))
     time2 = time.time()
     if stats:
         stats['simplifyIdeal_time'] += time2 - time1
-    print(len(s), 'simplifications')
+    print('system', origin, ':', len(s), 'simplifications')
     # See comment below for why we like to keep things sorted
     # We need simplifications to be a tuple because we're going to pickle it
     # simplifications is global so dump_bitset_to_SQL can access from the subprocesses in the second ProcessPool
@@ -1764,7 +1794,10 @@ def stage1and2(system, initial_simplifications, origin, stats=None):
         return
     # global for debugging purposes
     global eqns_factors
-    eqns_factors = parallel_factor_eqns(eqns)
+    if parallel:
+        eqns_factors = parallel_factor_eqns(eqns)
+    else:
+        eqns_factors = factor_eqns(eqns)
     time4 = time.time()
     if stats:
         stats['factor_time'] += time4-time3
@@ -1775,47 +1808,65 @@ def stage1and2(system, initial_simplifications, origin, stats=None):
     # in ascending order, which are then used as indices to all_factors.
     # We like sorted systems because they help us detect duplicate systems and reduce duplicate work.
     all_factors = set(f for l in eqns_factors for f in l)
-    print("Sorting", len(all_factors), "factors")
+    if verbose:
+        print("Sorting", len(all_factors), "factors")
     all_factors = sorted(all_factors)
 
-    pb = ProgressBar(label='saving factors as SQL globals', expected_size=len(all_factors))
-    with concurrent.futures.ProcessPoolExecutor(max_workers=num_processes, initializer=process_pool_initializer) as executor:
-        futures = [executor.submit(save_factor_as_global, i) for i in range(len(all_factors))]
-        for future in futures:
-            future.add_done_callback(done_callback)
-        num_completed = 0
-        while num_completed < len(all_factors):
-            concurrent.futures.wait(futures, timeout=1)
-            num_completed = tuple(future.done() for future in futures).count(True)
-            pb.show(num_completed)
-    pb.done()
+    # This is a list that matches all_factors, but instead of the polynomial factors, it's
+    # a list of the matching PersistentIdTag's.  The tags (short strings that map to the
+    # polynomials) will be used to form the pickled objects that are saved to SQL.
+    all_factors_tags = []
+
+    if verbose:
+        pb = ProgressBar(label='saving factors as SQL globals', expected_size=len(all_factors))
+    if parallel:
+        with concurrent.futures.ProcessPoolExecutor(max_workers=num_processes, initializer=process_pool_initializer) as executor:
+            futures = [executor.submit(save_factor_as_global, i) for i in range(len(all_factors))]
+            for future in futures:
+                future.add_done_callback(done_callback)
+            num_completed = 0
+            while num_completed < len(all_factors):
+                concurrent.futures.wait(futures, timeout=1)
+                num_completed = tuple(future.done() for future in futures).count(True)
+                if verbose:
+                    pb.show(num_completed)
+    else:
+        for i in range(len(all_factors)):
+            id = save_factor_as_global(i)
+            all_factors_tags.append(PersistentIdTag(id))
+            if verbose:
+                pb.show(i)
+    if verbose:
+        pb.done()
     time4a = time.time()
     if stats:
         stats['save_global_time'] += time4a-time4
     print()
 
-    # We need to get the objects tagged with their persistent ids (they were only tagged in the ProcessPool
-    # subprocesses), and I want to do this without having to transfer their pickled representations over a
-    # process boundary (either the subprocesses or postgres).  It's precisely for this step that
-    # save_global and save_factor_as_global (the function called by the future) return the persistent id.
-    print('Loading persistent ids')
-    all_factors_tags = []
-    for i,future in enumerate(futures):
-        id = future.result()
-        persistent_data[id] = all_factors[i]
-        persistent_data_inverse[all_factors[i]] = id
-        all_factors_tags.append(PersistentIdTag(id))
+    # If we're parallelized, we need to get the objects tagged with their persistent ids (they were only
+    # tagged in the ProcessPool subprocesses), and I want to do this without having to transfer their
+    # pickled representations over a process boundary (either the subprocesses or postgres).  It's
+    # precisely for this step that save_global and save_factor_as_global (the function called by the
+    # future) return the persistent id.
+    if parallel:
+        if verbose:
+            print('Loading persistent ids')
+        for i,future in enumerate(futures):
+            id = future.result()
+            persistent_data[id] = all_factors[i]
+            persistent_data_inverse[all_factors[i]] = id
+            all_factors_tags.append(PersistentIdTag(id))
 
-    print('cnf2dnf')
+    print('system', origin, ': cnf2dnf')
     time5 = time.time()
     # bitsets is global so the subprocesses in the next ProcessPool can access it
     global bitsets
-    bitsets = cnf2dnf((FrozenBitset(tuple(all_factors.index(f) for f in l), capacity=len(all_factors)) for l in eqns_factors), parallel=True)
+    bitsets = cnf2dnf((FrozenBitset(tuple(all_factors.index(f) for f in l), capacity=len(all_factors)) for l in eqns_factors), parallel=parallel)
     time6 = time.time()
     if stats:
         stats['cnf2dnf_time'] += time6-time5
 
-    print('insert systems into SQL')
+    print('system', origin, ': insert systems into SQL')
     with conn.cursor() as cursor:
         for bs in bitsets:
             t = tuple(all_factors_tags[j] for j in bs)
@@ -1836,11 +1887,12 @@ def SQL_stage1(eqns):
              'cnf2dnf_time' : 0,
              'save_global_time' : 0,
              'simplifyIdeal_time' : 0}
-    stage1and2(eqns, tuple(), 0, stats)
+    parallel = False
+    stage1and2(eqns, tuple(), 0, parallel, stats)
     conn.commit()
     print(stats)
 
-def SQL_stage2(requested_identifier=None):
+def SQL_stage2(requested_identifier=None, parallel=False):
     with conn.cursor() as cursor:
         while True:
             # This post explains the subquery and the use of "FOR UPDATE SKIP LOCKED"
@@ -1888,7 +1940,7 @@ def SQL_stage2(requested_identifier=None):
                          'save_global_time' : 0,
                          'simplifyIdeal_time' : 0}
 
-                stage1and2(system, simplifications, identifier, stats=stats)
+                stage1and2(system, simplifications, identifier, parallel, stats)
 
                 cursor.execute("""UPDATE staging
                                   SET current_status = 'finished'
@@ -1924,6 +1976,29 @@ def SQL_stage2(requested_identifier=None):
             # keep our memory down by clearing our cached polynomials
             persistent_data.clear()
             persistent_data_inverse.clear()
+
+def SQL_stage2_parallel(max_workers = num_processes):
+    try:
+        with concurrent.futures.ProcessPoolExecutor(max_workers=max_workers, initializer=process_pool_initializer) as executor:
+            futures = [executor.submit(SQL_stage2) for _ in range(max_workers)]
+            for future in futures:
+                future.add_done_callback(done_callback)
+            num_completed = 0
+            while num_completed < max_workers:
+                concurrent.futures.wait(futures, timeout=1)
+                num_completed = tuple(future.done() for future in futures).count(True)
+        for future in futures:
+            future.result()
+    except:
+        # The only exception I've actually seen here is a BrokenProcessPool when my attempt to raise CalledProcessError
+        # in one of the futures failed due to a TypeError because I didn't call the BrokenProcessPool constructor correctly.
+        conn.rollback()
+        with conn.cursor() as cursor:
+            cursor.execute("""UPDATE staging
+                              SET current_status = 'failed'
+                              WHERE current_status = 'running' AND node = %s""", (os.uname()[1],))
+        conn.commit()
+        raise
 
 # I'm experimenting with turning these on or off for efficiency
 #
