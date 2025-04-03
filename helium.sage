@@ -1322,9 +1322,11 @@ def cnf2dnf_espresso(cnf_bitsets, parallel=False):
         raise subprocess.CalledProcessError(proc.returncode, 'espresso')
     return retval
 
-def cnf2dnf_external(cnf_bitsets, parallel=False):
+def cnf2dnf_external(cnf_bitsets, simplify=False, parallel=False):
 
     cmd = ['./cnf2dnf', '-t', str(num_processes if parallel else 1)]
+    if simplify:
+        cmd.append('-s')
     proc = subprocess.Popen(cmd, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=sys.stderr)
     for bs in cnf_bitsets:
         proc.stdin.write(str(bs).encode())
@@ -1332,15 +1334,53 @@ def cnf2dnf_external(cnf_bitsets, parallel=False):
     proc.stdin.close()
     # There is some concern that if we proc.wait() here, proc.stdout could fill with data and both processes will deadlock.
     # So we read proc.stdout first, then wait for the subprocess to terminate.
-    retval = tuple(FrozenBitset(bs.decode().strip()) for bs in proc.stdout)
+    retval = list(FrozenBitset(bs.decode().strip()) for bs in proc.stdout)
     proc.wait()
     if proc.returncode != 0:
         raise subprocess.CalledProcessError(proc.returncode, './cnf2dnf')
+    # Consensus on stack overflow https://stackoverflow.com/questions/4154571
+    # is that since the first thing sorted() does is to convert the argument
+    # to a list, there's no reason not to convert the generator to a list
+    # (seven lines above), then sort it, then convert it to a tuple.
+    #
+    # One reason we want it as a tuple (the main reason we want it sorted, too),
+    # is so that cnf2dnf_checking can easily check it.
+    #
+    # Interesting little discovery: A FrozenBitset can't be sorted
+    # directly.  You have to convert them to strings to get keys that
+    # can be compared.
+    retval.sort(key = lambda x:str(x))
+    return tuple(retval)
+
+# In the literature, this logic operation is called "dualization of a monotone
+# Boolean function", which means CNF-to-DNF conversion of a monotone Boolean
+# function.  In the monotone case, the output is unique and unordered (so we sort
+# to compare it) and running the CNF-to-DNF algorithm again on the output (dualization)
+# reproduces the input (up to a simplification step - remove all duplicates and supersets
+# from the original input).
+#
+# The C++ cnf2dnf program has exhibited enough bugs that I now perform dualization
+# verification on every cnf2dnf calculation.
+
+def cnf2dnf_checking(cnf_bitsets, parallel=False):
+    
+    retval = cnf2dnf_external(cnf_bitsets, parallel=parallel)
+    simplified = cnf2dnf_external(cnf_bitsets, simplify=True, parallel=parallel)
+    verification = cnf2dnf_external(retval, parallel=parallel)
+    # simplified (the simplified input) should equal verification (the output run back through the algorithm again)
+    # since they're both tuples, comparing them is really this simple
+    if (simplified != verification):
+        raise RuntimeError("cnf2dnf verification failed")
     return retval
 
-# Which version of cnf2dnf should we use?  cnf2dnf_espresso or cnf2dnf_external
+# Which version of cnf2dnf should we use?
+#
+# cnf2dnf          - pure Python version (slow, maybe buggy) - buried back in Git history
+# cnf2dnf_espresso - UC Berkeley espresso (crashes)
+# cnf2dnf_external - my own C++ program
+# cnf2dnf_checking - front end to cnf2dnf_external that reverses and verifies the calculation
 
-cnf2dnf = cnf2dnf_external
+cnf2dnf = cnf2dnf_checking
 
 # CNF to DNF tests
 #
