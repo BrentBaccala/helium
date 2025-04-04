@@ -1,12 +1,42 @@
 #!/bin/bash
 #
-# Usage: ./cnf2dnf-check 40,60p
+# Usage: ./cnf2dnf-check FILENAME
 #
-# this usage will check lines 40-60
+# This will run cnf2dnf twice (forward and reverse) on FILENAME
+# and check final result for equality with simplified, sorted original input
+#
 
-sed $(echo $@ | xargs -n 1 echo e | sed 's/e/-e/g') -e d cnf2dnf-id-1.in | cut -c1-3,9,19,21,98,400,763 | ./cnf2dnf -s | sort > cnf2dnf-id-1-subset.in
-# sed -e "$1p" -e d cnf2dnf-id-1.in 
-./cnf2dnf -t 12 < cnf2dnf-id-1-subset.in > cnf2dnf-id-1-subset.out
-./cnf2dnf -t 12 < cnf2dnf-id-1-subset.out | sort > cnf2dnf-id-1-subset.check
-md5sum cnf2dnf-id-1-subset.in
-md5sum cnf2dnf-id-1-subset.check
+INFILE=$1
+OUTFILE=$(echo $INFILE | sed s/.in/.out/)
+CHKFILE=$(echo $INFILE | sed s/.in/.check/)
+
+if [ ! -r $INFILE ]; then
+   echo $INFILE no existe
+   exit
+fi
+
+# This stuff is here to pick out a subset of lines and characters in order to narrow down failures to a simple test case.
+#
+# sed $(echo $@ | xargs -n 1 echo e | sed 's/e/-e/g') -e d cnf2dnf-id-1.in | cut -c1-3,9,19,21,98,400,763 | ./cnf2dnf -s | sort > cnf2dnf-id-1-subset.in
+
+SED="cat"
+#SED="sed -e 1,100p -e d"
+
+if true; then
+   echo $SED $INFILE \| ./cnf2dnf -t 12 \> $OUTFILE
+   time $SED $INFILE | ./cnf2dnf -t 12 > $OUTFILE
+else
+   echo ./cnf2dnf -t 12 \< $INFILE \> $OUTFILE
+   time ./cnf2dnf -t 12 < $INFILE > $OUTFILE
+fi
+
+echo ./cnf2dnf -t 12 \< $OUTFILE \| sort \> $CHKFILE
+time ./cnf2dnf -t 12 < $OUTFILE | sort > $CHKFILE
+
+if true; then
+   $SED $INFILE | ./cnf2dnf -s | sort | md5sum -z; echo " $SED | ./cnf2dnf -s | sort"
+else
+   md5sum $INFILE
+   ./cnf2dnf -s < $INFILE | md5sum -z; echo " simplified"
+fi
+md5sum $CHKFILE
