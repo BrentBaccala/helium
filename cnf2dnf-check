@@ -1,0 +1,12 @@
+#!/bin/bash
+#
+# Usage: ./cnf2dnf-check 40,60p
+#
+# this usage will check lines 40-60
+
+sed $(echo $@ | xargs -n 1 echo e | sed 's/e/-e/g') -e d cnf2dnf-id-1.in | cut -c1-3,9,19,21,98,400,763 | ./cnf2dnf -s | sort > cnf2dnf-id-1-subset.in
+# sed -e "$1p" -e d cnf2dnf-id-1.in 
+./cnf2dnf -t 12 < cnf2dnf-id-1-subset.in > cnf2dnf-id-1-subset.out
+./cnf2dnf -t 12 < cnf2dnf-id-1-subset.out | sort > cnf2dnf-id-1-subset.check
+md5sum cnf2dnf-id-1-subset.in
+md5sum cnf2dnf-id-1-subset.check
