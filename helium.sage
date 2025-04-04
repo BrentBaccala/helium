@@ -1891,10 +1891,10 @@ def stage1and2(system, initial_simplifications, origin, parallel=False, stats=No
                 pb.show(i)
     if verbose:
         pb.done()
+        print()
     time4a = time.time()
     if stats:
         stats['save_global_time'] += time4a-time4
-    print()
 
     # If we're parallelized, we need to get the objects tagged with their persistent ids (they were only
     # tagged in the ProcessPool subprocesses), and I want to do this without having to transfer their
@@ -1930,6 +1930,8 @@ def stage1and2(system, initial_simplifications, origin, parallel=False, stats=No
     time7 = time.time()
     if stats:
         stats['insert_into_systems_time'] += time7-time6
+
+    print('system', origin, ': done')
 
 def SQL_stage1(eqns):
     # To keep the size of the pickles down, we save the ring as a global since it's referred to constantly.
