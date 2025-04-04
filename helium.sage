@@ -1365,8 +1365,19 @@ def cnf2dnf_external(cnf_bitsets, simplify=False, parallel=False):
 # The C++ cnf2dnf program has exhibited enough bugs that I now perform dualization
 # verification on every cnf2dnf calculation.
 
+cnf2dnf_debugging = False
+
 def cnf2dnf_checking(cnf_bitsets, parallel=False, stats=None):
-    
+    # it's probably a generator, so convert it to a list since we're going to loop over it two or three times
+    cnf_bitsets = list(cnf_bitsets)
+    if cnf2dnf_debugging:
+        try:
+            with open(f"cnf2dnf-id-{stats['identifier']}.in", "x") as f:
+                for bs in cnf_bitsets:
+                    print(str(bs), file=f)
+        except:
+            print("something went wrong with cnf2dnf debugging output")
+            raise
     retval = cnf2dnf_external(cnf_bitsets, parallel=parallel)
     time1 = time.time()
     simplified = cnf2dnf_external(cnf_bitsets, simplify=True, parallel=parallel)
