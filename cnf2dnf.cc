@@ -1034,6 +1034,9 @@ void task(void)
 	  if (current_work.allowed_bits.test_bit(next_bit)) {
 	    // std::cerr << "adding " << next_bit << "\n";
 	    if (! have_next_work) {
+	      /* If there's more bits in this input string (i.e, extra work), we don't set this bit when
+	       * processing them, so save the bitstring as extra_work, then set the bit.
+	       */
 	      extra_work.bitstring = current_work.bitstring;
 	      current_work.bitstring.set_bit(next_bit);
 #ifdef SLOW
@@ -1047,10 +1050,12 @@ void task(void)
 		continue;
 	      }
 #endif
-	      /* If the current polynomial's bits are 111, we want to create future work 1xx, 01x, 001,
-	       * (not 1xx, x1x, xx1), so we now remove the current bit from the allowed bits.
+	      /* If the current polynomial's bits are 111, we want to create extra work 1xx, 01x, 001,
+	       * (not 1xx, x1x, xx1), so we now remove the current bit from the allowed bits and
+	       * save the modified allowed_bits for any possible extra work.
 	       */
 	      current_work.allowed_bits.clear_bit(next_bit);
+	      extra_work.allowed_bits = current_work.allowed_bits;
 
 	      /* Check for forced assignments
 	       *
@@ -1100,8 +1105,7 @@ void task(void)
 	      }
 	      have_next_work = true;
 	    } else {
-	      /* extra_work.bitstring was already set above the first time through this loop */
-	      extra_work.allowed_bits = current_work.allowed_bits;
+	      /* extra_work bitstring and allowed_bits were already set above the first time through this loop */
 	      extra_work.next_index = current_work.next_index;
 	      extra_work.next_polynomial = current_work.next_polynomial;
 	      extra_work.cover = current_work.cover;
@@ -1435,6 +1439,7 @@ int main(const int argc, char * const * const argv)
        * For each value, either the attachment point is included and all of the outliers are excluded, or vice versa.
        * Loop through all of them, creating a BacktrackPoint for each and adding it to the work queue.
        */
+#ifndef USE_ATTACHMENT_POINTS
       for (int attachment_points_value = 0; (attachment_points_value & (1 << num_attachment_points)) == 0; attachment_points_value ++) {
 	int working_value = attachment_points_value;
 	initial_work.bitstring = BitString(bitstring_len);
@@ -1452,6 +1457,11 @@ int main(const int argc, char * const * const argv)
 	}
 	backtrack_queue.push(initial_work);
       }
+#else
+      initial_work.bitstring = BitString(bitstring_len);
+      initial_work.cover = &cover;
+      backtrack_queue.push(initial_work);
+#endif
     }
 
     // Set up the signal handler
