@@ -1362,11 +1362,15 @@ def cnf2dnf_external(cnf_bitsets, simplify=False, parallel=False):
 # The C++ cnf2dnf program has exhibited enough bugs that I now perform dualization
 # verification on every cnf2dnf calculation.
 
-def cnf2dnf_checking(cnf_bitsets, parallel=False):
+def cnf2dnf_checking(cnf_bitsets, parallel=False, stats=None):
     
     retval = cnf2dnf_external(cnf_bitsets, parallel=parallel)
+    time1 = time.time()
     simplified = cnf2dnf_external(cnf_bitsets, simplify=True, parallel=parallel)
     verification = cnf2dnf_external(retval, parallel=parallel)
+    time2 = time.time()
+    if stats:
+        stats['cnf2dnf_verification_time'] += time2-time1
     # simplified (the simplified input) should equal verification (the output run back through the algorithm again)
     # since they're both tuples, comparing them is really this simple
     if (simplified != verification):
@@ -1772,7 +1776,11 @@ def process_pool_initializer():
 
 # Statistics is like a dict, but with the ability to call += on non-existent keys,
 # so we can do things like stats['cnf2dnf_time'] += time6-time5
+#
 # Can be initialized by passing it a dictionary.
+#
+# Also has an insert_into_SQL method that adds time columns to the stats table if they don't already exist,
+# and converts the integers stored in '_time' keys into the INTERVAL stored in SQL.
 
 class Statistics(dict):
     def __init__(self, d=None):
@@ -1781,6 +1789,12 @@ class Statistics(dict):
             self.update(d)
     def __getitem__(self, key):
         return self.setdefault(key, 0)
+    def insert_into_SQL(self):
+        for k in self:
+            if k.endswith('_time'):
+                self[k] = datetime.timedelta(seconds = int(self[k]))
+                cursor.execute(f"ALTER TABLE staging_stats ADD COLUMN IF NOT EXISTS {k} INTERVAL")
+        cursor.execute(f"INSERT INTO staging_stats ({','.join(self.keys())}) VALUES %s", (tuple(self.values()),))
 
 def save_factor_as_global(i):
     return save_global(all_factors[i])
@@ -1898,7 +1912,8 @@ def stage1and2(system, initial_simplifications, origin, parallel=False, stats=No
     time5 = time.time()
     # bitsets is global so the subprocesses in the next ProcessPool can access it
     global bitsets
-    bitsets = cnf2dnf((FrozenBitset(tuple(all_factors.index(f) for f in l), capacity=len(all_factors)) for l in eqns_factors), parallel=parallel)
+    bitsets = cnf2dnf((FrozenBitset(tuple(all_factors.index(f) for f in l), capacity=len(all_factors)) for l in eqns_factors),
+                      parallel=parallel, stats=stats)
     time6 = time.time()
     if stats:
         stats['cnf2dnf_time'] += time6-time5
@@ -1956,11 +1971,12 @@ def SQL_stage2(requested_identifier=None, parallel=False):
                 system, simplifications = unpickle(pickled_system)
                 unpickle_time = time.time() - start_time
 
-                # The keys in this dictionary must match column names in the 'staging_stats' SQL table
-                # The keys ending in '_time' are processed differently because they correspond to SQL INTERVALs;
+                # The keys in stats (a fancy dictionary) must match column names in the 'staging_stats' SQL table,
+                # except that keys ending in '_time' are processed differently because they correspond to SQL INTERVALs;
                 # the other keys correspond to SQL INTEGERs, BIGINTs, or VARCHARs.  For the '_time' variables,
                 # we store seconds in the dictionary, then convert them to datetime.timedelta's right
-                # before we pass them to SQL.
+                # before we pass them to SQL, and any missing '_time' columns are added to the SQL on the fly.
+
                 stats = Statistics({'identifier' : identifier,
                                     'pid' : os.getpid(),
                                     'node' : os.uname()[1],
@@ -1975,10 +1991,7 @@ def SQL_stage2(requested_identifier=None, parallel=False):
                 stats['total_time'] = time.time() - start_time
                 stats['memory_utilization'] = psutil.Process(os.getpid()).memory_info().rss
 
-                for k in stats:
-                    if k.endswith('_time'):
-                        stats[k] = datetime.timedelta(seconds = int(stats[k]))
-                cursor.execute(f"INSERT INTO staging_stats ({','.join(stats.keys())}) VALUES %s", (tuple(stats.values()),))
+                stats.insert_into_SQL()
 
                 conn.commit()
 
@@ -2140,11 +2153,11 @@ def SQL_stage3_single_system(requested_identifier=None, parallel=False):
                 break
             pickled_system, identifier = cursor.fetchone()
             try:
-                # The keys in this dictionary must match column names in the 'staging_stats' SQL table
-                # The keys ending in '_time' are processed differently because they correspond to SQL INTERVALs;
+                # The keys in stats (a fancy dictionary) must match column names in the 'staging_stats' SQL table,
+                # except that keys ending in '_time' are processed differently because they correspond to SQL INTERVALs;
                 # the other keys correspond to SQL INTEGERs, BIGINTs, or VARCHARs.  For the '_time' variables,
                 # we store seconds in the dictionary, then convert them to datetime.timedelta's right
-                # before we pass them to SQL.
+                # before we pass them to SQL, and any missing '_time' columns are added to the SQL on the fly.
                 stats = Statistics({'identifier' : identifier,
                                     'pid' : os.getpid(),
                                     'node' : os.uname()[1]})
@@ -2164,10 +2177,7 @@ def SQL_stage3_single_system(requested_identifier=None, parallel=False):
                 stats['total_time'] = time.time() - start_time
                 stats['memory_utilization'] = psutil.Process(os.getpid()).memory_info().rss
 
-                for k in stats:
-                    if k.endswith('_time'):
-                        stats[k] = datetime.timedelta(seconds = int(stats[k]))
-                cursor.execute(f"INSERT INTO staging_stats ({','.join(stats.keys())}) VALUES %s", (tuple(stats.values()),))
+                stats.insert_into_SQL()
 
                 # This is the end of a typically long-running transaction that started when we set current_status = 'running'
                 # and includes many INSERT statements that were generated during the call to stage3()
