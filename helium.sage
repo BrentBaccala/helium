@@ -1758,7 +1758,9 @@ def unpickle(p):
     dst = io.BytesIO(p)
     up = pickle.Unpickler(dst)
     up.persistent_load = persistent_load
-    return up.load()
+    retval = up.load()
+    conn2.commit()
+    return retval
 
 # We use ProcessPool's for parallelization, and need an initializer and a done callback.
 
