@@ -46,12 +46,11 @@
 # create_database()
 # SQL_stage1(eqns_RQQ)
 # SQL_stage2_parallel()
-# SQL_stage3_parallel()
 # GTZ_parallel()
 # consolidate_ideals(load_prime_ideals())
 #
-# SQL_stage2/3_parallel() and GTZ_parallel() have single threaded
-# variants SQL_stage2(), SQL_stage3_single_system() and GTZ_single_thread().  Additionally,
+# SQL_stage2_parallel() and GTZ_parallel() have single threaded
+# variants SQL_stage2() and GTZ_single_thread().  Additionally,
 # these routines can be run on a cluster, using the SQL database as a
 # centralized data store.
 #
@@ -59,6 +58,10 @@
 # system of equations, runs a single iteration of the
 # variable substitution / factor / cnf2dnf algorithm to
 # populate multiple systems in SQL database 'staging'.
+#
+# There's also a stage 3 than will keep processing staging
+# systems until they've been exhausted, unless stage 2
+# which re-stages to SQL after every simplification step.
 #
 # For speed, the SQL version of the code should be run with the
 # espresso program compiled and available in the current working
@@ -1950,7 +1953,7 @@ def SQL_stage2(requested_identifier=None, parallel=False):
             if requested_identifier:
                 cursor.execute("""UPDATE staging
                                   SET current_status = 'running', pid = %s, node = %s
-                                  WHERE identifier = %s AND ( current_status = 'queued' OR current_status = 'interrupted' ) AND origin = 0
+                                  WHERE identifier = %s AND ( current_status = 'queued' OR current_status = 'interrupted' )
                                   RETURNING system, identifier""", (os.getpid(), os.uname()[1], int(requested_identifier)) )
                 conn.commit()
             else:
@@ -1959,7 +1962,7 @@ def SQL_stage2(requested_identifier=None, parallel=False):
                                   WHERE identifier = (
                                       SELECT identifier
                                       FROM staging
-                                      WHERE ( current_status = 'queued' OR current_status = 'interrupted' ) AND origin = 0
+                                      WHERE ( current_status = 'queued' OR current_status = 'interrupted' )
                                       ORDER BY identifier
                                       LIMIT 1
                                       FOR UPDATE SKIP LOCKED
