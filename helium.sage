@@ -1439,6 +1439,11 @@ cnf2dnf_tests = [
      ['01001', '10101', '10010', '01010']),
 ]
 
+cnf2dnf_tests2 = [
+    ('001000010', '001111000', '100000001', '101000100')
+]
+
+
 def make_unique_and_discard_subsets(iter):
     retval = set(iter)
     discards = []
@@ -1464,6 +1469,10 @@ def test_cnf2dnf(parallel=False):
                 print("Expected:", sorted(outputs, key=lambda x:str(x)))
                 print("Actual:", sorted(actual_outputs, key=lambda x:str(x)))
                 raise RuntimeError('cnf2dnf test failed')
+    for test in cnf2dnf_tests2:
+        # for these tests, we just run the cnf2dnf_checking tests (which are actually pretty good)
+        inputs = [FrozenBitset(s) for s in test]
+        outputs = cnf2dnf(inputs, parallel)
     print('All cnf2dnf tests passed')
 
 # Once we've built all of the systems, then we do this:
