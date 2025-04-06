@@ -1842,14 +1842,13 @@ def stage1and2(system, initial_simplifications, origin, parallel=False, stats=No
         stage = 1
     else:
         stage = 2
-    if verbose:
-        print('simplifyIdeal')
+    print(time.ctime(), 'system', origin, ': simplifyIdeal')
     time1 = time.time()
     eqns,s = simplifyIdeal(list(system))
     time2 = time.time()
     if stats:
         stats['simplifyIdeal_time'] += time2 - time1
-    print('system', origin, ':', len(s), 'simplifications')
+    print(time.ctime(), 'system', origin, ':', len(s), 'simplifications')
     # See comment below for why we like to keep things sorted
     # We need simplifications to be a tuple because we're going to pickle it
     global simplifications
@@ -1873,7 +1872,7 @@ def stage1and2(system, initial_simplifications, origin, parallel=False, stats=No
     if parallel:
         eqns_factors = parallel_factor_eqns(eqns)
     else:
-        print('system', origin, ': factoring')
+        print(time.ctime(), 'system', origin, ': factoring')
         eqns_factors = factor_eqns(eqns)
     time4 = time.time()
     if stats:
@@ -1895,7 +1894,7 @@ def stage1and2(system, initial_simplifications, origin, parallel=False, stats=No
     if verbose:
         pb = ProgressBar(label='saving factors as SQL globals', expected_size=len(all_factors))
     else:
-        print('system', origin, ": saving", len(all_factors), "factors as SQL globals")
+        print(time.ctime(), 'system', origin, ": saving", len(all_factors), "factors as SQL globals")
     if parallel:
         with concurrent.futures.ProcessPoolExecutor(max_workers=num_processes, initializer=process_pool_initializer) as executor:
             futures = [executor.submit(save_factor_as_global, i) for i in range(len(all_factors))]
@@ -1926,14 +1925,14 @@ def stage1and2(system, initial_simplifications, origin, parallel=False, stats=No
     # precisely for this step that save_global and save_factor_as_global (the function called by the
     # future) return the persistent id.
     if parallel:
-        print('system', origin, ': loading persistent ids')
+        print(time.ctime(), 'system', origin, ': loading persistent ids')
         for i,future in enumerate(futures):
             id = future.result()
             persistent_data[id] = all_factors[i]
             persistent_data_inverse[all_factors[i]] = id
             all_factors_tags.append(PersistentIdTag(id))
 
-    print('system', origin, ': cnf2dnf starting')
+    print(time.ctime(), 'system', origin, ': cnf2dnf starting')
     time5 = time.time()
     # bitsets is global so the subprocesses in the next ProcessPool can access it
     global bitsets
@@ -1943,7 +1942,7 @@ def stage1and2(system, initial_simplifications, origin, parallel=False, stats=No
     if stats:
         stats['cnf2dnf_time'] += time6-time5
 
-    print('system', origin, ': insert into SQL')
+    print(time.ctime(), 'system', origin, ': insert into SQL')
     with conn.cursor() as cursor:
         for bs in bitsets:
             t = tuple(all_factors_tags[j] for j in bs)
@@ -1954,7 +1953,7 @@ def stage1and2(system, initial_simplifications, origin, parallel=False, stats=No
     if stats:
         stats['insert_into_systems_time'] += time7-time6
 
-    print('system', origin, ': done')
+    print(time.ctime(), 'system', origin, ': done')
 
 def SQL_stage1(eqns, parallel=False):
     # To keep the size of the pickles down, we save the ring as a global since it's referred to constantly.
@@ -1993,7 +1992,7 @@ def SQL_stage2(requested_identifier=None, parallel=False):
             pickled_system, identifier = cursor.fetchone()
             try:
                 start_time = time.time()
-                print('system', identifier, ': unpickling')
+                print(time.ctime(), 'system', identifier, ': unpickling')
                 system, simplifications = unpickle(pickled_system)
                 unpickle_time = time.time() - start_time
 
