@@ -1873,6 +1873,7 @@ def stage1and2(system, initial_simplifications, origin, parallel=False, stats=No
     if parallel:
         eqns_factors = parallel_factor_eqns(eqns)
     else:
+        print('system', origin, ': factoring')
         eqns_factors = factor_eqns(eqns)
     time4 = time.time()
     if stats:
@@ -1884,8 +1885,6 @@ def stage1and2(system, initial_simplifications, origin, parallel=False, stats=No
     # in ascending order, which are then used as indices to all_factors.
     # We like sorted systems because they help us detect duplicate systems and reduce duplicate work.
     all_factors = set(f for l in eqns_factors for f in l)
-    if verbose:
-        print("Sorting", len(all_factors), "factors")
     all_factors = sorted(all_factors)
 
     # This is a list that matches all_factors, but instead of the polynomial factors, it's
@@ -1895,6 +1894,8 @@ def stage1and2(system, initial_simplifications, origin, parallel=False, stats=No
 
     if verbose:
         pb = ProgressBar(label='saving factors as SQL globals', expected_size=len(all_factors))
+    else:
+        print('system', origin, ": saving", len(all_factors), "factors as SQL globals")
     if parallel:
         with concurrent.futures.ProcessPoolExecutor(max_workers=num_processes, initializer=process_pool_initializer) as executor:
             futures = [executor.submit(save_factor_as_global, i) for i in range(len(all_factors))]
@@ -1925,15 +1926,14 @@ def stage1and2(system, initial_simplifications, origin, parallel=False, stats=No
     # precisely for this step that save_global and save_factor_as_global (the function called by the
     # future) return the persistent id.
     if parallel:
-        if verbose:
-            print('Loading persistent ids')
+        print('system', origin, ': loading persistent ids')
         for i,future in enumerate(futures):
             id = future.result()
             persistent_data[id] = all_factors[i]
             persistent_data_inverse[all_factors[i]] = id
             all_factors_tags.append(PersistentIdTag(id))
 
-    print('system', origin, ': cnf2dnf')
+    print('system', origin, ': cnf2dnf starting')
     time5 = time.time()
     # bitsets is global so the subprocesses in the next ProcessPool can access it
     global bitsets
@@ -1943,7 +1943,7 @@ def stage1and2(system, initial_simplifications, origin, parallel=False, stats=No
     if stats:
         stats['cnf2dnf_time'] += time6-time5
 
-    print('system', origin, ': insert systems into SQL')
+    print('system', origin, ': insert into SQL')
     with conn.cursor() as cursor:
         for bs in bitsets:
             t = tuple(all_factors_tags[j] for j in bs)
@@ -1993,7 +1993,7 @@ def SQL_stage2(requested_identifier=None, parallel=False):
             pickled_system, identifier = cursor.fetchone()
             try:
                 start_time = time.time()
-                print('Unpickling stage 1 system', identifier)
+                print('system', identifier, ': unpickling')
                 system, simplifications = unpickle(pickled_system)
                 unpickle_time = time.time() - start_time
 
