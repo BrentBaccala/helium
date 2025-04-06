@@ -1814,7 +1814,7 @@ class Statistics(dict):
             self.update(d)
     def __getitem__(self, key):
         return self.setdefault(key, 0)
-    def insert_into_SQL(self):
+    def insert_into_SQL(self, cursor):
         for k in self:
             if k.endswith('_time'):
                 self[k] = datetime.timedelta(seconds = int(self[k]))
@@ -2017,7 +2017,7 @@ def SQL_stage2(requested_identifier=None, parallel=False):
                 stats['total_time'] = time.time() - start_time
                 stats['memory_utilization'] = psutil.Process(os.getpid()).memory_info().rss
 
-                stats.insert_into_SQL()
+                stats.insert_into_SQL(cursor)
 
                 conn.commit()
 
