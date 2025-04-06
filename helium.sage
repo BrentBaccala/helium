@@ -1956,11 +1956,10 @@ def stage1and2(system, initial_simplifications, origin, parallel=False, stats=No
 
     print('system', origin, ': done')
 
-def SQL_stage1(eqns):
+def SQL_stage1(eqns, parallel=False):
     # To keep the size of the pickles down, we save the ring as a global since it's referred to constantly.
     save_global(eqns[0].parent())
     stats = Statistics()
-    parallel = False
     stage1and2(eqns, tuple(), 0, parallel, stats)
     conn.commit()
     print(stats)
