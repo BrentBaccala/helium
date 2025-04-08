@@ -6,6 +6,8 @@
 # and check final result for equality with simplified, sorted original input
 #
 
+THREADS=$(($(nproc)/2))
+
 INFILE=$1
 OUTFILE=$(echo $INFILE | sed s/.in/.out/)
 CHKFILE=$(echo $INFILE | sed s/.in/.check/)
@@ -23,15 +25,15 @@ SED="cat"
 #SED="sed -e 1,100p -e d"
 
 if true; then
-   echo $SED $INFILE \| ./cnf2dnf -t 12 \> $OUTFILE
-   time $SED $INFILE | ./cnf2dnf -t 12 > $OUTFILE
+   echo $SED $INFILE \| ./cnf2dnf -t $THREADS \> $OUTFILE
+   time $SED $INFILE | ./cnf2dnf -t $THREADS > $OUTFILE
 else
-   echo ./cnf2dnf -t 12 \< $INFILE \> $OUTFILE
-   time ./cnf2dnf -t 12 < $INFILE > $OUTFILE
+   echo ./cnf2dnf -t $THREADS \< $INFILE \> $OUTFILE
+   time ./cnf2dnf -t $THREADS < $INFILE > $OUTFILE
 fi
 
-echo ./cnf2dnf -t 12 \< $OUTFILE \| sort \> $CHKFILE
-time ./cnf2dnf -t 12 < $OUTFILE | sort > $CHKFILE
+echo ./cnf2dnf -t $THREADS \< $OUTFILE \| sort \> $CHKFILE
+time ./cnf2dnf -t $THREADS < $OUTFILE | sort > $CHKFILE
 
 if true; then
    $SED $INFILE | ./cnf2dnf -s | sort | md5sum -z; echo " $SED | ./cnf2dnf -s | sort"
