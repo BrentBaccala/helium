@@ -1365,21 +1365,13 @@ def cnf2dnf_external(cnf_bitsets, simplify=False, parallel=False):
 # The C++ cnf2dnf program has exhibited enough bugs that I now perform dualization
 # verification on every cnf2dnf calculation.
 
-cnf2dnf_debugging = False
-
 def cnf2dnf_checking(cnf_bitsets, parallel=False, stats=None):
-    # it's probably a generator, so convert it to a list since we're going to loop over it two or three times
+    # it might be a generator, so convert it to a list since we're going to loop over it twice
     cnf_bitsets = list(cnf_bitsets)
-    if cnf2dnf_debugging:
-        try:
-            with open(f"cnf2dnf-id-{stats['identifier']}.in", "x") as f:
-                for bs in cnf_bitsets:
-                    print(str(bs), file=f)
-        except:
-            print("something went wrong with cnf2dnf debugging output")
-            raise
     retval = cnf2dnf_external(cnf_bitsets, parallel=parallel)
     time1 = time.time()
+    if stats:
+        print(time.ctime(), f"system {stats['identifier']} : cnf2dnf verifying")
     simplified = cnf2dnf_external(cnf_bitsets, simplify=True, parallel=parallel)
     verification = cnf2dnf_external(retval, parallel=parallel)
     time2 = time.time()
@@ -1834,7 +1826,7 @@ def normalize(eqns):
 # index into those lists (instead of passing one of the factors or bitsets) is done to avoid serialization
 # delay in the parallel code.
 
-def stage1and2(system, initial_simplifications, origin, parallel=False, stats=None):
+def stage1and2(system, initial_simplifications, origin, cnf2dnf_debugging=False, parallel=False, stats=None):
     # If parallel == True, then we're only calling stage1and2 once, so we're verbose
     # If parallel == False, then we're probably calling it in multiple threads in parallel, so we're not verbose
     verbose = parallel
@@ -1886,6 +1878,24 @@ def stage1and2(system, initial_simplifications, origin, parallel=False, stats=No
     all_factors = set(f for l in eqns_factors for f in l)
     all_factors = sorted(all_factors)
 
+    # bitsets is global so the subprocesses in the ProcessPool below can access it.
+    # We create cnf_bitsets now in case we want to dump it for debugging purposes.
+    # If we aren't debugging, then we won't use cnf_bitsets until we call cnf2dnf further below.
+    global bitsets
+    cnf_bitsets = [FrozenBitset(tuple(all_factors.index(f) for f in l), capacity=len(all_factors)) for l in eqns_factors]
+    if cnf2dnf_debugging:
+        filename = f"cnf2dnf-id-{origin}.in"
+        print(time.ctime(), 'system', origin, ': dumping', filename)
+        try:
+            with open(filename, "x") as f:
+                for bs in cnf_bitsets:
+                    print(str(bs), file=f)
+            print(time.ctime(), 'system', origin, ': done')
+        except:
+            print("something went wrong with cnf2dnf debugging output")
+            raise
+        return
+
     # This is a list that matches all_factors, but instead of the polynomial factors, it's
     # a list of the matching PersistentIdTag's.  The tags (short strings that map to the
     # polynomials) will be used to form the pickled objects that are saved to SQL.
@@ -1934,10 +1944,7 @@ def stage1and2(system, initial_simplifications, origin, parallel=False, stats=No
 
     print(time.ctime(), 'system', origin, ': cnf2dnf starting')
     time5 = time.time()
-    # bitsets is global so the subprocesses in the next ProcessPool can access it
-    global bitsets
-    bitsets = cnf2dnf((FrozenBitset(tuple(all_factors.index(f) for f in l), capacity=len(all_factors)) for l in eqns_factors),
-                      parallel=parallel, stats=stats)
+    bitsets = cnf2dnf(cnf_bitsets, parallel=parallel, stats=stats)
     time6 = time.time()
     if stats:
         stats['cnf2dnf_time'] += time6-time5
@@ -1958,8 +1965,8 @@ def stage1and2(system, initial_simplifications, origin, parallel=False, stats=No
 def SQL_stage1(eqns, parallel=False):
     # To keep the size of the pickles down, we save the ring as a global since it's referred to constantly.
     save_global(eqns[0].parent())
-    stats = Statistics()
-    stage1and2(eqns, tuple(), 0, parallel, stats)
+    stats = Statistics({'identifier' : 0})
+    stage1and2(eqns, tuple(), 0, parallel=parallel, stats=stats)
     conn.commit()
     print(stats)
 
@@ -2007,7 +2014,7 @@ def SQL_stage2(requested_identifier=None, parallel=False):
                                     'node' : os.uname()[1],
                                     'unpickle_time' : unpickle_time})
 
-                stage1and2(system, simplifications, identifier, parallel, stats)
+                stage1and2(system, simplifications, identifier, parallel=parallel, stats=stats)
 
                 cursor.execute("""UPDATE staging
                                   SET current_status = 'finished'
@@ -2040,6 +2047,21 @@ def SQL_stage2(requested_identifier=None, parallel=False):
             # keep our memory down by clearing our cached polynomials
             persistent_data.clear()
             persistent_data_inverse.clear()
+
+def SQL_stage2_debug_cnf2dnf(requested_identifier, parallel=False):
+    with conn.cursor() as cursor:
+        cursor.execute("""SELECT system, identifier FROM staging WHERE identifier = %s""",
+                       (int(requested_identifier),))
+        conn.commit()
+        if cursor.rowcount == 0:
+            return
+        pickled_system, identifier = cursor.fetchone()
+        start_time = time.time()
+        print(time.ctime(), 'system', identifier, ': unpickling')
+        system, simplifications = unpickle(pickled_system)
+        unpickle_time = time.time() - start_time
+
+        stage1and2(system, simplifications, identifier, cnf2dnf_debugging=True, parallel=parallel, stats=None)
 
 def SQL_stage2_parallel(max_workers = num_processes):
     try:
