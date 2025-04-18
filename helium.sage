@@ -1778,16 +1778,44 @@ def persistent_load(id):
             if cursor.rowcount == 0:
                 raise pickle.UnpicklingError("Invalid persistent id")
             else:
-                obj = unpickle(cursor.fetchone()[0])
+                obj = unpickle_internal(cursor.fetchone()[0])
                 persistent_data[id] = obj
                 persistent_data_inverse[obj] = id
     return persistent_data[id]
 
-def unpickle(p):
+def unpickle_internal(p):
     dst = io.BytesIO(p)
     up = pickle.Unpickler(dst)
     up.persistent_load = persistent_load
     retval = up.load()
+    return retval
+
+def unpickle(p):
+    dst = io.BytesIO(p)
+    persistent_ids = []
+    def persistent_load_counter(id):
+        if id not in persistent_data:
+            persistent_ids.append(int(id))
+    up = pickle.Unpickler(dst)
+    up.persistent_load = persistent_load_counter
+    up.load()
+    print(time.ctime(), len(persistent_ids), 'persistent_ids')
+    first_one = True
+    if persistent_ids:
+        block_size = 10000
+        for blocknum in range((len(persistent_ids)+block_size-1)//block_size):
+            block = persistent_ids[blocknum*block_size:(blocknum+1)*block_size]
+            with conn2.cursor() as cursor:
+                cursor.execute("SELECT identifier, pickle FROM globals WHERE identifier IN %s", (tuple(block),))
+                while pickl := cursor.fetchone():
+                    if first_one:
+                        print(time.ctime(), 'pickle fetch from SQL done; unpickling')
+                        first_one = False
+                    id = pickl[0]
+                    obj = unpickle_internal(pickl[1])
+                    persistent_data[str(id)] = obj
+                    persistent_data_inverse[obj] = str(id)
+    retval = unpickle_internal(p)
     conn2.commit()
     return retval
 
