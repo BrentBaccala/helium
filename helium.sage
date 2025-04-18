@@ -1398,9 +1398,9 @@ def cnf2dnf_checking(cnf_bitsets, parallel=False, stats=None):
 # cnf2dnf          - pure Python version (slow, maybe buggy) - buried back in Git history
 # cnf2dnf_espresso - UC Berkeley espresso (crashes)
 # cnf2dnf_external - my own C++ program
-# cnf2dnf_checking - front end to cnf2dnf_external that reverses and verifies the calculation
+# cnf2dnf_checking - front end to cnf2dnf_external that reverses and verifies the calculation (can run much slower)
 
-cnf2dnf = cnf2dnf_checking
+cnf2dnf = cnf2dnf_external
 
 # CNF to DNF tests
 #
