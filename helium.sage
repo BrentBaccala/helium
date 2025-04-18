@@ -1329,11 +1329,14 @@ def cnf2dnf_espresso(cnf_bitsets, parallel=False):
         raise subprocess.CalledProcessError(proc.returncode, 'espresso')
     return retval
 
-def cnf2dnf_external(cnf_bitsets, simplify=False, parallel=False):
+def cnf2dnf_external(cnf_bitsets, simplify=False, parallel=False, stats=None):
 
     cmd = ['./cnf2dnf', '-t', str(num_processes if parallel else 1)]
     if simplify:
         cmd.append('-s')
+    time1 = time.time()
+    if stats:
+        print(time.ctime(), f"system {stats['identifier']} : cnf2dnf starting")
     proc = subprocess.Popen(cmd, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=sys.stderr)
     for bs in cnf_bitsets:
         proc.stdin.write(str(bs).encode())
@@ -1345,6 +1348,9 @@ def cnf2dnf_external(cnf_bitsets, simplify=False, parallel=False):
     proc.wait()
     if proc.returncode != 0:
         raise subprocess.CalledProcessError(proc.returncode, './cnf2dnf')
+    time2 = time.time()
+    if stats:
+        stats['cnf2dnf_time'] += time2-time1
     # Consensus on stack overflow https://stackoverflow.com/questions/4154571
     # is that since the first thing sorted() does is to convert the argument
     # to a list, there's no reason not to convert the generator to a list
@@ -1372,12 +1378,12 @@ def cnf2dnf_external(cnf_bitsets, simplify=False, parallel=False):
 def cnf2dnf_checking(cnf_bitsets, parallel=False, stats=None):
     # it might be a generator, so convert it to a list since we're going to loop over it twice
     cnf_bitsets = list(cnf_bitsets)
-    retval = cnf2dnf_external(cnf_bitsets, parallel=parallel)
+    retval = cnf2dnf_external(cnf_bitsets, parallel=parallel, stats=stats)
     time1 = time.time()
     if stats:
         print(time.ctime(), f"system {stats['identifier']} : cnf2dnf verifying")
-    simplified = cnf2dnf_external(cnf_bitsets, simplify=True, parallel=parallel)
-    verification = cnf2dnf_external(retval, parallel=parallel)
+    simplified = cnf2dnf_external(cnf_bitsets, simplify=True, parallel=parallel, stats=None)
+    verification = cnf2dnf_external(retval, parallel=parallel, stats=None)
     time2 = time.time()
     if stats:
         stats['cnf2dnf_verification_time'] += time2-time1
@@ -1946,12 +1952,8 @@ def stage1and2(system, initial_simplifications, origin, cnf2dnf_debugging=False,
             persistent_data_inverse[all_factors[i]] = id
             all_factors_tags.append(PersistentIdTag(id))
 
-    print(time.ctime(), 'system', origin, ': cnf2dnf starting')
-    time5 = time.time()
+    # cnf2dnf records its own timing statistics
     bitsets = cnf2dnf(cnf_bitsets, parallel=parallel, stats=stats)
-    time6 = time.time()
-    if stats:
-        stats['cnf2dnf_time'] += time6-time5
 
     print(time.ctime(), 'system', origin, ': insert into SQL')
     with conn.cursor() as cursor:
