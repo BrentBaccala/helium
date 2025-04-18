@@ -1707,12 +1707,13 @@ def create_database():
 persistent_data = {}
 persistent_data_inverse = {}
 
-def save_global(obj):
+def save_global(obj, stats=None):
     if obj in persistent_data_inverse:
         return persistent_data_inverse[obj]
     p = persistent_pickle(obj)
     # See this stackoverflow post: https://stackoverflow.com/questions/34708509/how-to-use-returning-with-on-conflict-in-postgresql
     # for issues with the simple "ON CONFLICT DO NOTHING RETURNING identifier"
+    time1 = time.time()
     with conn2:
         with conn2.cursor() as cursor:
             cursor.execute("INSERT INTO globals (pickle) VALUES (%s) ON CONFLICT DO NOTHING", (p,))
@@ -1720,6 +1721,9 @@ def save_global(obj):
             id = cursor.fetchone()[0]
             persistent_data[str(id)] = obj
             persistent_data_inverse[obj] = str(id)
+    time2 = time.time()
+    if stats:
+        stats['save_global_sql_time'] += time2-time1
     return str(id)
 
 # This routine isn't called anywhere (it's just for debugging) because the globals table is large
@@ -1823,8 +1827,8 @@ class Statistics(dict):
                 cursor.execute(f"ALTER TABLE staging_stats ADD COLUMN IF NOT EXISTS {k} INTERVAL")
         cursor.execute(f"INSERT INTO staging_stats ({','.join(self.keys())}) VALUES %s", (tuple(self.values()),))
 
-def save_factor_as_global(i):
-    return save_global(all_factors[i])
+def save_factor_as_global(i, stats=None):
+    return save_global(all_factors[i], stats=stats)
 
 def dropZeros(eqns):
     return tuple(e for e in eqns if e != 0)
@@ -1928,7 +1932,7 @@ def stage1and2(system, initial_simplifications, origin, cnf2dnf_debugging=False,
                     pb.show(num_completed)
     else:
         for i in range(len(all_factors)):
-            id = save_factor_as_global(i)
+            id = save_factor_as_global(i, stats=stats)
             all_factors_tags.append(PersistentIdTag(id))
             if verbose:
                 pb.show(i)
@@ -1938,6 +1942,9 @@ def stage1and2(system, initial_simplifications, origin, cnf2dnf_debugging=False,
     time4a = time.time()
     if stats:
         stats['save_global_time'] += time4a-time4
+
+    if stats:
+        print(stats)
 
     # If we're parallelized, we need to get the objects tagged with their persistent ids (they were only
     # tagged in the ProcessPool subprocesses), and I want to do this without having to transfer their
@@ -1952,7 +1959,7 @@ def stage1and2(system, initial_simplifications, origin, cnf2dnf_debugging=False,
             persistent_data_inverse[all_factors[i]] = id
             all_factors_tags.append(PersistentIdTag(id))
 
-    # cnf2dnf records its own timing statistics
+    # cnf2dnf records its own timing statistics and prints its own status messages
     bitsets = cnf2dnf(cnf_bitsets, parallel=parallel, stats=stats)
 
     print(time.ctime(), 'system', origin, ': insert into SQL')
