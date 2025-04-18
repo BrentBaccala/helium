@@ -1990,6 +1990,7 @@ def stage1and2(system, initial_simplifications, origin, cnf2dnf_debugging=False,
     # cnf2dnf records its own timing statistics and prints its own status messages
     bitsets = cnf2dnf(cnf_bitsets, parallel=parallel, stats=stats)
 
+    time6 = time.time()
     print(time.ctime(), 'system', origin, ': insert into SQL')
     with conn.cursor() as cursor:
         for bs in bitsets:
