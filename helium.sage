@@ -1219,6 +1219,10 @@ def create_eqns_R32003():
     global eqns_R32003
     eqns_R32003 = tuple(map(lambda arg: arg.map_coefficients(GF(32003), GF(32003)), eqns_RQQ))
 
+def create_eqns_R65521():
+    global eqns_R65521
+    eqns_R65521 = tuple(map(lambda arg: arg.map_coefficients(GF(65521), GF(65521)), eqns_RQQ))
+
 def init():
     global reductionIdeal
     # convert_eq_a is the first really time consuming step
