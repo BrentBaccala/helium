@@ -197,12 +197,13 @@ except ModuleNotFoundError:
 
 def postgres_connect():
     try:
-        global conn, conn2
-        conn = psycopg2.connect(**postgres_connection_parameters)
-        conn2 = psycopg2.connect(**postgres_connection_parameters)
-        print(f"connected to SQL database {conn.info.dbname} at {conn.info.host}")
-    except psycopg2.OperationalError as ex:
-        print('SQL OperationalError during connection attempt; no SQL database support')
+        try:
+            global conn, conn2
+            conn = psycopg2.connect(**postgres_connection_parameters)
+            conn2 = psycopg2.connect(**postgres_connection_parameters)
+            print(f"connected to SQL database {conn.info.dbname} at {conn.info.host}")
+        except psycopg2.OperationalError as ex:
+            print('SQL OperationalError during connection attempt; no SQL database support')
     except NameError as ex:
         if ex.name == 'psycopg2':
             # if we couldn't load psycopg2, we already printed a warning
