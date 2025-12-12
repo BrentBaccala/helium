@@ -2,6 +2,11 @@
 #
 # Sage script to do the computations for my paper in the Journal of Computational Algebra.
 #
+# Author: Brent Baccala
+# Date: December 12, 2025
+#
+# Tested on Ubuntu 24 with Sage 10.6
+#
 # François Boulier's Differential Algebra package is required to run this script.
 # To install it, run this command from the sage prompt:
 #
@@ -46,23 +51,25 @@ PDE = -(Psi[x,x] + Psi[y,y] + Psi[z,z])*r - int(2) * Psi - int(2)*E*r*Psi
 
 # Define the ansatz, the parameterized function space in which we're looking for solutions
 
-syst = [Psi[x] - DPsi * v[x],
-        Psi[y] - DPsi * v[y],
-        Psi[z] - DPsi * v[z],
-        DPsi[x] - DDPsi * v[x],
-        DPsi[y] - DDPsi * v[y],
-        DPsi[z] - DDPsi * v[z],
-#       DifferentialAlgebra can't parse this parenthesized expression, so expand it out "by hand"
-#       (a0 + a1*v)*DDPsi + (b0 + b1*v)*DPsi + (c0 + c1*v)*Psi,
-        a0*DDPsi + a1*v*DDPsi + b0*DPsi + b1*v*DPsi + c0*Psi + c1*v*Psi,
-        v - (v1*x + v2*y + v3*z + v4*r),
-        r**2 - x**2 - y**2 - z**2]
+ansatz = [Psi[x] - DPsi * v[x],
+          Psi[y] - DPsi * v[y],
+          Psi[z] - DPsi * v[z],
+          DPsi[x] - DDPsi * v[x],
+          DPsi[y] - DDPsi * v[y],
+          DPsi[z] - DDPsi * v[z],
+          (a0 + a1*v)*DDPsi + (b0 + b1*v)*DPsi + (c0 + c1*v)*Psi,
+          v - (v1*x + v2*y + v3*z + v4*r),
+          r**2 - x**2 - y**2 - z**2]
+
+# DifferentialAlgebra can't handle the parenthesized expressions directly, so expand them
+
+ansatz = list(map(sympy.expand, ansatz))
 
 # Reduce the PDE modulo the ansatz using Ritt's reduction algorithm
 
-h,r = R.differential_prem(PDE, syst)
+h,r = R.differential_prem(PDE, ansatz)
 
-# Convert the remainder to Sage (since sympy can't compute prime decompositions of ideals)
+# Convert the remainder to Sage
 
 Rsage = PolynomialRing(QQ, names=[str(indet) for indet in R.indets(r, selection='all')])
 sage_constants = list(map(Rsage, constants))
