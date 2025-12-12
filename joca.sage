@@ -24,9 +24,9 @@ x,y,z = sympy.var('x,y,z')
 
 # Declare our constants
 E = sympy.var('E')
-a0,a1,b0,b1,c0,c1 = sympy.var('a0,a1,b0,b1,c0,c1')
 v1,v2,v3,v4 = sympy.var('v1,v2,v3,v4')
-constants = [E,a0,a1,b0,b1,c0,c1,v1,v2,v3,v4]
+a0,a1,b0,b1,c0,c1 = sympy.var('a0,a1,b0,b1,c0,c1')
+constants = [E,v1,v2,v3,v4,a0,a1,b0,b1,c0,c1]
 
 # Declare our dependent variables
 #
@@ -40,14 +40,14 @@ r = DifferentialAlgebra.indexedbase('r')
 # Create the DifferentialRing and set the ranking on the variables
 
 R = DifferentialAlgebra.DifferentialRing (derivations = [x,y,z],
-                                          blocks = [[DDPsi,DPsi,Psi],[v,r], constants],
+                                          blocks = [[DDPsi,DPsi,Psi,v,r], constants],
                                           parameters = constants,
-                                          notation='jet')
+                                          notation = 'jet')
 
 # Define the PDE we're trying to solve
-# sympy can't handle a Sage Integer, so use a cast to make these Python integers
+# sympy can't handle a Sage Integer, so use casts to make these Python integers
 
-PDE = -(Psi[x,x] + Psi[y,y] + Psi[z,z])*r - int(2) * Psi - int(2)*E*r*Psi
+PDE = -int(1)/int(2)*(Psi[x,x] + Psi[y,y] + Psi[z,z])*r - Psi - E*r*Psi
 
 # Define the ansatz, the parameterized function space in which we're looking for solutions
 
@@ -99,6 +99,7 @@ eqns = build_system_of_equations(sage_r, sage_constants)
 I = ideal(eqns)
 prime_decomposition = I.minimal_associated_primes()
 
-# Print this result
+# Sort this result (so it prints in the same order as in the JOCA paper) and print it
 
+prime_decomposition.sort(key=lambda x:str(x))
 print(*prime_decomposition, sep='\n')
