@@ -398,7 +398,7 @@ def finish_prep(ansatz):
         # where D(V), M(V), and N(V) are linear polynomials in V, which is itself a linear polynomial
         #
         # Homogenization forces V and D to be non-zero; V is also forced to be non-constant
-        Zeta = SR_function('Zeta')
+        Zeta = SR_function('Zeta', latex_name='\\Zeta')
         (Vvars, V) = trial_polynomial('v', coordinates, roots, 1, constant=None, first_index=1)
         Psi = Zeta(V)
         if ansatz == 5.01:
@@ -1049,6 +1049,14 @@ def create_polynomial_rings(alg_exts):
     else:
         print('Using Singular rings for convertion')
         convertRing = Rsingular
+
+    # Sage doesn't recognize Greek letters as special and just prints them in LaTeX inside "\mathit{...}"
+    for i in range(convertRing.ngens()):
+        variable_name = convertRing.variable_names()[i]
+        if variable_name == 'Zeta':
+            convertRing._latex_names[i] = '\\Zeta'
+        if variable_name == 'DZeta':
+            convertRing._latex_names[i] = '\\Zeta\''
 
     print('Using Singular rings for reduction ideal')
     idealRing = Rsingular
