@@ -23,6 +23,30 @@ try:
 except ModuleNotFoundError as ex:
     raise ModuleNotFoundError(ex.msg + "\nInstall it with '%pip install DifferentialAlgebra'")
 
+# Claude Sonnet 4's solution to printing "DPsi" as "\Psi'" in LaTeX
+
+def patch_latex_varify():
+    """
+    Patch sage.misc.latex.latex_varify to handle 'DPsi' specially.
+    """
+    from sage.misc.latex import latex_varify
+    import sage.misc.latex
+
+    # Save reference to the original function
+    original_latex_varify = latex_varify
+
+    # Define the custom function
+    def custom_latex_varify(a, is_fname=False):
+        if a == "DPsi":
+            return r"\Psi'"
+        else:
+            return original_latex_varify(a, is_fname=is_fname)
+
+    # Replace the function in the module
+    sage.misc.latex.latex_varify = custom_latex_varify
+
+patch_latex_varify()
+
 # Declare our independent variables
 x,y,z = sympy.var('x,y,z')
 
