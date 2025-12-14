@@ -17,7 +17,11 @@
 # Some fiddling is required to juggle back and forth between the two.
 
 import sympy
-import DifferentialAlgebra
+
+try:
+    import DifferentialAlgebra
+except ModuleNotFoundError as ex:
+    raise ModuleNotFoundError(ex.msg + "\nInstall it with '%pip install DifferentialAlgebra'")
 
 # Declare our independent variables
 x,y,z = sympy.var('x,y,z')
