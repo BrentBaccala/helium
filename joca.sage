@@ -39,10 +39,10 @@ r = DifferentialAlgebra.indexedbase('r')
 
 # Create the DifferentialRing and set the ranking on the variables
 
-R = DifferentialAlgebra.DifferentialRing (derivations = [x,y,z],
-                                          blocks = [[DDPsi,DPsi,Psi,v,r], constants],
-                                          parameters = constants,
-                                          notation = 'jet')
+DiffRing = DifferentialAlgebra.DifferentialRing (derivations = [x,y,z],
+                                                 blocks = [[DDPsi,DPsi,Psi,v,r], constants],
+                                                 parameters = constants,
+                                                 notation = 'jet')
 
 # Define the PDE we're trying to solve
 # sympy can't handle a Sage Integer, so use casts to make these Python integers
@@ -67,13 +67,13 @@ ansatz = list(map(sympy.expand, ansatz))
 
 # Reduce the PDE modulo the ansatz using Ritt's reduction algorithm
 
-h,r = R.differential_prem(PDE, ansatz)
+h,r = DiffRing.differential_prem(PDE, ansatz)
 
 # Convert the remainder to Sage
 
-Rsage = PolynomialRing(QQ, names=[str(indet) for indet in R.indets(r, selection='all')])
-sage_constants = list(map(Rsage, constants))
-sage_r = Rsage(r)
+PolyRing = PolynomialRing(QQ, names=[str(indet) for indet in DiffRing.indets(r, selection='all')])
+PolyRing_constants = list(map(PolyRing, constants))
+PolyRing_r = PolyRing(r)
 
 # Given an equation and a list of constants, factor each term into constant and non-constant factors,
 # then group together all terms with identical non-constant factors and return the resulting
@@ -92,7 +92,7 @@ def build_system_of_equations(eqn, constants):
             system_of_like_terms[non_constant_part] = constant_part
     return tuple(set(system_of_like_terms.values()))
 
-eqns = build_system_of_equations(sage_r, sage_constants)
+eqns = build_system_of_equations(PolyRing_r, PolyRing_constants)
 
 # Build a polynomial ideal from the system of equations and construct its prime decomposition
 
