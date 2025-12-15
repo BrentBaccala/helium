@@ -77,6 +77,8 @@ DiffRing = DifferentialAlgebra.DifferentialRing (derivations = [x,y,z],
 
 PDE = -int(1)/int(2)*(Psi[x,x] + Psi[y,y] + Psi[z,z])*r - Psi - E*r*Psi
 
+print("PDE:", PDE)
+
 # Define the ansatz, the parameterized function space in which we're looking for solutions
 
 ansatz = [Psi[x] - DPsi * v[x],
@@ -93,9 +95,13 @@ ansatz = [Psi[x] - DPsi * v[x],
 
 ansatz = list(map(sympy.expand, ansatz))
 
+print("\nAnsatz:", *ansatz, sep='\n')
+
 # Reduce the PDE modulo the ansatz using Ritt's reduction algorithm
 
 h,r = DiffRing.differential_prem(PDE, ansatz)
+
+print("\nRemainder:", r)
 
 # Convert the remainder to Sage
 
@@ -122,6 +128,8 @@ def build_system_of_equations(eqn, constants):
 
 eqns = build_system_of_equations(PolyRing_r, PolyRing_constants)
 
+print("\nSystem of equations:", *eqns, sep='\n')
+
 # Build a polynomial ideal from the system of equations and construct its prime decomposition
 
 I = ideal(eqns)
@@ -130,4 +138,4 @@ prime_decomposition = I.minimal_associated_primes()
 # Sort this result (so it prints in the same order as in the JOCA paper) and print it
 
 prime_decomposition.sort(key=lambda x:str(x))
-print(*prime_decomposition, sep='\n')
+print("\nMinimal associated prime ideals:", *prime_decomposition, sep='\n')
