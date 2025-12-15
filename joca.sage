@@ -99,7 +99,7 @@ h,r = DiffRing.differential_prem(PDE, ansatz)
 
 # Convert the remainder to Sage
 
-PolyRing = PolynomialRing(QQ, names=[str(indet) for indet in DiffRing.indets(r, selection='all')])
+PolyRing = PolynomialRing(QQ, names=[str(indet) for indet in DiffRing.indets(selection='all')])
 PolyRing_constants = list(map(PolyRing, constants))
 PolyRing_r = PolyRing(r)
 
