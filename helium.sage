@@ -1051,6 +1051,7 @@ def create_polynomial_rings(alg_exts):
         convertRing = Rsingular
 
     # Sage doesn't recognize Greek letters as special and just prints them in LaTeX inside "\mathit{...}"
+    convertRing.latex_variable_names()
     for i in range(convertRing.ngens()):
         variable_name = convertRing.variable_names()[i]
         if variable_name == 'Zeta':
