@@ -819,7 +819,7 @@ def finish_prep(ansatz):
         (Avars, A) = trial_polynomial('a', coordinates, roots, maxdeg_alg)
         def deriv(self, *args,**kwds):
             wrt = args[kwds['diff_param']]
-            return diff(A, wrt)/(2*A*self(*coordinates))
+            return diff(A, wrt)/(2*self(*coordinates))
         # anything that isn't constant w.r.t. coordinates is an SR_function
         gamma = SR_function('g', nargs=len(coordinates), derivative_func=deriv)
 
