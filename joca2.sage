@@ -17,6 +17,7 @@
 # Some fiddling is required to juggle back and forth between the two.
 
 import sympy
+import time
 
 try:
     import DifferentialAlgebra
@@ -46,6 +47,15 @@ def patch_latex_varify():
     sage.misc.latex.latex_varify = custom_latex_varify
 
 patch_latex_varify()
+
+# Wrap a long-running function in a timer and print the time
+
+def timefunc(func, *args, **kwargs):
+    start_time = time.perf_counter()
+    retval = func(*args, **kwargs)
+    end_time = time.perf_counter()
+    print('{:30} {:10.2f} sec'.format(func.__name__, end_time - start_time))
+    return retval
 
 # Declare our independent variables
 R1,R2,R12 = sympy.var('R1,R2,R12')
@@ -120,9 +130,9 @@ print("\nAnsatz:", *ansatz, sep='\n')
 
 numerator, denominator = sympy.expand(PDE).as_numer_denom()
 
-h,r = DiffRing.differential_prem(numerator, ansatz)
+h,r = timefunc(DiffRing.differential_prem, numerator, ansatz)
 
-print("\nRemainder:", r)
+print(f"\nRemainder ({len(sympy.expand(r).args)} terms):", r)
 
 # Convert the remainder to Sage
 
@@ -148,9 +158,9 @@ def build_system_of_equations(eqn, constants):
             system_of_like_terms[non_constant_part] = constant_part
     return tuple(set(system_of_like_terms.values()))
 
-eqns = build_system_of_equations(PolyRing_r, PolyRing_constants)
+eqns = timefunc(build_system_of_equations, PolyRing_r, PolyRing_constants)
 
-print("\nSystem of equations:", *eqns, sep='\n')
+print(f"\nSystem of equations ({len(eqns)} equations):", *eqns, sep='\n')
 
 raise 'hi'
 
