@@ -1126,6 +1126,16 @@ def create_eqns_R65521():
     global eqns_R65521
     eqns_R65521 = tuple(map(lambda arg: arg.map_coefficients(GF(65521), GF(65521)), eqns_RQQ))
 
+#
+# Helper functions for the "Pseudo-Solution of Hydrogen" paper
+#
+
+def latex_array(eqns):
+    print("\\begin{array}{r}")
+    for eqn in eqns:
+        print(latex(eqn) + "\\\\")
+    print("\\end{array}\n")
+
 def init():
     global reductionIdeal
     # convert_eq_a is the first really time consuming step

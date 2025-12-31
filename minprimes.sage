@@ -4,7 +4,7 @@
 # of a system of equations using factorization and monotone
 # dualization, followed by the GTZ algorithm.
 #
-# minimal_associated_primes() can run out of memory on large
+# Sage's minimal_associated_primes() can run out of memory on large
 # polynomial systems.  In the case, we can run a series of
 # simplification steps that produce a family of simpler systems that
 # are stored in a PostgreSQL database, processed in parallel, then
@@ -12,21 +12,22 @@
 #
 # The basic simplication step is to look for simple variable
 # substitutions (i.e, if "a=0" is in the system, set a equal to zero
-# everywhere in the system), then factor the polynomials, then
-# run a cnf-to-dnf (conjunctive normal form to disjunctive normal form)
-# conversion to obtain a set of factored ideals.  We'll recurse and repeat
-# the basic simplification step again on every output ideal.  Once
-# we've obtained an ideal that can't be simplified further using
-# this procedure, run the GTZ algorithm of minimal_associated_primes()
-# to complete the calculation.  The final result is the union
-# of all of the ideals so obtained.
+# everywhere in the system), then factor the polynomials, then run
+# monotone dualization, which is a cnf-to-dnf (conjunctive normal form
+# to disjunctive normal form) conversion to obtain a set of factored
+# ideals.  We'll recurse and repeat the basic simplification step
+# again on every output ideal.  Once we've obtained an ideal that
+# can't be simplified further using this procedure, run the GTZ
+# algorithm of minimal_associated_primes() to complete the
+# calculation.  The final result is the union of all of the ideals so
+# obtained.
 #
 # INTERACTIVE USAGE:
 #
 # load('minprimes.sage')
 # delete_database()    # only needed to remove a previous run
 # create_database()
-# SQL_stage1(eqns_RQQ)
+# SQL_stage1(eqns)
 # SQL_stage2_parallel()
 # GTZ_parallel()
 # consolidate_ideals(load_prime_ideals())
@@ -45,16 +46,14 @@
 # systems until they've been exhausted, unless stage 2
 # which re-stages to SQL after every simplification step.
 #
-# For speed, the SQL version of the code should be run with the
-# espresso program compiled and available in the current working
-# directory, and using a custom version of Sage that has an optimized
-# simplifyIdeal function, available as the simplifyIdeal branch of
-# https://github.com/BrentBaccala/sage.
+# For speed, it's best to use a custom version of Sage that has an
+# optimized simplifyIdeal function, available as the simplifyIdeal
+# branch of https://github.com/BrentBaccala/sage.
 #
 # The two algorithms should produce identical results.  In particular,
 # the output of the following two commands should be identical:
 #
-# sorted([j.groebner_basis() for j in ideal(eqns_RQQ).minimal_associated_primes()])
+# sorted([j.groebner_basis() for j in ideal(eqns).minimal_associated_primes()])
 # sorted([j.groebner_basis() for j in consolidate_ideals(load_prime_ideals())])
 #
 # by Brent Baccala
@@ -207,53 +206,8 @@ def parallel_factor_eqns(eqns):
 # We wish to convert this to disjunctive normal form (DNF), an OR-of-ANDs, sum-of-products,
 # that will give us multiple systems of irreducible factors.
 #
-# I've tried several ways to do this, starting with native Python code and later an optimized
-# C++ version of my simple algorithm.  Most recently, I've been using a dedicated logic
-# optimizer, "espresso", available from https://github.com/classabbyamp/espresso-logic.
-
-def cnf2dnf_espresso(cnf_bitsets, parallel=False):
-    # convert a generator to a tuple, because we're about to iterate it twice
-    cnf_bitsets = tuple(cnf_bitsets)
-    cnf_bitset_lengths = set(bs.capacity() for bs in cnf_bitsets)
-    assert len(cnf_bitset_lengths) == 1
-    cnf_bitset_length = cnf_bitset_lengths.pop()
-
-    # Espresso's input is a list of product terms that are logically OR-ed together to specify the ON-set in DNF.
-    # How can we provide CNF input?  We take advantage of the fact that complementing CNF produces DNF, so we
-    # complement all of our input bits, encoding '1' and '0' and '0' as do-not-care, then specify '-epos' to
-    # swap the ON-set and OFF-set, effectively inputting the OFF-set in DNF.  See espresso man page.
-
-    proc = subprocess.Popen(['./espresso', '-epos'], stdin=subprocess.PIPE, stdout=subprocess.PIPE)
-
-    # espresso reads all of its stdin before outputting anything, so there's no danger of stdin blocking here.
-    proc.stdin.write(f'.i {cnf_bitset_length}\n'.encode())
-    proc.stdin.write('.o 1\n'.encode())
-    proc.stdin.write('.type f\n'.encode())
-    for bs in cnf_bitsets:
-        proc.stdin.write('{} 1\n'.format(str(bs).replace('0','-').replace('1','0')).encode())
-    proc.stdin.close()
-
-    # There is some concern that if we proc.wait() here, proc.stdout could fill with data and both processes will deadlock.
-    # So we read proc.stdout first, then wait for the subprocess to terminate.
-    retval = []
-    for line in proc.stdout:
-        line = line.decode()
-        if line.startswith('.i ') or line.startswith('.o ') or line.startswith('#.phase ') or line.startswith('.p ') or line == '.e\n':
-            pass
-        else:
-            # In principle, espresso could produce both 1s and 0s (as well as do-not-care dashes) in its output.
-            # Yet I've never seen 0s in the output, and that would be very strange - it would mean that our
-            # system would be true if some polynomial was NOT zero, and if that was the case, why wouldn't
-            # it also be true if that polynomial was zero?  In any event, if we ever see a zero in the output,
-            # it will raise an exception here.
-            product_term_str, output_str = line.split(' ')
-            if output_str != '1\n' or set(product_term_str) > set('1-'):
-                raise RuntimeError('unexpected espresso output')
-            retval.append(FrozenBitset(product_term_str.replace('-', '0')))
-    proc.wait()
-    if proc.returncode != 0:
-        raise subprocess.CalledProcessError(proc.returncode, 'espresso')
-    return retval
+# I've tried several ways to do this, starting with native Python code and later using
+# the program "espresso".  Most recently, I've been using a custom C++ program.
 
 def cnf2dnf_external(cnf_bitsets, simplify=False, parallel=False, stats=None):
 
@@ -322,7 +276,6 @@ def cnf2dnf_checking(cnf_bitsets, parallel=False, stats=None):
 # Which version of cnf2dnf should we use?
 #
 # cnf2dnf          - pure Python version (slow, maybe buggy) - buried back in Git history
-# cnf2dnf_espresso - UC Berkeley espresso (crashes)
 # cnf2dnf_external - my own C++ program
 # cnf2dnf_checking - front end to cnf2dnf_external that reverses and verifies the calculation (can run much slower)
 
@@ -431,16 +384,6 @@ def consolidate_ideals(list_of_ideals):
         consolidated_ideals = [I for I in consolidated_ideals if not ideal < I]
         consolidated_ideals.append(ideal)
     return consolidated_ideals
-
-#
-# Helper functions for the "Pseudo-Solution of Hydrogen" paper
-#
-
-def latex_array(eqns):
-    print("\\begin{array}{r}")
-    for eqn in eqns:
-        print(latex(eqn) + "\\\\")
-    print("\\end{array}\n")
 
 # The "simplifyIdeal" procedure in Singular's primdec.lib (primary decomposition library) checks
 # for equations with simple variable substitutions, but doesn't get all linear relations.
