@@ -739,10 +739,7 @@ def normalize(eqns):
 # index into those lists (instead of passing one of the factors or bitsets) is done to avoid serialization
 # delay in the parallel code.
 
-def stage1and2(system, initial_simplifications, origin, cnf2dnf_debugging=False, parallel=False, stats=None):
-    # If parallel == True, then we're only calling stage1and2 once, so we're verbose
-    # If parallel == False, then we're probably calling it in multiple threads in parallel, so we're not verbose
-    verbose = parallel
+def stage1and2(system, initial_simplifications, origin, cnf2dnf_debugging=False, parallel=False, verbose=False, stats=None):
     if origin == 0:
         stage = 1
     else:
@@ -775,7 +772,7 @@ def stage1and2(system, initial_simplifications, origin, cnf2dnf_debugging=False,
     # global for debugging purposes
     global eqns_factors
     if parallel:
-        eqns_factors = parallel_factor_eqns(eqns)
+        eqns_factors = parallel_factor_eqns(eqns, verbose=verbose)
     else:
         print(time.ctime(), 'system', origin, ': factoring')
         eqns_factors = factor_eqns(eqns)
@@ -879,7 +876,7 @@ def SQL_stage1(eqns, parallel=False):
     # To keep the size of the pickles down, we save the ring as a global since it's referred to constantly.
     save_global(eqns[0].parent())
     stats = Statistics({'identifier' : 0})
-    stage1and2(eqns, tuple(), 0, parallel=parallel, stats=stats)
+    stage1and2(eqns, tuple(), 0, verbose=True, parallel=parallel, stats=stats)
     conn.commit()
     print(stats)
 
