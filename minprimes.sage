@@ -547,6 +547,8 @@ CREATE TABLE staging_stats (
 '''
 
 def delete_database():
+    persistent_data.clear()
+    persistent_data_inverse.clear()
     with conn.cursor() as cursor:
         cursor.execute("DROP OWNED BY current_user")
     conn.commit()
