@@ -531,6 +531,8 @@ CREATE UNIQUE INDEX ON globals(md5(pickle));
 
 CREATE INDEX ON globals(identifier);
 
+-- staging_stats will be ALTERed by the Statistics class if it doesn't have a _time field that corresponds to a statistic
+
 CREATE TABLE staging_stats (
       identifier INTEGER,
       node VARCHAR,
@@ -739,6 +741,92 @@ def normalize(eqns):
 # index into those lists (instead of passing one of the factors or bitsets) is done to avoid serialization
 # delay in the parallel code.
 
+# I'm experimenting with turning these on or off for efficiency
+#
+# We can dump polynomials to the SQL table 'globals' and only store persistent ids in the 'systems' table.
+# This saves disk space because duplicate polynomials are only stored once.
+#
+# We can save tracking information that tracks which systems came from which stage2 systems.
+
+dump_polynomials_to_globals_table = True
+tracking = True
+
+def insert_into_systems(system, simplifications, origin, stats=None):
+    time1 = time.time()
+    if dump_polynomials_to_globals_table:
+        for eqn in system:
+            save_global(eqn)
+        for eqn in simplifications:
+            save_global(eqn)
+    time2 = time.time()
+    if stats:
+        stats['save_global_time'] += time2-time1
+    p = persistent_pickle((system, simplifications))
+    if len(system) == 0:
+        deg = 1
+        npolys = 0
+        nvars = 0
+    else:
+        deg = max(p.degree() for p in system)
+        npolys = len(system)
+        nvars = len(set(v for p in system for v in p.variables()))
+    with conn.cursor() as cursor:
+        if tracking:
+            cursor.execute("""INSERT INTO systems (system, degree, npolys, nvars, num, current_status) VALUES (%s, %s, %s, %s, 1, 'queued')
+                              ON CONFLICT (md5(system)) DO UPDATE SET num = systems.num + 1
+                              RETURNING identifier""",
+                           (p, int(deg), int(npolys), int(nvars)))
+            id = cursor.fetchone()[0]
+            cursor.execute("""INSERT INTO systems_tracking (origin, destination, count) VALUES (%s, %s, 1)
+                              ON CONFLICT (origin, destination) DO UPDATE SET count = systems_tracking.count + 1""",
+                           (origin, id))
+        else:
+            cursor.execute("""INSERT INTO systems (system, degree, npolys, nvars, num, current_status) VALUES (%s, %s, %s, %s, 1, 'queued')
+                              ON CONFLICT (md5(system)) DO UPDATE SET num = systems.num + 1""",
+                           (p, int(deg), int(npolys), int(nvars)))
+    # We don't commit until we're all done this stage2 system (the commit is in SQL_stage3_single_thread)
+    # Not only does this improve efficiency, but it makes the entire processing step for one stage2 system
+    # atomic, which simplifies things.  If the processing step fails or is interrupted, it has to be completely
+    # re-run anyway, so in that case we just rollback the whole transaction.
+    time3 = time.time()
+    if stats:
+        stats['insert_into_systems_time'] += time3-time2
+
+def eliminateZeros(I):
+    # I should be a list or a tuple of polynomials, not an ideal
+    # returns a list of equations after substituting zero for any variables that appear alone in the system
+    simplifications = []
+    for v in I[0].parent().gens():
+        for p in I:
+            if p == 0:
+                pass
+            elif p/p.lc() == v:
+                I = tuple(map(lambda p: p.subs({v: 0}), I))
+                simplifications.append(v)
+    return simplifications + [p for p in I if p != 0]
+
+def polish_system(system, simplifications, origin, stats=None):
+    time1 = time.time()
+    # should we add simplifications to the system before running GTZ on it?
+    minimal_primes = ideal(system + simplifications).minimal_associated_primes()
+    time2 = time.time()
+    if stats:
+        stats['GTZ_time'] += time2-time1
+    with conn.cursor() as cursor:
+        for I in minimal_primes:
+            ss = I.gens()
+            for p in ss:
+                save_global(p)
+            degree = max(p.degree() for p in ss)
+            p = persistent_pickle(sorted(ss))
+            cursor.execute("""INSERT INTO prime_ideals (ideal, degree, num) VALUES (%s, %s, 1)
+                              ON CONFLICT (md5(ideal)) DO UPDATE SET num = prime_ideals.num + 1
+                              RETURNING identifier""",
+                           (p, int(degree)))
+            id = cursor.fetchone()[0]
+            cursor.execute("""INSERT INTO prime_ideals_tracking (origin, destination) VALUES (%s, %s)""",
+                           (origin, id))
+
 def stage1and2(system, initial_simplifications, origin, cnf2dnf_debugging=False, parallel=False, verbose=False, stats=None):
     if origin == 0:
         stage = 1
@@ -751,6 +839,15 @@ def stage1and2(system, initial_simplifications, origin, cnf2dnf_debugging=False,
     if stats:
         stats['simplifyIdeal_time'] += time2 - time1
     print(time.ctime(), 'system', origin, ':', len(s), 'simplifications')
+    if origin != 0 and len(s) == 0:
+        # If origin != 0, then the last thing we did to this system was to factor and cnf2dnf it.
+        # If there are now no simplifications, then it's ready to be "polished" with GTZ
+        # If origin == 0, then fall through and factor it.  Worst thing that can happen is that
+        #    it gets reinserted as system #1 and we come back here with origin == 1
+        print(time.ctime(), 'system', origin, ': polishing')
+        polish_system(system, initial_simplifications, origin, stats=stats)
+        print(time.ctime(), 'system', origin, ': done')
+        return
     # See comment below for why we like to keep things sorted
     # We need simplifications to be a tuple because we're going to pickle it
     global simplifications
@@ -763,8 +860,9 @@ def stage1and2(system, initial_simplifications, origin, cnf2dnf_debugging=False,
         stats['save_global_time'] += time3-time2
     eqns = normalize(dropZeros(eqns))
     if len(eqns) == 0:
-        insert_into_systems(eqns, simplifications, origin, stats=stats)
-        conn.commit()
+        print(time.ctime(), 'system', origin, ': polishing')
+        polish_system(eqns, simplifications, origin, stats=stats)
+        print(time.ctime(), 'system', origin, ': done')
         return
     if any(eqn == 1 for eqn in eqns):
         # the system is inconsistent and needs no further processing
@@ -805,6 +903,9 @@ def stage1and2(system, initial_simplifications, origin, cnf2dnf_debugging=False,
             print("something went wrong with cnf2dnf debugging output")
             raise
         return
+
+    # cnf2dnf records its own timing statistics and prints its own status messages
+    dnf_bitsets = cnf2dnf(cnf_bitsets, parallel=parallel, stats=stats)
 
     # This is a list that matches all_factors, but instead of the polynomial factors, it's
     # a list of the matching PersistentIdTag's.  The tags (short strings that map to the
@@ -855,20 +956,17 @@ def stage1and2(system, initial_simplifications, origin, cnf2dnf_debugging=False,
             persistent_data_inverse[all_factors[i]] = id
             all_factors_tags.append(PersistentIdTag(id))
 
-    # cnf2dnf records its own timing statistics and prints its own status messages
-    bitsets = cnf2dnf(cnf_bitsets, parallel=parallel, stats=stats)
-
     time6 = time.time()
     print(time.ctime(), 'system', origin, ': insert into SQL')
     with conn.cursor() as cursor:
-        for bs in bitsets:
+        for bs in dnf_bitsets:
             t = tuple(all_factors_tags[j] for j in bs)
             system = persistent_pickle((t,simplifications))
             cursor.execute("INSERT INTO staging (system, stage, origin, current_status) VALUES (%s, %s, %s, 'queued')",
                            (system, int(stage), int(origin)))
     time7 = time.time()
     if stats:
-        stats['insert_into_systems_time'] += time7-time6
+        stats['insert_into_staging_time'] += time7-time6
 
     print(time.ctime(), 'system', origin, ': done')
 
@@ -995,57 +1093,6 @@ def SQL_stage2_parallel(max_workers = num_processes):
                               WHERE current_status = 'running' AND node = %s""", (os.uname()[1],))
         conn.commit()
         raise
-
-# I'm experimenting with turning these on or off for efficiency
-#
-# We can dump polynomials to the SQL table 'globals' and only store persistent ids in the 'systems' table.
-# This saves disk space because duplicate polynomials are only stored once.
-#
-# We can save tracking information that tracks which systems came from which stage2 systems.
-
-dump_polynomials_to_globals_table = True
-tracking = True
-
-def insert_into_systems(system, simplifications, origin, stats=None):
-    time1 = time.time()
-    if dump_polynomials_to_globals_table:
-        for eqn in system:
-            save_global(eqn)
-        for eqn in simplifications:
-            save_global(eqn)
-    time2 = time.time()
-    if stats:
-        stats['save_global_time'] += time2-time1
-    p = persistent_pickle((system, simplifications))
-    if len(system) == 0:
-        deg = 1
-        npolys = 0
-        nvars = 0
-    else:
-        deg = max(p.degree() for p in system)
-        npolys = len(system)
-        nvars = len(set(v for p in system for v in p.variables()))
-    with conn.cursor() as cursor:
-        if tracking:
-            cursor.execute("""INSERT INTO systems (system, degree, npolys, nvars, num, current_status) VALUES (%s, %s, %s, %s, 1, 'queued')
-                              ON CONFLICT (md5(system)) DO UPDATE SET num = systems.num + 1
-                              RETURNING identifier""",
-                           (p, int(deg), int(npolys), int(nvars)))
-            id = cursor.fetchone()[0]
-            cursor.execute("""INSERT INTO systems_tracking (origin, destination, count) VALUES (%s, %s, 1)
-                              ON CONFLICT (origin, destination) DO UPDATE SET count = systems_tracking.count + 1""",
-                           (origin, id))
-        else:
-            cursor.execute("""INSERT INTO systems (system, degree, npolys, nvars, num, current_status) VALUES (%s, %s, %s, %s, 1, 'queued')
-                              ON CONFLICT (md5(system)) DO UPDATE SET num = systems.num + 1""",
-                           (p, int(deg), int(npolys), int(nvars)))
-    # We don't commit until we're all done this stage2 system (the commit is in SQL_stage3_single_thread)
-    # Not only does this improve efficiency, but it makes the entire processing step for one stage2 system
-    # atomic, which simplifies things.  If the processing step fails or is interrupted, it has to be completely
-    # re-run anyway, so in that case we just rollback the whole transaction.
-    time3 = time.time()
-    if stats:
-        stats['insert_into_systems_time'] += time3-time2
 
 # Stage 3 is different from stages 1 and 2 because there is no stage 4 per se.  In stage 3, we keep
 # calling stage3() recursively until we've fully simplified the systems.  Selecting which stage to stop
@@ -1183,19 +1230,6 @@ def SQL_stage3_parallel(max_workers = num_processes):
         conn.commit()
         raise
 
-def eliminateZeros(I):
-    # I should be a list or a tuple of polynomials, not an ideal
-    # returns a list of equations after substituting zero for any variables that appear alone in the system
-    simplifications = []
-    for v in I[0].parent().gens():
-        for p in I:
-            if p == 0:
-                pass
-            elif p/p.lc() == v:
-                I = tuple(map(lambda p: p.subs({v: 0}), I))
-                simplifications.append(v)
-    return simplifications + [p for p in I if p != 0]
-
 def GTZ_single_thread(requested_identifier=None):
     while True:
         with conn.cursor() as cursor:
@@ -1304,7 +1338,7 @@ def load_systems():
     with conn.cursor() as cursor:
         cursor.execute("SELECT system FROM systems;")
         for pickled_system in cursor:
-            retval(unpickle(pickled_system[0]))
+            retval.append(unpickle(pickled_system[0]))
     return retval
 
 def list_systems():
@@ -1312,6 +1346,11 @@ def list_systems():
         cursor.execute("SELECT system FROM systems WHERE current_status = 'finished'")
         for sys in cursor:
             print(unpickle(sys[0]))
+
+def list_staging():
+    with conn.cursor() as cursor:
+        cursor.execute("SELECT identifier FROM staging")
+        return tuple(sys[0] for sys in cursor)
 
 def load_prime_ideal(identifier):
     with conn:
