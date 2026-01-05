@@ -711,6 +711,7 @@ def normalize(eqns):
 # We can save tracking information that tracks which systems came from which stage2 systems.
 
 dump_polynomials_to_globals_table = True
+depth_first_processing = True
 tracking = True
 
 def eliminateZeros(I):
@@ -911,17 +912,21 @@ def SQL_stage2(requested_identifier=None, parallel=False):
                                   RETURNING system, identifier""", (os.getpid(), os.uname()[1], int(requested_identifier)) )
                 conn.commit()
             else:
-                cursor.execute("""UPDATE staging
-                                  SET current_status = 'running', pid = %s, node = %s
-                                  WHERE identifier = (
-                                      SELECT identifier
-                                      FROM staging
-                                      WHERE ( current_status = 'queued' OR current_status = 'interrupted' )
-                                      ORDER BY identifier
-                                      LIMIT 1
-                                      FOR UPDATE SKIP LOCKED
-                                      )
-                                  RETURNING system, identifier""", (os.getpid(), os.uname()[1]) )
+                if depth_first_processing:
+                    order='DESC'
+                else:
+                    order='ASC'
+                cursor.execute(f"""UPDATE staging
+                                   SET current_status = 'running', pid = %s, node = %s
+                                   WHERE identifier = (
+                                       SELECT identifier
+                                       FROM staging
+                                       WHERE ( current_status = 'queued' OR current_status = 'interrupted' )
+                                       ORDER BY identifier {order}
+                                       LIMIT 1
+                                       FOR UPDATE SKIP LOCKED
+                                       )
+                                   RETURNING system, identifier""", (os.getpid(), os.uname()[1]) )
                 conn.commit()
             if cursor.rowcount == 0:
                 break
