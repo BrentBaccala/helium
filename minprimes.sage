@@ -163,8 +163,6 @@ postgres_connect()
 #
 # 2. Find simple linear substitutions that allow a variable to be eliminated.
 
-# Parallelized Singular polynomial factorization
-
 def factor_eqns(eqns, verbose=False):
     retval = []
     if verbose:
@@ -180,19 +178,6 @@ def factor_eqns(eqns, verbose=False):
 
 def factor_eqn(eqn):
     return eqn.factor()
-
-def parallel_factor_eqns(eqns):
-    with concurrent.futures.ProcessPoolExecutor(max_workers=num_processes) as executor:
-        futures = [executor.submit(factor_eqn, eqn) for eqn in eqns]
-        pb = ProgressBar(label='factor equations', expected_size=len(eqns))
-        num_completed = 0
-        while num_completed < len(eqns):
-            concurrent.futures.wait(futures, timeout=10)
-            num_completed = tuple(future.done() for future in futures).count(True)
-            pb.show(num_completed)
-    pb.done()
-    print()
-    return tuple(tuple(f for f,m in future.result()) for future in futures)
 
 # After we factor all of the polynomials, we have a system of equations which all have to be zero,
 # and each equation is a product of factors, only one of which needs to be zero to make that
@@ -656,20 +641,6 @@ def unpickle(p, verbose=False):
     conn2.commit()
     return retval
 
-# We use ProcessPool's for parallelization, and need an initializer and a done callback.
-
-def done_callback(future):
-    if future.exception():
-        # I'm not sure what to do here to get a full traceback printed
-        traceback.print_exception(None, future.exception(), None)
-
-def process_pool_initializer():
-    # futures can't share the original SQL connection, so create a new one
-    # We DON'T want to close the existing connection, since it's still being used by the parent process
-    global conn, conn2
-    conn = psycopg2.connect(**postgres_connection_parameters)
-    conn2 = psycopg2.connect(**postgres_connection_parameters)
-
 # Statistics is like a dict, but with the ability to call += on non-existent keys,
 # so we can do things like stats['cnf2dnf_time'] += time6-time5
 #
@@ -700,10 +671,6 @@ def dropZeros(eqns):
 
 def normalize(eqns):
     return tuple(e/e.lc() for e in eqns)
-
-# Creating ProcessPools after all_factors and bitsets have been created (as globals) and passing an integer
-# index into those lists (instead of passing one of the factors or bitsets) is done to avoid serialization
-# delay in the parallel code.
 
 # I'm experimenting with turning these on or off for efficiency
 #
@@ -751,7 +718,7 @@ def polish_system(system, simplifications, origin, stats=None):
             cursor.execute("""INSERT INTO prime_ideals_tracking (origin, destination) VALUES (%s, %s)""",
                            (origin, id))
 
-def processing_stage(system, initial_simplifications, origin, cnf2dnf_debugging=False, parallel=False, verbose=False, stats=None):
+def processing_stage(system, initial_simplifications, origin, cnf2dnf_debugging=False, verbose=False, stats=None):
     if origin == 0:
         stage = 1
     else:
@@ -795,11 +762,8 @@ def processing_stage(system, initial_simplifications, origin, cnf2dnf_debugging=
         return
     # global for debugging purposes
     global eqns_factors
-    if parallel:
-        eqns_factors = parallel_factor_eqns(eqns, verbose=verbose)
-    else:
-        print(time.ctime(), 'system', origin, ': factoring')
-        eqns_factors = factor_eqns(eqns)
+    print(time.ctime(), 'system', origin, ': factoring')
+    eqns_factors = factor_eqns(eqns)
     time4 = time.time()
     if stats:
         stats['factor_time'] += time4-time3
@@ -831,7 +795,7 @@ def processing_stage(system, initial_simplifications, origin, cnf2dnf_debugging=
         return
 
     # cnf2dnf records its own timing statistics and prints its own status messages
-    dnf_bitsets = cnf2dnf(cnf_bitsets, parallel=parallel, stats=stats)
+    dnf_bitsets = cnf2dnf(cnf_bitsets, stats=stats)
 
     # This is a list that matches all_factors, but instead of the polynomial factors, it's
     # a list of the matching PersistentIdTag's.  The tags (short strings that map to the
@@ -842,42 +806,17 @@ def processing_stage(system, initial_simplifications, origin, cnf2dnf_debugging=
         pb = ProgressBar(label='saving factors as SQL globals', expected_size=len(all_factors))
     else:
         print(time.ctime(), 'system', origin, ": saving", len(all_factors), "factors as SQL globals")
-    if parallel:
-        with concurrent.futures.ProcessPoolExecutor(max_workers=num_processes, initializer=process_pool_initializer) as executor:
-            futures = [executor.submit(save_factor_as_global, i) for i in range(len(all_factors))]
-            for future in futures:
-                future.add_done_callback(done_callback)
-            num_completed = 0
-            while num_completed < len(all_factors):
-                concurrent.futures.wait(futures, timeout=1)
-                num_completed = tuple(future.done() for future in futures).count(True)
-                if verbose:
-                    pb.show(num_completed)
-    else:
-        for i in range(len(all_factors)):
-            id = save_factor_as_global(i, stats=stats)
-            all_factors_tags.append(PersistentIdTag(id))
-            if verbose:
-                pb.show(i)
+    for i in range(len(all_factors)):
+        id = save_factor_as_global(i, stats=stats)
+        all_factors_tags.append(PersistentIdTag(id))
+        if verbose:
+            pb.show(i)
     if verbose:
         pb.done()
         print()
     time4a = time.time()
     if stats:
         stats['save_global_time'] += time4a-time4
-
-    # If we're parallelized, we need to get the objects tagged with their persistent ids (they were only
-    # tagged in the ProcessPool subprocesses), and I want to do this without having to transfer their
-    # pickled representations over a process boundary (either the subprocesses or postgres).  It's
-    # precisely for this step that save_global and save_factor_as_global (the function called by the
-    # future) return the persistent id.
-    if parallel:
-        print(time.ctime(), 'system', origin, ': loading persistent ids')
-        for i,future in enumerate(futures):
-            id = future.result()
-            persistent_data[id] = all_factors[i]
-            persistent_data_inverse[all_factors[i]] = id
-            all_factors_tags.append(PersistentIdTag(id))
 
     time6 = time.time()
     print(time.ctime(), 'system', origin, ': insert into SQL')
@@ -893,15 +832,15 @@ def processing_stage(system, initial_simplifications, origin, cnf2dnf_debugging=
 
     print(time.ctime(), 'system', origin, ': done')
 
-def SQL_stage1(eqns, parallel=False):
+def SQL_stage1(eqns):
     # To keep the size of the pickles down, we save the ring as a global since it's referred to constantly.
     save_global(eqns[0].parent())
     stats = Statistics({'identifier' : 0})
-    processing_stage(eqns, tuple(), 0, verbose=True, parallel=parallel, stats=stats)
+    processing_stage(eqns, tuple(), 0, verbose=True, stats=stats)
     conn.commit()
     print(stats)
 
-def SQL_stage2(requested_identifier=None, parallel=False):
+def SQL_stage2(requested_identifier=None):
     with conn.cursor() as cursor:
         while True:
             # This post explains the subquery and the use of "FOR UPDATE SKIP LOCKED"
@@ -949,7 +888,7 @@ def SQL_stage2(requested_identifier=None, parallel=False):
                                     'node' : os.uname()[1],
                                     'unpickle_time' : unpickle_time})
 
-                processing_stage(system, simplifications, identifier, parallel=parallel, stats=stats)
+                processing_stage(system, simplifications, identifier, stats=stats)
 
                 cursor.execute("""UPDATE staging
                                   SET current_status = 'finished'
@@ -985,7 +924,7 @@ def SQL_stage2(requested_identifier=None, parallel=False):
             persistent_data.clear()
             persistent_data_inverse.clear()
 
-def SQL_stage2_debug_cnf2dnf(requested_identifier, parallel=False):
+def SQL_stage2_debug_cnf2dnf(requested_identifier):
     with conn.cursor() as cursor:
         cursor.execute("""SELECT system, identifier FROM staging WHERE identifier = %s""",
                        (int(requested_identifier),))
@@ -998,7 +937,21 @@ def SQL_stage2_debug_cnf2dnf(requested_identifier, parallel=False):
         system, simplifications = unpickle(pickled_system)
         unpickle_time = time.time() - start_time
 
-        processing_stage(system, simplifications, identifier, cnf2dnf_debugging=True, parallel=parallel, stats=None)
+        processing_stage(system, simplifications, identifier, cnf2dnf_debugging=True, stats=None)
+
+# SQL_stage2_parallel uses ProcessPool for parallelization and needs an initializer and a done callback.
+
+def done_callback(future):
+    if future.exception():
+        # I'm not sure what to do here to get a full traceback printed
+        traceback.print_exception(None, future.exception(), None)
+
+def process_pool_initializer():
+    # futures can't share the original SQL connection, so create a new one
+    # We DON'T want to close the existing connection, since it's still being used by the parent process
+    global conn, conn2
+    conn = psycopg2.connect(**postgres_connection_parameters)
+    conn2 = psycopg2.connect(**postgres_connection_parameters)
 
 def SQL_stage2_parallel(max_workers = num_processes):
     try:
