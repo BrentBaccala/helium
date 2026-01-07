@@ -719,7 +719,7 @@ def polish_system(system, simplifications, origin, stats=None):
             cursor.execute("""INSERT INTO prime_ideals_tracking (origin, destination) VALUES (%s, %s)""",
                            (origin, id))
 
-def processing_stage(system, initial_simplifications, origin, cnf2dnf_debugging=False, verbose=False, stats=None):
+def processing_stage(system, initial_simplifications, origin, verbose=False, stats=None):
     if origin == 0:
         stage = 1
     else:
@@ -782,18 +782,6 @@ def processing_stage(system, initial_simplifications, origin, cnf2dnf_debugging=
     # If we aren't debugging, then we won't use cnf_bitsets until we call cnf2dnf further below.
     global bitsets
     cnf_bitsets = [FrozenBitset(tuple(all_factors.index(f) for f in l), capacity=len(all_factors)) for l in eqns_factors]
-    if cnf2dnf_debugging:
-        filename = f"cnf2dnf-id-{origin}.in"
-        print(time.ctime(), 'system', origin, ': dumping', filename)
-        try:
-            with open(filename, "x") as f:
-                for bs in cnf_bitsets:
-                    print(str(bs), file=f)
-            print(time.ctime(), 'system', origin, ': done')
-        except:
-            print("something went wrong with cnf2dnf debugging output")
-            raise
-        return
 
     # cnf2dnf records its own timing statistics and prints its own status messages
     dnf_bitsets = cnf2dnf(cnf_bitsets, stats=stats)
@@ -924,21 +912,6 @@ def SQL_stage2(requested_identifier=None):
             # keep our memory down by clearing our cached polynomials
             persistent_data.clear()
             persistent_data_inverse.clear()
-
-def SQL_stage2_debug_cnf2dnf(requested_identifier):
-    with conn.cursor() as cursor:
-        cursor.execute("""SELECT system, identifier FROM staging WHERE identifier = %s""",
-                       (int(requested_identifier),))
-        conn.commit()
-        if cursor.rowcount == 0:
-            return
-        pickled_system, identifier = cursor.fetchone()
-        start_time = time.time()
-        print(time.ctime(), 'system', identifier, ': unpickling')
-        system, simplifications = unpickle(pickled_system)
-        unpickle_time = time.time() - start_time
-
-        processing_stage(system, simplifications, identifier, cnf2dnf_debugging=True, stats=None)
 
 # SQL_stage2_parallel uses ProcessPool for parallelization and needs an initializer and a done callback.
 
