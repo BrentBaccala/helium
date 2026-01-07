@@ -358,11 +358,12 @@ def test_cnf2dnf(parallel=False):
 
 def consolidate_ideals(list_of_ideals):
     consolidated_ideals = []
-    for ideal in list_of_ideals:
-        if any(I < ideal for I in consolidated_ideals):
+    for next_ideal in list_of_ideals:
+        if any(I < next_ideal for I in consolidated_ideals):
             continue
-        consolidated_ideals = [I for I in consolidated_ideals if not ideal < I]
-        consolidated_ideals.append(ideal)
+        consolidated_ideals = [I for I in consolidated_ideals if not next_ideal < I]
+        # simplify the visual presentation of the ideal by using a reduced Groebner basis
+        consolidated_ideals.append(ideal(next_ideal.groebner_basis()))
     return consolidated_ideals
 
 # The "simplifyIdeal" procedure in Singular's primdec.lib (primary decomposition library) checks
