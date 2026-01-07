@@ -506,6 +506,8 @@ CREATE TABLE staging_stats (
       total_time INTERVAL,
       memory_utilization BIGINT
 );
+
+CREATE INDEX ON staging_stats(identifier);
 '''
 
 def delete_database():
@@ -767,7 +769,9 @@ def processing_stage(system, initial_simplifications, origin, cnf2dnf_debugging=
         # If origin == 0, then fall through and factor it.  Worst thing that can happen is that
         #    it gets reinserted as system #1 and we come back here with origin == 1
         print(time.ctime(), 'system', origin, ': polishing')
+        time2a = time.time()
         polish_system(system, initial_simplifications, origin, stats=stats)
+        stats['polishing_time'] += time2a - time2
         print(time.ctime(), 'system', origin, ': done')
         return
     # See comment below for why we like to keep things sorted
@@ -862,9 +866,6 @@ def processing_stage(system, initial_simplifications, origin, cnf2dnf_debugging=
     if stats:
         stats['save_global_time'] += time4a-time4
 
-    if stats:
-        print(stats)
-
     # If we're parallelized, we need to get the objects tagged with their persistent ids (they were only
     # tagged in the ProcessPool subprocesses), and I want to do this without having to transfer their
     # pickled representations over a process boundary (either the subprocesses or postgres).  It's
@@ -956,6 +957,8 @@ def SQL_stage2(requested_identifier=None, parallel=False):
 
                 stats['total_time'] = time.time() - start_time
                 stats['memory_utilization'] = psutil.Process(os.getpid()).memory_info().rss
+
+                print(stats)
 
                 stats.insert_into_SQL(cursor)
 
