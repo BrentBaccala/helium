@@ -189,13 +189,13 @@ def factor_eqn(eqn):
 # I've tried several ways to do this, starting with native Python code and later using
 # the program "espresso".  Most recently, I've been using a custom C++ program.
 
-def cnf2dnf_external(cnf_bitsets, simplify=False, parallel=False, stats=None):
+def cnf2dnf_external(cnf_bitsets, simplify=False, parallel=False, stats=None, verbose=False):
 
     cmd = ['./cnf2dnf', '-t', str(num_processes if parallel else 1)]
     if simplify:
         cmd.append('-s')
     time1 = time.time()
-    if stats:
+    if verbose:
         print(time.ctime(), f"system {stats['identifier']} : cnf2dnf starting")
     proc = subprocess.Popen(cmd, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=sys.stderr)
     for bs in cnf_bitsets:
@@ -235,15 +235,15 @@ def cnf2dnf_external(cnf_bitsets, simplify=False, parallel=False, stats=None):
 # The C++ cnf2dnf program has exhibited enough bugs that I now perform dualization
 # verification on every cnf2dnf calculation.
 
-def cnf2dnf_checking(cnf_bitsets, parallel=False, stats=None):
+def cnf2dnf_checking(cnf_bitsets, parallel=False, stats=None, verbose=False):
     # it might be a generator, so convert it to a list since we're going to loop over it twice
     cnf_bitsets = list(cnf_bitsets)
-    retval = cnf2dnf_external(cnf_bitsets, parallel=parallel, stats=stats)
+    retval = cnf2dnf_external(cnf_bitsets, parallel=parallel, stats=stats, verbose=verbose)
     time1 = time.time()
-    if stats:
+    if verbose:
         print(time.ctime(), f"system {stats['identifier']} : cnf2dnf verifying")
-    simplified = cnf2dnf_external(cnf_bitsets, simplify=True, parallel=parallel, stats=None)
-    verification = cnf2dnf_external(retval, parallel=parallel, stats=None)
+    simplified = cnf2dnf_external(cnf_bitsets, simplify=True, parallel=parallel, stats=None, verbose=False)
+    verification = cnf2dnf_external(retval, parallel=parallel, stats=None, verbose=False)
     time2 = time.time()
     if stats:
         stats['cnf2dnf_verification_time'] += time2-time1
@@ -737,23 +737,23 @@ def initial_processing_stage(system, initial_simplifications, origin, verbose=Fa
         stage = 1
     else:
         stage = 2
-    print(time.ctime(), 'system', origin, ': simplifyIdeal')
+    if verbose: print(time.ctime(), 'system', origin, ': simplifyIdeal')
     time1 = time.time()
     eqns,s = simplifyIdeal(list(system))
     time2 = time.time()
     if stats:
         stats['simplifyIdeal_time'] += time2 - time1
-    print(time.ctime(), 'system', origin, ':', len(s), 'simplifications')
+    if verbose: print(time.ctime(), 'system', origin, ':', len(s), 'simplifications')
     if origin != 0 and len(s) == 0:
         # If origin != 0, then the last thing we did to this system was to factor and cnf2dnf it.
         # If there are now no simplifications, then it's ready to be "polished" with GTZ
         # If origin == 0, then fall through and factor it.  Worst thing that can happen is that
         #    it gets reinserted as system #1 and we come back here with origin == 1
-        print(time.ctime(), 'system', origin, ': polishing')
-        time2a = time.time()
+        if verbose: print(time.ctime(), 'system', origin, ': polishing')
         polish_system(system, initial_simplifications, origin, stats=stats)
+        time2a = time.time()
         stats['polishing_time'] += time2a - time2
-        print(time.ctime(), 'system', origin, ': done')
+        if verbose: print(time.ctime(), 'system', origin, ': done')
         return (None, None)
     # See comment below for why we like to keep things sorted
     # We need simplifications to be a tuple because we're going to pickle it
@@ -767,16 +767,18 @@ def initial_processing_stage(system, initial_simplifications, origin, verbose=Fa
         stats['save_global_time'] += time3-time2
     eqns = normalize(dropZeros(eqns))
     if len(eqns) == 0:
-        print(time.ctime(), 'system', origin, ': polishing')
+        if verbose: print(time.ctime(), 'system', origin, ': polishing')
         polish_system(eqns, simplifications, origin, stats=stats)
-        print(time.ctime(), 'system', origin, ': done')
+        time3a = time.time()
+        stats['polishing_time'] += time3a - time3
+        if verbose: print(time.ctime(), 'system', origin, ': done')
         return (None, None)
     if any(eqn == 1 for eqn in eqns):
         # the system is inconsistent and needs no further processing
         return (None, None)
     # global for debugging purposes
     global eqns_factors
-    print(time.ctime(), 'system', origin, ': factoring')
+    if verbose: print(time.ctime(), 'system', origin, ': factoring')
     eqns_factors = factor_eqns(eqns)
     time4 = time.time()
     if stats:
@@ -797,11 +799,11 @@ def initial_processing_stage(system, initial_simplifications, origin, verbose=Fa
     cnf_bitsets = [FrozenBitset(tuple(all_factors.index(f) for f in l), capacity=len(all_factors)) for l in eqns_factors]
 
     # cnf2dnf records its own timing statistics and prints its own status messages
-    dnf_bitsets = cnf2dnf(cnf_bitsets, stats=stats)
+    dnf_bitsets = cnf2dnf(cnf_bitsets, stats=stats, verbose=verbose)
 
     return (simplifications, tuple(tuple(all_factors[j] for j in bs) for bs in dnf_bitsets))
 
-def dump_to_SQL(eqns, simplifications, origin, stats=None):
+def dump_to_SQL(eqns, simplifications, origin, stats=None, verbose=False):
     # This is a list that matches all_factors, but the polynomials are tagged. The tags
     # (short strings that map to the polynomials) will be used to form the pickled objects
     # that are saved to SQL.
@@ -820,7 +822,7 @@ def dump_to_SQL(eqns, simplifications, origin, stats=None):
         stats['save_global_time'] += time5-time4
 
     time6 = time.time()
-    print(time.ctime(), 'system', origin, ': insert into SQL')
+    if verbose: print(time.ctime(), 'system', origin, ': insert into SQL')
     with conn.cursor() as cursor:
         system = persistent_pickle((tuple(eqns_tagged), tuple(simplifications_tagged)))
         cursor.execute("INSERT INTO staging (system, origin, current_status) VALUES (%s, %s, 'queued')",
@@ -846,7 +848,7 @@ def processing_stage(system, initial_simplifications, origin, start_time=None, v
             # origin 0 is special because it won't polish in initial_processing_stage; instead, it'll loop forever
             # If we've been processing this stage for more than stage_processing_time seconds, dump to SQL
             if origin == 0 or elapsed_time > stage_processing_time:
-                dump_to_SQL(subsystem, simplifications, origin, stats=stats)
+                dump_to_SQL(subsystem, simplifications, origin, stats=stats, verbose=verbose)
             else:
                 processing_stage(subsystem, simplifications, origin, start_time=start_time, verbose=verbose, stats=stats)
 
@@ -858,7 +860,7 @@ def SQL_stage1(eqns):
     conn.commit()
     print(stats)
 
-def SQL_stage2(requested_identifier=None):
+def SQL_stage2(requested_identifier=None, verbose=False):
     with conn.cursor() as cursor:
         while True:
             # This post explains the subquery and the use of "FOR UPDATE SKIP LOCKED"
@@ -891,8 +893,8 @@ def SQL_stage2(requested_identifier=None):
             pickled_system, identifier = cursor.fetchone()
             try:
                 start_time = time.time()
-                print(time.ctime(), 'system', identifier, ': unpickling')
-                system, simplifications = unpickle(pickled_system, verbose=True)
+                if verbose: print(time.ctime(), 'system', identifier, ': unpickling')
+                system, simplifications = unpickle(pickled_system, verbose=verbose)
                 unpickle_time = time.time() - start_time
 
                 # The keys in stats (a fancy dictionary) must match column names in the 'staging_stats' SQL table,
