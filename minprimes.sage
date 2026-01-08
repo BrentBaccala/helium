@@ -965,11 +965,11 @@ def list_staging():
         cursor.execute("SELECT identifier FROM staging")
         return tuple(sys[0] for sys in cursor)
 
-def load_stage1(identifier):
+def load_stage1(identifier, verbose=False):
     with conn:
         with conn.cursor() as cursor:
             cursor.execute("SELECT system FROM staging WHERE identifier = %s", (int(identifier),))
-            return unpickle(cursor.fetchone()[0])
+            return unpickle(cursor.fetchone()[0], verbose=verbose)
 
 def SQL_stage2_reset():
     # this will delete everything except the results of running the first pass
