@@ -682,10 +682,13 @@ def normalize(eqns):
 # This saves disk space because duplicate polynomials are only stored once.
 #
 # We can save tracking information that tracks which systems came from which stage2 systems.
+#
+# Once a stage hits stage_processing_time, we let it finish its current calculation, then dump it to SQL
 
 dump_polynomials_to_globals_table = True
 depth_first_processing = True
 tracking = True
+stage_processing_time = 60
 
 def eliminateZeros(I):
     # I should be a list or a tuple of polynomials, not an ideal
@@ -722,7 +725,7 @@ def polish_system(system, simplifications, origin, stats=None):
             cursor.execute("""INSERT INTO prime_ideals_tracking (origin, destination) VALUES (%s, %s)""",
                            (origin, id))
 
-def processing_stage(system, initial_simplifications, origin, verbose=False, stats=None):
+def initial_processing_stage(system, initial_simplifications, origin, verbose=False, stats=None):
     if origin == 0:
         stage = 1
     else:
@@ -744,7 +747,7 @@ def processing_stage(system, initial_simplifications, origin, verbose=False, sta
         polish_system(system, initial_simplifications, origin, stats=stats)
         stats['polishing_time'] += time2a - time2
         print(time.ctime(), 'system', origin, ': done')
-        return
+        return (None, None)
     # See comment below for why we like to keep things sorted
     # We need simplifications to be a tuple because we're going to pickle it
     global simplifications
@@ -760,10 +763,10 @@ def processing_stage(system, initial_simplifications, origin, verbose=False, sta
         print(time.ctime(), 'system', origin, ': polishing')
         polish_system(eqns, simplifications, origin, stats=stats)
         print(time.ctime(), 'system', origin, ': done')
-        return
+        return (None, None)
     if any(eqn == 1 for eqn in eqns):
         # the system is inconsistent and needs no further processing
-        return
+        return (None, None)
     # global for debugging purposes
     global eqns_factors
     print(time.ctime(), 'system', origin, ': factoring')
@@ -789,46 +792,62 @@ def processing_stage(system, initial_simplifications, origin, verbose=False, sta
     # cnf2dnf records its own timing statistics and prints its own status messages
     dnf_bitsets = cnf2dnf(cnf_bitsets, stats=stats)
 
+    return (simplifications, tuple(tuple(all_factors[j] for j in bs) for bs in dnf_bitsets))
+
+def dump_to_SQL(eqns, simplifications, origin, stats=None):
     # This is a list that matches all_factors, but the polynomials are tagged. The tags
     # (short strings that map to the polynomials) will be used to form the pickled objects
     # that are saved to SQL.
-    all_factors_tagged = []
+    eqns_tagged = []
+    simplifications_tagged = []
 
-    if verbose:
-        pb = ProgressBar(label='saving factors as SQL globals', expected_size=len(all_factors))
-    else:
-        print(time.ctime(), 'system', origin, ": saving", len(all_factors), "factors as SQL globals")
-    for i in range(len(all_factors)):
-        tagged_factor = save_global(all_factors[i], stats=stats)
-        all_factors_tagged.append(tagged_factor)
-        if verbose:
-            pb.show(i)
-    if verbose:
-        pb.done()
-        print()
-    time4a = time.time()
+    time4 = time.time()
+    for eqn in eqns:
+        tagged_eqn = save_global(eqn, stats=stats)
+        eqns_tagged.append(tagged_eqn)
+    for eqn in simplifications:
+        tagged_eqn = save_global(eqn, stats=stats)
+        simplifications_tagged.append(tagged_eqn)
+    time5 = time.time()
     if stats:
-        stats['save_global_time'] += time4a-time4
+        stats['save_global_time'] += time5-time4
 
     time6 = time.time()
     print(time.ctime(), 'system', origin, ': insert into SQL')
     with conn.cursor() as cursor:
-        for bs in dnf_bitsets:
-            t = tuple(all_factors_tagged[j] for j in bs)
-            system = persistent_pickle((t,simplifications))
-            cursor.execute("INSERT INTO staging (system, stage, origin, current_status) VALUES (%s, %s, %s, 'queued')",
-                           (system, int(stage), int(origin)))
+        system = persistent_pickle((tuple(eqns_tagged), tuple(simplifications_tagged)))
+        cursor.execute("INSERT INTO staging (system, origin, current_status) VALUES (%s, %s, 'queued')",
+                       (system, int(origin)))
     time7 = time.time()
     if stats:
         stats['insert_into_staging_time'] += time7-time6
 
-    print(time.ctime(), 'system', origin, ': done')
+# To avoid the situation where we're running short processing stages and spending most of our time
+# dumping the results to SQL, we recurse on our results if we've spent less than stage_processing_time
+# seconds on this processing stage.  Once a stage hits stage_processing_time seconds, then we wait for
+# the current stage to finish (i.e, we don't kill it), but then everything else gets dumped to SQL.
+# Of course, the remaining stages might run very quickly, but we don't know that, unless
+# we're willing to start them running and then kill them, which we currently don't do.
+
+def processing_stage(system, initial_simplifications, origin, start_time=None, verbose=False, stats=None):
+    if not start_time:
+        start_time = time.time()
+    simplifications, subsystems = initial_processing_stage(system, initial_simplifications, origin, verbose=verbose, stats=stats)
+    elapsed_time = time.time() - start_time
+    if subsystems:
+        for subsystem in subsystems:
+            # origin 0 is special because it won't polish in initial_processing_stage; instead, it'll loop forever
+            # If we've been processing this stage for more than stage_processing_time seconds, dump to SQL
+            if origin == 0 or elapsed_time > stage_processing_time:
+                dump_to_SQL(subsystem, simplifications, origin, stats=stats)
+            else:
+                processing_stage(subsystem, simplifications, origin, start_time=start_time, verbose=verbose, stats=stats)
 
 def SQL_stage1(eqns):
     # To keep the size of the pickles down, we save the ring as a global since it's referred to constantly.
     save_global(eqns[0].parent())
     stats = Statistics({'identifier' : 0})
-    processing_stage(eqns, tuple(), 0, verbose=True, stats=stats)
+    processing_stage(eqns, tuple(), int(0), verbose=True, stats=stats)
     conn.commit()
     print(stats)
 
