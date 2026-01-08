@@ -573,14 +573,6 @@ def load_globals():
                 persistent_data[str(id)] = obj
                 persistent_data_inverse[obj] = str(id)
 
-# "persistent_data_inverse[obj]" can take a long time (on the order of ten seconds) if obj
-# is a large polynomial (it's the hash that takes so long), so we used tags in place
-# of the polynomials where we can.
-
-class PersistentIdTag:
-    def __init__(self, tag):
-        self.tag = tag
-
 # Note that no attempt is made to save objects that aren't already in the persistent data tables.
 # If you want something saved into the globals table, you have to call save_global() explicitly.
 
@@ -589,8 +581,6 @@ def persistent_id(obj):
     #    See https://stackoverflow.com/a/3460725/1493790
     # The stackoverflow suggestion (try/except) is quite slow
     if isinstance(obj, GlobalWithTag):
-        return obj.tag
-    if isinstance(obj, PersistentIdTag):
         return obj.tag
     if isinstance(obj, sage.rings.ring.Ring) or isinstance(obj, sage.rings.polynomial.multi_polynomial.MPolynomial):
         return persistent_data_inverse.get(obj, None)
