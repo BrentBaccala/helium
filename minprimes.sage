@@ -528,9 +528,23 @@ def create_database():
 persistent_data = {}
 persistent_data_inverse = {}
 
+# GlobalWithTag is a wrapper around an object (a polynomial) with an associated tag.
+# The tag is going to be a numeric string that matches 'identifier' in the SQL `globals` table.
+
+class GlobalWithTag:
+    def __init__(self, obj, tag):
+        self.obj = obj
+        self.tag = tag
+
+    def __getattr__(self, name):
+        # Delegate to the wrapped object
+        return getattr(self.obj, name)
+
+# Saves the object (a polynomial) to the SQL `globals` table and returns it wrapped in a GlobalWithTag
+
 def save_global(obj, stats=None):
     if obj in persistent_data_inverse:
-        return persistent_data_inverse[obj]
+        return GlobalWithTag(obj, persistent_data_inverse[obj])
     p = persistent_pickle(obj)
     # See this stackoverflow post: https://stackoverflow.com/questions/34708509/how-to-use-returning-with-on-conflict-in-postgresql
     # for issues with the simple "ON CONFLICT DO NOTHING RETURNING identifier"
@@ -545,7 +559,7 @@ def save_global(obj, stats=None):
     time2 = time.time()
     if stats:
         stats['save_global_sql_time'] += time2-time1
-    return str(id)
+    return GlobalWithTag(obj, str(id))
 
 # This routine isn't called anywhere (it's just for debugging) because the globals table is large
 # and we don't want to load the whole thing into memory.  But this is the idea.
@@ -555,7 +569,7 @@ def load_globals():
         with conn2.cursor() as cursor:
             cursor.execute("SELECT identifier, pickle FROM globals")
             for id, p in cursor:
-                obj = pickle.loads(p)
+                obj = GlobalWithTag(pickle.loads(p), str(id))
                 persistent_data[str(id)] = obj
                 persistent_data_inverse[obj] = str(id)
 
@@ -574,6 +588,8 @@ def persistent_id(obj):
     # It's hard to tell if an arbitrary Python object is hashable
     #    See https://stackoverflow.com/a/3460725/1493790
     # The stackoverflow suggestion (try/except) is quite slow
+    if isinstance(obj, GlobalWithTag):
+        return obj.tag
     if isinstance(obj, PersistentIdTag):
         return obj.tag
     if isinstance(obj, sage.rings.ring.Ring) or isinstance(obj, sage.rings.polynomial.multi_polynomial.MPolynomial):
@@ -663,9 +679,6 @@ class Statistics(dict):
                 self[k] = datetime.timedelta(seconds = int(self[k]))
                 cursor.execute(f"ALTER TABLE staging_stats ADD COLUMN IF NOT EXISTS {k} INTERVAL")
         cursor.execute(f"INSERT INTO staging_stats ({','.join(self.keys())}) VALUES %s", (tuple(self.values()),))
-
-def save_factor_as_global(i, stats=None):
-    return save_global(all_factors[i], stats=stats)
 
 def dropZeros(eqns):
     return tuple(e for e in eqns if e != 0)
@@ -786,18 +799,18 @@ def processing_stage(system, initial_simplifications, origin, verbose=False, sta
     # cnf2dnf records its own timing statistics and prints its own status messages
     dnf_bitsets = cnf2dnf(cnf_bitsets, stats=stats)
 
-    # This is a list that matches all_factors, but instead of the polynomial factors, it's
-    # a list of the matching PersistentIdTag's.  The tags (short strings that map to the
-    # polynomials) will be used to form the pickled objects that are saved to SQL.
-    all_factors_tags = []
+    # This is a list that matches all_factors, but the polynomials are tagged. The tags
+    # (short strings that map to the polynomials) will be used to form the pickled objects
+    # that are saved to SQL.
+    all_factors_tagged = []
 
     if verbose:
         pb = ProgressBar(label='saving factors as SQL globals', expected_size=len(all_factors))
     else:
         print(time.ctime(), 'system', origin, ": saving", len(all_factors), "factors as SQL globals")
     for i in range(len(all_factors)):
-        id = save_factor_as_global(i, stats=stats)
-        all_factors_tags.append(PersistentIdTag(id))
+        tagged_factor = save_global(all_factors[i], stats=stats)
+        all_factors_tagged.append(tagged_factor)
         if verbose:
             pb.show(i)
     if verbose:
@@ -811,7 +824,7 @@ def processing_stage(system, initial_simplifications, origin, verbose=False, sta
     print(time.ctime(), 'system', origin, ': insert into SQL')
     with conn.cursor() as cursor:
         for bs in dnf_bitsets:
-            t = tuple(all_factors_tags[j] for j in bs)
+            t = tuple(all_factors_tagged[j] for j in bs)
             system = persistent_pickle((t,simplifications))
             cursor.execute("INSERT INTO staging (system, stage, origin, current_status) VALUES (%s, %s, %s, 'queued')",
                            (system, int(stage), int(origin)))
