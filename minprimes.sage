@@ -717,10 +717,17 @@ def polish_system(system, simplifications, origin, stats=None):
                 save_global(p)
             degree = max(p.degree() for p in ss)
             p = persistent_pickle(sorted(ss))
+            # This version creates deadlocks after I introduced the code that runs
+            # a bunch of processing stages until stage_processing_time is reached
+            #
+            #cursor.execute("""INSERT INTO prime_ideals (ideal, degree, num) VALUES (%s, %s, 1)
+            #                  ON CONFLICT (md5(ideal)) DO UPDATE SET num = prime_ideals.num + 1
+            #                  RETURNING identifier""",
+            #               (p, int(degree)))
             cursor.execute("""INSERT INTO prime_ideals (ideal, degree, num) VALUES (%s, %s, 1)
-                              ON CONFLICT (md5(ideal)) DO UPDATE SET num = prime_ideals.num + 1
-                              RETURNING identifier""",
+                              ON CONFLICT (md5(ideal)) DO NOTHING""",
                            (p, int(degree)))
+            cursor.execute("SELECT identifier FROM prime_ideals WHERE ideal = %s", (p,))
             id = cursor.fetchone()[0]
             cursor.execute("""INSERT INTO prime_ideals_tracking (origin, destination) VALUES (%s, %s)""",
                            (origin, id))
