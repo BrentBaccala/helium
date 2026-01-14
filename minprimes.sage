@@ -982,6 +982,26 @@ def SQL_stage2_parallel(max_workers = num_processes):
         conn.commit()
         raise
 
+# Here's how I manually loaded an ideal into prime_ideals:
+#
+# ideals = load_prime_ideals()
+# ideals[0].parent().ring().inject_variables()
+# bwb = (d0,d1,d2,m0,m1,m2,n0,n1,n2)
+# p = persistent_pickle(sorted(bwb))
+# cursor=conn.cursor()
+# cursor.execute("INSERT INTO prime_ideals (ideal, degree, num) VALUES (%s,1,1)", (p,))
+# cursor.execute("SELECT identifier FROM prime_ideals WHERE ideal = %s", (p,))
+# cursor.rowcount
+# bwb = cursor.fetchone()
+
+def load_prime_ideal(identifier):
+    retval = []
+    with conn.cursor() as cursor:
+        cursor.execute("SELECT ideal FROM prime_ideals WHERE identifier = %s", (int(identifier),))
+        for sys in cursor:
+            retval.append(ideal(unpickle(sys[0])))
+    return retval[0] if retval else None
+
 def load_prime_ideals():
     retval = []
     with conn.cursor() as cursor:
