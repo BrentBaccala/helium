@@ -436,7 +436,8 @@ CREATE TABLE prime_ideals (
       identifier INTEGER GENERATED ALWAYS AS IDENTITY,
       ideal BYTEA,                -- a pickle of a list of polynomials
       degree INTEGER,             -- the maximum degree of the polynomials in the ideal
-      num INTEGER                 -- how many 'staging' systems generated this prime ideal
+      num INTEGER,                -- how many 'staging' systems generated this prime ideal
+      simplified BOOLEAN          -- has this ideal been a subset of another one?
 );
 
 CREATE UNIQUE INDEX ON prime_ideals(md5(ideal));
@@ -984,10 +985,38 @@ def SQL_stage2_parallel(max_workers = num_processes):
 def load_prime_ideals():
     retval = []
     with conn.cursor() as cursor:
-        cursor.execute("SELECT ideal FROM prime_ideals")
+        cursor.execute("SELECT ideal FROM prime_ideals WHERE simplified IS NOT TRUE")
         for sys in cursor:
             retval.append(ideal(unpickle(sys[0])))
     return retval
+
+def simplify_ideals():
+    ideals = load_prime_ideals()
+    for I in ideals:
+        if any(I < any_ideal for any_ideal in ideals):
+            # flag I as simplified
+            p = persistent_pickle(I.gens())
+            with conn.cursor() as cursor:
+                cursor.execute("UPDATE prime_ideals SET simplified = TRUE WHERE ideal = %s", (p,))
+                print(f"{cursor.rowcount} rows updated")
+
+def simplify_ideals_2():
+    ideals = []
+    with conn.cursor() as cursor:
+        cursor.execute("SELECT identifier, ideal FROM prime_ideals")
+        for sys in cursor:
+            ideals.append((sys[0], sys[1], ideal(unpickle(sys[1]))))
+    for identifier,pickle,I in ideals:
+        if any(I < any_ideal for _,_,any_ideal in ideals):
+            # flag I as simplified
+            p = persistent_pickle(sorted(I.gens()))
+            #print(p)
+            #print(bytes(pickle))
+            with conn.cursor() as cursor:
+                #cursor.execute("UPDATE prime_ideals SET simplified = TRUE WHERE ideal = %s", (p,))
+                cursor.execute("UPDATE prime_ideals SET simplified = TRUE WHERE identifier = %s", (identifier,))
+                print(f"{cursor.rowcount} rows updated")
+    conn.commit()
 
 # Various utility functions for debugging the SQL database from the command line
 
