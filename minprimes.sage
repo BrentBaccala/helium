@@ -988,12 +988,13 @@ def SQL_stage2_parallel(max_workers = num_processes):
 # ideals = load_prime_ideals()
 # ideals[0].parent().ring().inject_variables()
 # bwb = (d0,d1,d2,m0,m1,m2,n0,n1,n2)
+# bwb = (v12, v11, v10, v9, v8, v7, v6, v5, v4, v3, v2, v1, v0)
 # p = persistent_pickle(sorted(bwb))
 # cursor=conn.cursor()
 # cursor.execute("INSERT INTO prime_ideals (ideal, degree, num) VALUES (%s,1,1)", (p,))
 # cursor.execute("SELECT identifier FROM prime_ideals WHERE ideal = %s", (p,))
 # cursor.rowcount
-# bwb = cursor.fetchone()
+# cursor.fetchone()
 
 def load_prime_ideal(identifier):
     retval = []
@@ -1010,6 +1011,15 @@ def load_prime_ideals():
         for sys in cursor:
             retval.append(ideal(unpickle(sys[0])))
     return retval
+
+# For the helium problem, I expect the solution to involve the energy E.  Hydrogen's solution
+# involves E, and it's hard to imagine how we'd have a ground state solution that doesn't
+# involve E.  If I'm looking at it while it's running, I use this function to show any
+# candidate solutions.
+
+def check_prime_ideals():
+    ideals = load_prime_ideals()
+    return [I for I in ideals if 'E' in str(tuple(I.gens()))]
 
 def simplify_ideals():
     ideals = load_prime_ideals()
