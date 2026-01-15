@@ -359,6 +359,7 @@ def test_cnf2dnf(parallel=False):
 def consolidate_ideals(list_of_ideals):
     consolidated_ideals = []
     for next_ideal in list_of_ideals:
+        # I < next_ideal  ===>  V(I) > V(next_ideal)
         if any(I < next_ideal for I in consolidated_ideals):
             continue
         consolidated_ideals = [I for I in consolidated_ideals if not next_ideal < I]
@@ -1013,7 +1014,8 @@ def load_prime_ideals():
 def simplify_ideals():
     ideals = load_prime_ideals()
     for I in ideals:
-        if any(I < any_ideal for any_ideal in ideals):
+        # I > any_ideal  ===>  V(I) < V(any_ideal)
+        if any(I > any_ideal for any_ideal in ideals):
             # flag I as simplified
             p = persistent_pickle(I.gens())
             with conn.cursor() as cursor:
@@ -1023,13 +1025,14 @@ def simplify_ideals():
 def simplify_ideals_2():
     ideals = []
     with conn.cursor() as cursor:
-        cursor.execute("SELECT identifier, ideal FROM prime_ideals")
+        cursor.execute("SELECT identifier, ideal FROM prime_ideals WHERE simplified IS NOT TRUE")
         for sys in cursor:
             ideals.append((sys[0], sys[1], ideal(unpickle(sys[1]))))
     for identifier,pickle,I in ideals:
-        if any(I < any_ideal for _,_,any_ideal in ideals):
+        # I > any_ideal  ===>  V(I) < V(any_ideal)
+        if any(I > any_ideal for _,_,any_ideal in ideals):
             # flag I as simplified
-            p = persistent_pickle(sorted(I.gens()))
+            #p = persistent_pickle(sorted(I.gens()))
             #print(p)
             #print(bytes(pickle))
             with conn.cursor() as cursor:
