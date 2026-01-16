@@ -685,12 +685,21 @@ def normalize(eqns):
 #
 # We can save tracking information that tracks which systems came from which stage2 systems.
 #
-# Once a stage hits stage_processing_time, we let it finish its current calculation, then dump it to SQL
+# Once a stage hits stage_processing_time, we let it finish its current calculation, then dump it to SQL.
+# Setting stage_processing_time to zero forces all stages to be dumped to SQL.
 
 dump_polynomials_to_globals_table = True
 depth_first_processing = True
 tracking = True
 stage_processing_time = 60
+
+# For Schrodinger equation calculations, we expect the energy to be involved in any physically
+# realistic solution.  Therefore, we can prune the search tree when we simplify to systems that
+# don't involve energy.  This can lead to faulty results, though.  For example, if (v0,v1,v2,v3)
+# is a solution, it will get discarded because it doesn't involve E, but (E,v0,v1,v2,v3) will
+# stay.  My current belief is that pruning the tree is more important for performance.
+
+discard_systems_without_energy = True
 
 def eliminateZeros(I):
     # I should be a list or a tuple of polynomials, not an ideal
@@ -708,13 +717,18 @@ def eliminateZeros(I):
 def polish_system(system, simplifications, origin, stats=None):
     time1 = time.time()
     # should we add simplifications to the system before running GTZ on it?
-    minimal_primes = ideal(system + simplifications).minimal_associated_primes()
+    I = ideal(system + simplifications)
+    minimal_primes = I.minimal_associated_primes()
     time2 = time.time()
     if stats:
         stats['GTZ_time'] += time2-time1
+    ring = I.ring()
+    E = ring('E')
     with conn.cursor() as cursor:
         for I in minimal_primes:
             ss = I.gens()
+            if discard_systems_without_energy and not any(E in p.variables() for p in ss):
+                continue
             for p in ss:
                 save_global(p)
             degree = max(p.degree() for p in ss)
@@ -733,6 +747,11 @@ def polish_system(system, simplifications, origin, stats=None):
             id = cursor.fetchone()[0]
             cursor.execute("""INSERT INTO prime_ideals_tracking (origin, destination) VALUES (%s, %s)""",
                            (origin, id))
+
+# initial_processing_stage
+#
+# returns a tuple of all of the simplifications that have been applied and the systems;
+# the systems are a tuple of tuples of irreducible polynomials
 
 def initial_processing_stage(system, initial_simplifications, origin, verbose=False, stats=None):
     if origin == 0:
@@ -803,7 +822,20 @@ def initial_processing_stage(system, initial_simplifications, origin, verbose=Fa
     # cnf2dnf records its own timing statistics and prints its own status messages
     dnf_bitsets = cnf2dnf(cnf_bitsets, stats=stats, verbose=verbose)
 
-    return (simplifications, tuple(tuple(all_factors[j] for j in bs) for bs in dnf_bitsets))
+    # now we've got set of systems of polynomials, all polynomials irreducible
+    # discard systems if there is no energy dependency in either the simplifications or the systems (considered individually)
+    # what about if E is in simplifications?  then leave everything alone
+
+    ring = all_factors[0].parent()
+    E = ring('E')
+
+    do_discard = discard_systems_without_energy and not any(E in poly.variables() for poly in simplifications)
+    if do_discard:
+        systems = tuple(tuple(all_factors[j] for j in bs) for bs in dnf_bitsets if any(E in all_factors[j].variables() for j in bs))
+    else:
+        systems = tuple(tuple(all_factors[j] for j in bs) for bs in dnf_bitsets)
+
+    return (simplifications, systems)
 
 def dump_to_SQL(eqns, simplifications, origin, stats=None, verbose=False):
     # This is a list that matches all_factors, but the polynomials are tagged. The tags
