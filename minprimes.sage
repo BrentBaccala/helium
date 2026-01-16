@@ -1036,12 +1036,15 @@ def load_prime_ideal(identifier):
             retval.append(ideal(unpickle(sys[0])))
     return retval[0] if retval else None
 
-def load_prime_ideals():
+def load_prime_ideals(tagged=False):
     retval = []
     with conn.cursor() as cursor:
-        cursor.execute("SELECT ideal FROM prime_ideals WHERE simplified IS NOT TRUE")
+        cursor.execute("SELECT identifier, ideal FROM prime_ideals WHERE simplified IS NOT TRUE")
         for sys in cursor:
-            retval.append(ideal(unpickle(sys[0])))
+            if tagged:
+                retval.append((sys[0], ideal(unpickle(sys[1]))))
+            else:
+                retval.append(ideal(unpickle(sys[1])))
     return retval
 
 # For the helium problem, I expect the solution to involve the energy E.  Hydrogen's solution
