@@ -660,7 +660,7 @@ class Statistics(dict):
         self['START'] = time.time()
         self['LAST'] = self['START']
     def __getitem__(self, key):
-        return self.setdefault(key, 0)
+        return self.setdefault(key, int(0))
     def timestamp(self, name):
         ts = time.time()
         self[name + '_time'] += ts - self['LAST']
@@ -674,6 +674,8 @@ class Statistics(dict):
             if k.endswith('_time'):
                 self[k] = datetime.timedelta(seconds = float(self[k]))
                 cursor.execute(f"ALTER TABLE staging_stats ADD COLUMN IF NOT EXISTS {k} INTERVAL")
+            elif k not in ('identifier', 'node', 'pid', 'memory_utilization'):
+                cursor.execute(f"ALTER TABLE staging_stats ADD COLUMN IF NOT EXISTS {k} INTEGER")
         cursor.execute(f"INSERT INTO staging_stats ({','.join(self.keys())}) VALUES %s", (tuple(self.values()),))
         # this next one will only print on the console; it won't appear in the SQL stats
         self['insert_into_staging_stats_time'] += time.time() - ts
@@ -722,6 +724,8 @@ def eliminateZeros(I):
 
 def polish_system(system, simplifications, origin, stats=None):
     # should we add simplifications to the system before running GTZ on it?
+    if stats:
+        stats['polished_systems'] += int(1)
     I = ideal(system + simplifications)
     minimal_primes = I.minimal_associated_primes()
     if stats:
@@ -762,10 +766,6 @@ def polish_system(system, simplifications, origin, stats=None):
 # the systems are a tuple of tuples of irreducible polynomials
 
 def initial_processing_stage(system, initial_simplifications, origin, verbose=False, stats=None):
-    if origin == 0:
-        stage = 1
-    else:
-        stage = 2
     if verbose: print(time.ctime(), 'system', origin, ': simplifyIdeal')
     eqns,s = simplifyIdeal(list(system))
     if stats:
@@ -780,10 +780,7 @@ def initial_processing_stage(system, initial_simplifications, origin, verbose=Fa
         polish_system(system, initial_simplifications, origin, stats=stats)
         if verbose: print(time.ctime(), 'system', origin, ': done')
         return (None, None)
-    # See comment below for why we like to keep things sorted
-    # We need simplifications to be a tuple because we're going to pickle it
-    global simplifications
-    simplifications = tuple(sorted(initial_simplifications + normalize(s)))
+    simplifications = initial_simplifications + normalize(s)
     # We can't save simplifications itself, since persistent_id() only works on rings and polynomials, not tuples
     for s in simplifications:
         save_global(s, stats=stats)
@@ -795,6 +792,8 @@ def initial_processing_stage(system, initial_simplifications, origin, verbose=Fa
         return (None, None)
     if any(eqn == 1 for eqn in eqns):
         # the system is inconsistent and needs no further processing
+        if stats:
+            stats['inconsistent_systems'] += int(1)
         return (None, None)
     # global for debugging purposes
     global eqns_factors
@@ -802,22 +801,10 @@ def initial_processing_stage(system, initial_simplifications, origin, verbose=Fa
     eqns_factors = factor_eqns(eqns)
     if stats:
         stats.timestamp('factor')
-    # all_factors is global so that the subprocesses in the next two ProcessPools can access it
-    global all_factors
-    # By sorting all_factors, we ensure that the systems inserted into stage2 are sorted,
-    # because iterating over a FrozenBitset generates integers
-    # in ascending order, which are then used as indices to all_factors.
-    # We like sorted systems because they help us detect duplicate systems and reduce duplicate work.
-    all_factors = set(f for l in eqns_factors for f in l)
-    all_factors = sorted(all_factors)
-
-    # bitsets is global so the subprocesses in the ProcessPool below can access it.
-    # We create cnf_bitsets now in case we want to dump it for debugging purposes.
-    # If we aren't debugging, then we won't use cnf_bitsets until we call cnf2dnf further below.
-    global bitsets
-    cnf_bitsets = [FrozenBitset(tuple(all_factors.index(f) for f in l), capacity=len(all_factors)) for l in eqns_factors]
 
     # cnf2dnf records its own timing statistics and prints its own status messages
+    all_factors = tuple(f for l in eqns_factors for f in l)
+    cnf_bitsets = [FrozenBitset(tuple(all_factors.index(f) for f in l), capacity=len(all_factors)) for l in eqns_factors]
     dnf_bitsets = cnf2dnf(cnf_bitsets, stats=stats, verbose=verbose)
 
     # now we've got set of systems of polynomials, all polynomials irreducible
@@ -835,6 +822,11 @@ def initial_processing_stage(system, initial_simplifications, origin, verbose=Fa
 
     return (simplifications, systems)
 
+def pack_tagged_eqns(eqns):
+    eqns_tags = sorted(eqn.tag for eqn in eqns)
+    eqns_encoded = struct.pack('H' * len(eqns), *eqns_tags)
+    return eqns_encoded
+
 def dump_to_SQL(eqns, simplifications, origin, stats=None, verbose=False):
     # This is a list that matches all_factors, but the polynomials are tagged. The tags
     # (short strings that map to the polynomials) will be used to form the pickled objects
@@ -851,9 +843,8 @@ def dump_to_SQL(eqns, simplifications, origin, stats=None, verbose=False):
 
     if verbose: print(time.ctime(), 'system', origin, ': insert into SQL')
     with conn.cursor() as cursor:
-        eqns_encoded = struct.pack('H' * len(eqns), *(eqn.tag for eqn in eqns_tagged))
-        simplifications_encoded = struct.pack('H' * len(simplifications), *(eqn.tag for eqn in simplifications_tagged))
-        system = persistent_pickle((tuple(eqns_tagged), tuple(simplifications_tagged)))
+        eqns_encoded = pack_tagged_eqns(eqns_tagged)
+        simplifications_encoded = pack_tagged_eqns(simplifications_tagged)
         cursor.execute("INSERT INTO staging (system, simplifications, origin, current_status) VALUES (%s, %s, %s, 'queued')",
                        (eqns_encoded, simplifications_encoded, int(origin)))
     if stats:
@@ -867,6 +858,8 @@ def dump_to_SQL(eqns, simplifications, origin, stats=None, verbose=False):
 # we're willing to start them running and then kill them, which we currently don't do.
 
 def processing_stage(system, initial_simplifications, origin, start_time=None, verbose=False, stats=None):
+    if stats:
+        stats['stages'] += int(1)
     if not start_time:
         start_time = time.time()
     simplifications, subsystems = initial_processing_stage(system, initial_simplifications, origin, verbose=verbose, stats=stats)
@@ -877,6 +870,8 @@ def processing_stage(system, initial_simplifications, origin, start_time=None, v
             # If we've been processing this stage for more than stage_processing_time seconds, dump to SQL
             if origin == 0 or elapsed_time > stage_processing_time:
                 dump_to_SQL(subsystem, simplifications, origin, stats=stats, verbose=verbose)
+                if stats:
+                    stats['dumped_to_SQL'] += int(1)
             else:
                 processing_stage(subsystem, simplifications, origin, start_time=start_time, verbose=verbose, stats=stats)
 
