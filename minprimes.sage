@@ -798,7 +798,7 @@ def initial_processing_stage(system, initial_simplifications, origin, verbose=Fa
         return (None, None)
     # global for debugging purposes
     global eqns_factors
-    if verbose: print(time.ctime(), 'system', origin, ': factoring')
+    if verbose: print(time.ctime(), 'system', origin, ': factoring', len(eqns), 'equations')
     eqns_factors = factor_eqns(eqns)
     if stats:
         stats.timestamp('factor')
