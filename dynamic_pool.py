@@ -159,10 +159,15 @@ class DynamicProcessManager:
                 if not p.is_alive():
                     p.join()  # Clean up zombie
                     exited.append(p.pid)
-                    print(f"Worker {p.pid} exited. Remaining: {len(self.processes)-1}")
                 else:
                     alive.append(p)
             self.processes = alive
+
+            # Print exit message with all PIDs
+            if exited:
+                pids = ', '.join(map(str, exited))
+                plural = "Workers" if len(exited) > 1 else "Worker"
+                print(f"{plural} {pids} exited. Remaining: {len(self.processes)}")
         
         return exited
     
