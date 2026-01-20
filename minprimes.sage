@@ -935,7 +935,8 @@ def SQL_stage2(requested_identifier=None, verbose=False):
                                     'pid' : os.getpid(),
                                     'node' : os.uname()[1]})
 
-                if verbose: print(time.ctime(), 'system', identifier, ': unpickling')
+                print(time.ctime(), 'pid', stats['pid'], 'system', identifier, 'starting')
+
                 system = unpack_eqns(packed_system)
                 simplifications = unpack_eqns(packed_simplifications)
                 stats.timestamp('unpickle')
