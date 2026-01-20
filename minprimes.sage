@@ -885,6 +885,8 @@ def processing_stage(system, initial_simplifications, origin, start_time=None, v
                     stats['dumped_to_SQL'] += int(1)
             else:
                 processing_stage(subsystem, simplifications, origin, start_time=start_time, verbose=verbose, stats=stats)
+                if stats:
+                    stats['recursed_subsystems'] += int(1)
 
 def SQL_stage1(eqns):
     # To keep the size of the pickles down, we save the ring as a global since it's referred to constantly.
