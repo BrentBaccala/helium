@@ -546,11 +546,11 @@ def save_global(obj, stats=None):
             cursor.execute("INSERT INTO globals (pickle) VALUES (%s) ON CONFLICT DO NOTHING", (p,))
             cursor.execute("SELECT identifier FROM globals WHERE pickle = %s", (p,))
             id = cursor.fetchone()[0]
-            persistent_data[str(id)] = obj
-            persistent_data_inverse[obj] = str(id)
+            persistent_data[int(id)] = obj
+            persistent_data_inverse[obj] = int(id)
     if stats:
         stats.timestamp('save_global_sql')
-    return GlobalWithTag(obj, str(id))
+    return GlobalWithTag(obj, int(id))
 
 # This routine isn't called anywhere (it's just for debugging) because the globals table is large
 # and we don't want to load the whole thing into memory.  But this is the idea.
@@ -560,9 +560,9 @@ def load_globals():
         with conn2.cursor() as cursor:
             cursor.execute("SELECT identifier, pickle FROM globals")
             for id, p in cursor:
-                obj = GlobalWithTag(pickle.loads(p), str(id))
-                persistent_data[str(id)] = obj
-                persistent_data_inverse[obj] = str(id)
+                obj = GlobalWithTag(pickle.loads(p), int(id))
+                persistent_data[int(id)] = obj
+                persistent_data_inverse[obj] = int(id)
 
 # Note that no attempt is made to save objects that aren't already in the persistent data tables.
 # If you want something saved into the globals table, you have to call save_global() explicitly.
@@ -633,8 +633,8 @@ def unpickle(p, verbose=False):
                         first_one = False
                     id = pickl[0]
                     obj = unpickle_internal(pickl[1])
-                    persistent_data[str(id)] = obj
-                    persistent_data_inverse[obj] = str(id)
+                    persistent_data[int(id)] = obj
+                    persistent_data_inverse[obj] = int(id)
     retval = unpickle_internal(p)
     conn2.commit()
     return retval
