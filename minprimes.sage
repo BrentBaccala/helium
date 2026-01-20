@@ -940,7 +940,7 @@ def SQL_stage2(requested_identifier=None, verbose=False):
                 simplifications = unpack_eqns(packed_simplifications)
                 stats.timestamp('unpickle')
 
-                processing_stage(system, simplifications, identifier, stats=stats)
+                processing_stage(system, simplifications, identifier, verbose=verbose, stats=stats)
 
                 cursor.execute("""UPDATE staging
                                   SET current_status = 'finished'
