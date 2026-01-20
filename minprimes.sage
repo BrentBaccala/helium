@@ -194,7 +194,6 @@ def cnf2dnf_external(cnf_bitsets, simplify=False, parallel=False, stats=None, ve
     cmd = ['./cnf2dnf', '-t', str(num_processes if parallel else 1)]
     if simplify:
         cmd.append('-s')
-    time1 = time.time()
     if verbose:
         print(time.ctime(), f"system {stats['identifier']} : cnf2dnf starting")
     proc = subprocess.Popen(cmd, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=sys.stderr)
@@ -208,9 +207,8 @@ def cnf2dnf_external(cnf_bitsets, simplify=False, parallel=False, stats=None, ve
     proc.wait()
     if proc.returncode != 0:
         raise subprocess.CalledProcessError(proc.returncode, './cnf2dnf')
-    time2 = time.time()
     if stats:
-        stats['cnf2dnf_time'] += time2-time1
+        stats.timestamp('cnf2dnf')
     # Consensus on stack overflow https://stackoverflow.com/questions/4154571
     # is that since the first thing sorted() does is to convert the argument
     # to a list, there's no reason not to convert the generator to a list
@@ -239,14 +237,12 @@ def cnf2dnf_checking(cnf_bitsets, parallel=False, stats=None, verbose=False):
     # it might be a generator, so convert it to a list since we're going to loop over it twice
     cnf_bitsets = list(cnf_bitsets)
     retval = cnf2dnf_external(cnf_bitsets, parallel=parallel, stats=stats, verbose=verbose)
-    time1 = time.time()
     if verbose:
         print(time.ctime(), f"system {stats['identifier']} : cnf2dnf verifying")
     simplified = cnf2dnf_external(cnf_bitsets, simplify=True, parallel=parallel, stats=None, verbose=False)
     verification = cnf2dnf_external(retval, parallel=parallel, stats=None, verbose=False)
-    time2 = time.time()
     if stats:
-        stats['cnf2dnf_verification_time'] += time2-time1
+        stats.timestamp('cnf2dnf_verification')
     # simplified (the simplified input) should equal verification (the output run back through the algorithm again)
     # since they're both tuples, comparing them is really this simple
     if (simplified != verification):
@@ -485,13 +481,6 @@ CREATE TABLE staging_stats (
       identifier INTEGER,
       node VARCHAR,
       pid INTEGER,
-      unpickle_time INTERVAL,
-      factor_time INTERVAL,
-      cnf2dnf_time INTERVAL,
-      save_global_time INTERVAL,
-      simplifyIdeal_time INTERVAL,
-      insert_into_staging_time INTERVAL,
-      total_time INTERVAL,
       memory_utilization BIGINT
 );
 
@@ -548,9 +537,10 @@ def save_global(obj, stats=None):
     if obj in persistent_data_inverse:
         return GlobalWithTag(obj, persistent_data_inverse[obj])
     p = persistent_pickle(obj)
+    if stats:
+        stats.timestamp('save_global_pickle')
     # See this stackoverflow post: https://stackoverflow.com/questions/34708509/how-to-use-returning-with-on-conflict-in-postgresql
     # for issues with the simple "ON CONFLICT DO NOTHING RETURNING identifier"
-    time1 = time.time()
     with conn2:
         with conn2.cursor() as cursor:
             cursor.execute("INSERT INTO globals (pickle) VALUES (%s) ON CONFLICT DO NOTHING", (p,))
@@ -558,9 +548,8 @@ def save_global(obj, stats=None):
             id = cursor.fetchone()[0]
             persistent_data[str(id)] = obj
             persistent_data_inverse[obj] = str(id)
-    time2 = time.time()
     if stats:
-        stats['save_global_sql_time'] += time2-time1
+        stats.timestamp('save_global_sql')
     return GlobalWithTag(obj, str(id))
 
 # This routine isn't called anywhere (it's just for debugging) because the globals table is large
@@ -655,6 +644,8 @@ def unpickle(p, verbose=False):
 #
 # Can be initialized by passing it a dictionary.
 #
+# Has a timestamp method that records timing into those `_time` keys
+#
 # Also has an insert_into_SQL method that adds time columns to the stats table if they don't already exist,
 # and converts the integers stored in '_time' keys into the INTERVAL stored in SQL.
 
@@ -663,14 +654,26 @@ class Statistics(dict):
         if d:
             assert type(d) == dict
             self.update(d)
+        self['START'] = time.time()
+        self['LAST'] = self['START']
     def __getitem__(self, key):
         return self.setdefault(key, 0)
+    def timestamp(self, name):
+        ts = time.time()
+        self[name + '_time'] += ts - self['LAST']
+        self['LAST'] = ts
     def insert_into_SQL(self, cursor):
+        ts = time.time()
+        self['total_time'] = ts - self['START']
+        del self['START']
+        del self['LAST']
         for k in self:
             if k.endswith('_time'):
-                self[k] = datetime.timedelta(seconds = int(self[k]))
+                self[k] = datetime.timedelta(seconds = float(self[k]))
                 cursor.execute(f"ALTER TABLE staging_stats ADD COLUMN IF NOT EXISTS {k} INTERVAL")
         cursor.execute(f"INSERT INTO staging_stats ({','.join(self.keys())}) VALUES %s", (tuple(self.values()),))
+        # this next one will only print on the console; it won't appear in the SQL stats
+        self['insert_into_staging_stats_time'] += time.time() - ts
 
 def dropZeros(eqns):
     return tuple(e for e in eqns if e != 0)
@@ -715,13 +718,11 @@ def eliminateZeros(I):
     return simplifications + [p for p in I if p != 0]
 
 def polish_system(system, simplifications, origin, stats=None):
-    time1 = time.time()
     # should we add simplifications to the system before running GTZ on it?
     I = ideal(system + simplifications)
     minimal_primes = I.minimal_associated_primes()
-    time2 = time.time()
     if stats:
-        stats['GTZ_time'] += time2-time1
+        stats.timestamp('GTZ')
     ring = I.ring()
     E = ring('E')
     with conn.cursor() as cursor:
@@ -730,7 +731,7 @@ def polish_system(system, simplifications, origin, stats=None):
             if discard_systems_without_energy and not any(E in p.variables() for p in ss):
                 continue
             for p in ss:
-                save_global(p)
+                save_global(p, stats=stats)
             degree = max(p.degree() for p in ss)
             p = persistent_pickle(sorted(ss))
             # This version creates deadlocks after I introduced the code that runs
@@ -743,10 +744,14 @@ def polish_system(system, simplifications, origin, stats=None):
             cursor.execute("""INSERT INTO prime_ideals (ideal, degree, num) VALUES (%s, %s, 1)
                               ON CONFLICT (md5(ideal)) DO NOTHING""",
                            (p, int(degree)))
+            if stats:
+                stats.timestamp('insert_into_prime_ideals')
             cursor.execute("SELECT identifier FROM prime_ideals WHERE ideal = %s", (p,))
             id = cursor.fetchone()[0]
             cursor.execute("""INSERT INTO prime_ideals_tracking (origin, destination) VALUES (%s, %s)""",
                            (origin, id))
+            if stats:
+                stats.timestamp('insert_into_prime_ideals_tracking')
 
 # initial_processing_stage
 #
@@ -759,11 +764,9 @@ def initial_processing_stage(system, initial_simplifications, origin, verbose=Fa
     else:
         stage = 2
     if verbose: print(time.ctime(), 'system', origin, ': simplifyIdeal')
-    time1 = time.time()
     eqns,s = simplifyIdeal(list(system))
-    time2 = time.time()
     if stats:
-        stats['simplifyIdeal_time'] += time2 - time1
+        stats.timestamp('simplifyIdeal')
     if verbose: print(time.ctime(), 'system', origin, ':', len(s), 'simplifications')
     if origin != 0 and len(s) == 0:
         # If origin != 0, then the last thing we did to this system was to factor and cnf2dnf it.
@@ -772,8 +775,6 @@ def initial_processing_stage(system, initial_simplifications, origin, verbose=Fa
         #    it gets reinserted as system #1 and we come back here with origin == 1
         if verbose: print(time.ctime(), 'system', origin, ': polishing')
         polish_system(system, initial_simplifications, origin, stats=stats)
-        time2a = time.time()
-        stats['polishing_time'] += time2a - time2
         if verbose: print(time.ctime(), 'system', origin, ': done')
         return (None, None)
     # See comment below for why we like to keep things sorted
@@ -782,16 +783,11 @@ def initial_processing_stage(system, initial_simplifications, origin, verbose=Fa
     simplifications = tuple(sorted(initial_simplifications + normalize(s)))
     # We can't save simplifications itself, since persistent_id() only works on rings and polynomials, not tuples
     for s in simplifications:
-        save_global(s)
-    time3 = time.time()
-    if stats:
-        stats['save_global_time'] += time3-time2
+        save_global(s, stats=stats)
     eqns = normalize(dropZeros(eqns))
     if len(eqns) == 0:
         if verbose: print(time.ctime(), 'system', origin, ': polishing')
         polish_system(eqns, simplifications, origin, stats=stats)
-        time3a = time.time()
-        stats['polishing_time'] += time3a - time3
         if verbose: print(time.ctime(), 'system', origin, ': done')
         return (None, None)
     if any(eqn == 1 for eqn in eqns):
@@ -801,9 +797,8 @@ def initial_processing_stage(system, initial_simplifications, origin, verbose=Fa
     global eqns_factors
     if verbose: print(time.ctime(), 'system', origin, ': factoring')
     eqns_factors = factor_eqns(eqns)
-    time4 = time.time()
     if stats:
-        stats['factor_time'] += time4-time3
+        stats.timestamp('factor')
     # all_factors is global so that the subprocesses in the next two ProcessPools can access it
     global all_factors
     # By sorting all_factors, we ensure that the systems inserted into stage2 are sorted,
@@ -844,26 +839,20 @@ def dump_to_SQL(eqns, simplifications, origin, stats=None, verbose=False):
     eqns_tagged = []
     simplifications_tagged = []
 
-    time4 = time.time()
     for eqn in eqns:
         tagged_eqn = save_global(eqn, stats=stats)
         eqns_tagged.append(tagged_eqn)
     for eqn in simplifications:
         tagged_eqn = save_global(eqn, stats=stats)
         simplifications_tagged.append(tagged_eqn)
-    time5 = time.time()
-    if stats:
-        stats['save_global_time'] += time5-time4
 
-    time6 = time.time()
     if verbose: print(time.ctime(), 'system', origin, ': insert into SQL')
     with conn.cursor() as cursor:
         system = persistent_pickle((tuple(eqns_tagged), tuple(simplifications_tagged)))
         cursor.execute("INSERT INTO staging (system, origin, current_status) VALUES (%s, %s, 'queued')",
                        (system, int(origin)))
-    time7 = time.time()
     if stats:
-        stats['insert_into_staging_time'] += time7-time6
+        stats.timestamp('insert_into_staging')
 
 # To avoid the situation where we're running short processing stages and spending most of our time
 # dumping the results to SQL, we recurse on our results if we've spent less than stage_processing_time
@@ -889,8 +878,10 @@ def processing_stage(system, initial_simplifications, origin, start_time=None, v
 def SQL_stage1(eqns):
     # To keep the size of the pickles down, we save the ring as a global since it's referred to constantly.
     save_global(eqns[0].parent())
-    stats = Statistics({'identifier' : 0})
+    stats = Statistics({'identifier' : int(0)})
     processing_stage(eqns, tuple(), int(0), verbose=True, stats=stats)
+    with conn.cursor() as cursor:
+        stats.insert_into_SQL(cursor)
     conn.commit()
     print(stats)
 
@@ -926,21 +917,16 @@ def SQL_stage2(requested_identifier=None, verbose=False):
                 break
             pickled_system, identifier = cursor.fetchone()
             try:
-                start_time = time.time()
-                if verbose: print(time.ctime(), 'system', identifier, ': unpickling')
-                system, simplifications = unpickle(pickled_system, verbose=verbose)
-                unpickle_time = time.time() - start_time
-
                 # The keys in stats (a fancy dictionary) must match column names in the 'staging_stats' SQL table,
-                # except that keys ending in '_time' are processed differently because they correspond to SQL INTERVALs;
-                # the other keys correspond to SQL INTEGERs, BIGINTs, or VARCHARs.  For the '_time' variables,
-                # we store seconds in the dictionary, then convert them to datetime.timedelta's right
-                # before we pass them to SQL, and any missing '_time' columns are added to the SQL on the fly.
+                # except that we track timing and add keys ending in '_time'.
 
                 stats = Statistics({'identifier' : identifier,
                                     'pid' : os.getpid(),
-                                    'node' : os.uname()[1],
-                                    'unpickle_time' : unpickle_time})
+                                    'node' : os.uname()[1]})
+
+                if verbose: print(time.ctime(), 'system', identifier, ': unpickling')
+                system, simplifications = unpickle(pickled_system, verbose=verbose)
+                stats.timestamp('unpickle')
 
                 processing_stage(system, simplifications, identifier, stats=stats)
 
@@ -948,12 +934,9 @@ def SQL_stage2(requested_identifier=None, verbose=False):
                                   SET current_status = 'finished'
                                   WHERE identifier = %s""", (identifier, ))
 
-                stats['total_time'] = time.time() - start_time
-                stats['memory_utilization'] = psutil.Process(os.getpid()).memory_info().rss
-
-                print(stats)
-
+                # stats.insert_into_SQL() actually changes stats a bit before it gets printed
                 stats.insert_into_SQL(cursor)
+                print(stats)
 
                 conn.commit()
 
