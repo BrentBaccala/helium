@@ -604,13 +604,14 @@ def persistent_load(id):
     return persistent_data[id]
 
 def persistent_load_tuple(t):
-    with conn2.cursor() as cursor:
-        cursor.execute("SELECT identifier, pickle FROM globals WHERE identifier IN %s", (t,))
-        while pickl := cursor.fetchone():
-            id = pickl[0]
-            obj = unpickle_internal(pickl[1])
-            persistent_data[int(id)] = obj
-            persistent_data_inverse[obj] = int(id)
+    if t:
+        with conn2.cursor() as cursor:
+            cursor.execute("SELECT identifier, pickle FROM globals WHERE identifier IN %s", (t,))
+            while pickl := cursor.fetchone():
+                id = pickl[0]
+                obj = unpickle_internal(pickl[1])
+                persistent_data[int(id)] = obj
+                persistent_data_inverse[obj] = int(id)
 
 def persistent_load_tuple_if_needed(t):
     persistent_load_tuple(tuple(identifier for identifier in t if identifier not in persistent_data))
