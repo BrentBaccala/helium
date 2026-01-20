@@ -67,6 +67,7 @@ import subprocess
 import threading
 
 import pickle
+import struct
 import io
 
 # for running cnf2dnf tests
@@ -452,7 +453,8 @@ CREATE TABLE staging (
       identifier INTEGER GENERATED ALWAYS AS IDENTITY,
       stage INTEGER,              -- the original system is stage 0, each system derived from it is one integer higher
       origin INTEGER,             -- for stage 1, 0; for later stages, which identifier in the previous stage this system came from
-      system BYTEA,               -- a pickle of a tuple pair of tuples of polynomials; the first complex, the second simple
+      system BYTEA,               -- a struct.pack of polynomial identifiers; not simple linear substitutions
+      simplifications BYTEA,      -- a struct.pack of polynomial identifiers; simple linear substitutions
       current_status status,
       node VARCHAR,
       pid INTEGER
@@ -601,6 +603,18 @@ def persistent_load(id):
                 persistent_data_inverse[obj] = id
     return persistent_data[id]
 
+def persistent_load_tuple(t):
+    with conn2.cursor() as cursor:
+        cursor.execute("SELECT identifier, pickle FROM globals WHERE identifier IN %s", (t,))
+        while pickl := cursor.fetchone():
+            id = pickl[0]
+            obj = unpickle_internal(pickl[1])
+            persistent_data[int(id)] = obj
+            persistent_data_inverse[obj] = int(id)
+
+def persistent_load_tuple_if_needed(t):
+    persistent_load_tuple(tuple(identifier for identifier in t if identifier not in persistent_data))
+
 def unpickle_internal(p):
     dst = io.BytesIO(p)
     up = pickle.Unpickler(dst)
@@ -619,22 +633,11 @@ def unpickle(p, verbose=False):
     up.load()
     if verbose:
         print(time.ctime(), len(persistent_ids), 'persistent_ids')
-    first_one = True
     if persistent_ids:
         block_size = 10000
         for blocknum in range((len(persistent_ids)+block_size-1)//block_size):
             block = persistent_ids[blocknum*block_size:(blocknum+1)*block_size]
-            with conn2.cursor() as cursor:
-                cursor.execute("SELECT identifier, pickle FROM globals WHERE identifier IN %s", (tuple(block),))
-                while pickl := cursor.fetchone():
-                    if first_one:
-                        if verbose:
-                            print(time.ctime(), 'pickle fetch from SQL done; unpickling')
-                        first_one = False
-                    id = pickl[0]
-                    obj = unpickle_internal(pickl[1])
-                    persistent_data[int(id)] = obj
-                    persistent_data_inverse[obj] = int(id)
+            persistent_load_tuple(tuple(block))
     retval = unpickle_internal(p)
     conn2.commit()
     return retval
@@ -848,9 +851,11 @@ def dump_to_SQL(eqns, simplifications, origin, stats=None, verbose=False):
 
     if verbose: print(time.ctime(), 'system', origin, ': insert into SQL')
     with conn.cursor() as cursor:
+        eqns_encoded = struct.pack('H' * len(eqns), *(eqn.tag for eqn in eqns_tagged))
+        simplifications_encoded = struct.pack('H' * len(simplifications), *(eqn.tag for eqn in simplifications_tagged))
         system = persistent_pickle((tuple(eqns_tagged), tuple(simplifications_tagged)))
-        cursor.execute("INSERT INTO staging (system, origin, current_status) VALUES (%s, %s, 'queued')",
-                       (system, int(origin)))
+        cursor.execute("INSERT INTO staging (system, simplifications, origin, current_status) VALUES (%s, %s, %s, 'queued')",
+                       (eqns_encoded, simplifications_encoded, int(origin)))
     if stats:
         stats.timestamp('insert_into_staging')
 
@@ -894,7 +899,7 @@ def SQL_stage2(requested_identifier=None, verbose=False):
                 cursor.execute("""UPDATE staging
                                   SET current_status = 'running', pid = %s, node = %s
                                   WHERE identifier = %s AND ( current_status = 'queued' OR current_status = 'interrupted' )
-                                  RETURNING system, identifier""", (os.getpid(), os.uname()[1], int(requested_identifier)) )
+                                  RETURNING system, simplifications, identifier""", (os.getpid(), os.uname()[1], int(requested_identifier)) )
                 conn.commit()
             else:
                 if depth_first_processing:
@@ -911,11 +916,11 @@ def SQL_stage2(requested_identifier=None, verbose=False):
                                        LIMIT 1
                                        FOR UPDATE SKIP LOCKED
                                        )
-                                   RETURNING system, identifier""", (os.getpid(), os.uname()[1]) )
+                                   RETURNING system, simplifications, identifier""", (os.getpid(), os.uname()[1]) )
                 conn.commit()
             if cursor.rowcount == 0:
                 break
-            pickled_system, identifier = cursor.fetchone()
+            packed_system, packed_simplifications, identifier = cursor.fetchone()
             try:
                 # The keys in stats (a fancy dictionary) must match column names in the 'staging_stats' SQL table,
                 # except that we track timing and add keys ending in '_time'.
@@ -925,7 +930,12 @@ def SQL_stage2(requested_identifier=None, verbose=False):
                                     'node' : os.uname()[1]})
 
                 if verbose: print(time.ctime(), 'system', identifier, ': unpickling')
-                system, simplifications = unpickle(pickled_system, verbose=verbose)
+                system_identifiers = struct.unpack('H' * int(len(packed_system)/int(2)), packed_system)
+                simplifications_identifiers = struct.unpack('H' * int(len(packed_system)/int(2)), packed_system)
+                persistent_load_tuple(system_identifiers)
+                persistent_load_tuple(simplifications_identifiers)
+                system = tuple(persistent_data[identifier] for identifier in system_identifiers)
+                simplifications = tuple(persistent_data[identifier] for identifier in simplifications_identifiers)
                 stats.timestamp('unpickle')
 
                 processing_stage(system, simplifications, identifier, stats=stats)
