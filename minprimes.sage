@@ -1062,7 +1062,8 @@ def simplify_ideals():
         # I > any_ideal  ===>  V(I) < V(any_ideal)
         if any(I > any_ideal for any_ideal in ideals):
             # flag I as simplified
-            p = persistent_pickle(I.gens())
+            # I.gens() returns a PolynomialSequence_generic, but what got pickled was a list, so we have to convert
+            p = persistent_pickle(list(I.gens()))
             with conn.cursor() as cursor:
                 cursor.execute("UPDATE prime_ideals SET simplified = TRUE WHERE ideal = %s", (p,))
                 print(f"{cursor.rowcount} rows updated")
