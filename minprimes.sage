@@ -816,7 +816,12 @@ def initial_processing_stage(system, initial_simplifications, origin, verbose=Fa
 
     do_discard = discard_systems_without_energy and not any(E in poly.variables() for poly in simplifications)
     if do_discard:
+        stats['do_discard'] += int(1)
+    if do_discard:
         systems = tuple(tuple(all_factors[j] for j in bs) for bs in dnf_bitsets if any(E in all_factors[j].variables() for j in bs))
+        num_discards = len(systems) - len(dnf_bitsets)
+        if stats and num_discards > 0:
+            stats['discarded_without_energy'] += int(1)
     else:
         systems = tuple(tuple(all_factors[j] for j in bs) for bs in dnf_bitsets)
 
