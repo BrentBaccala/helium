@@ -834,7 +834,7 @@ def pack_tagged_eqns(eqns):
     return eqns_encoded
 
 def unpack_eqns(eqns_encoded):
-    identifiers = struct.unpack('I' * int(len(eqns_encoded)/int(2)), eqns_encoded)
+    identifiers = struct.unpack('I' * int(len(eqns_encoded)/int(4)), eqns_encoded)
     persistent_load_tuple(identifiers)
     return tuple(persistent_data[identifier] for identifier in identifiers)
 
