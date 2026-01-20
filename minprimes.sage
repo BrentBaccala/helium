@@ -830,11 +830,11 @@ def initial_processing_stage(system, initial_simplifications, origin, verbose=Fa
 
 def pack_tagged_eqns(eqns):
     eqns_tags = sorted(eqn.tag for eqn in eqns)
-    eqns_encoded = struct.pack('H' * len(eqns), *eqns_tags)
+    eqns_encoded = struct.pack('I' * len(eqns), *eqns_tags)
     return eqns_encoded
 
 def unpack_eqns(eqns_encoded):
-    identifiers = struct.unpack('H' * int(len(eqns_encoded)/int(2)), eqns_encoded)
+    identifiers = struct.unpack('I' * int(len(eqns_encoded)/int(2)), eqns_encoded)
     persistent_load_tuple(identifiers)
     return tuple(persistent_data[identifier] for identifier in identifiers)
 
