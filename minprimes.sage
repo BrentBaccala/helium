@@ -832,6 +832,11 @@ def pack_tagged_eqns(eqns):
     eqns_encoded = struct.pack('H' * len(eqns), *eqns_tags)
     return eqns_encoded
 
+def unpack_eqns(eqns_encoded):
+    identifiers = struct.unpack('H' * int(len(eqns_encoded)/int(2)), eqns_encoded)
+    persistent_load_tuple(identifiers)
+    return tuple(persistent_data[identifier] for identifier in identifiers)
+
 def dump_to_SQL(eqns, simplifications, origin, stats=None, verbose=False):
     # This is a list that matches all_factors, but the polynomials are tagged. The tags
     # (short strings that map to the polynomials) will be used to form the pickled objects
@@ -930,12 +935,8 @@ def SQL_stage2(requested_identifier=None, verbose=False):
                                     'node' : os.uname()[1]})
 
                 if verbose: print(time.ctime(), 'system', identifier, ': unpickling')
-                system_identifiers = struct.unpack('H' * int(len(packed_system)/int(2)), packed_system)
-                simplifications_identifiers = struct.unpack('H' * int(len(packed_system)/int(2)), packed_system)
-                persistent_load_tuple(system_identifiers)
-                persistent_load_tuple(simplifications_identifiers)
-                system = tuple(persistent_data[identifier] for identifier in system_identifiers)
-                simplifications = tuple(persistent_data[identifier] for identifier in simplifications_identifiers)
+                system = unpack_eqns(packed_system)
+                simplifications = unpack_eqns(packed_simplifications)
                 stats.timestamp('unpickle')
 
                 processing_stage(system, simplifications, identifier, stats=stats)
