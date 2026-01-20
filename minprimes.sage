@@ -81,7 +81,8 @@ import time
 
 from sage.data_structures.bitset import FrozenBitset
 
-import concurrent.futures
+from dynamic_pool import DynamicProcessManager
+import multiprocessing as mp
 
 import traceback
 
@@ -976,12 +977,7 @@ def SQL_stage2(requested_identifier=None, verbose=False):
             persistent_data.clear()
             persistent_data_inverse.clear()
 
-# SQL_stage2_parallel uses ProcessPool for parallelization and needs an initializer and a done callback.
-
-def done_callback(future):
-    if future.exception():
-        # I'm not sure what to do here to get a full traceback printed
-        traceback.print_exception(None, future.exception(), None)
+# SQL_stage2_parallel uses a process pool for parallelization and needs an initializer to setup its database connections
 
 def process_pool_initializer():
     # futures can't share the original SQL connection, so create a new one
@@ -990,18 +986,12 @@ def process_pool_initializer():
     conn = psycopg2.connect(**postgres_connection_parameters)
     conn2 = psycopg2.connect(**postgres_connection_parameters)
 
-def SQL_stage2_parallel(max_workers = num_processes):
+def SQL_stage2_parallel(num_workers = num_processes):
     try:
-        with concurrent.futures.ProcessPoolExecutor(max_workers=max_workers, initializer=process_pool_initializer) as executor:
-            futures = [executor.submit(SQL_stage2) for _ in range(max_workers)]
-            for future in futures:
-                future.add_done_callback(done_callback)
-            num_completed = 0
-            while num_completed < max_workers:
-                concurrent.futures.wait(futures, timeout=1)
-                num_completed = tuple(future.done() for future in futures).count(True)
-        for future in futures:
-            future.result()
+        manager = DynamicProcessManager(worker_func=SQL_stage2, num_workers=num_workers, initializer=process_pool_initializer)
+        manager.start()
+        while manager.is_running():
+            manager.wait_for_events()
     except:
         # The only exception I've actually seen here is a BrokenProcessPool when my attempt to raise CalledProcessError
         # in one of the futures failed due to a TypeError because I didn't call the BrokenProcessPool constructor correctly.
