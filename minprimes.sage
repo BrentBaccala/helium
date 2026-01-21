@@ -762,12 +762,12 @@ def polish_system(system, simplifications, origin, stats=None):
             if stats:
                 stats.timestamp('insert_into_prime_ideals_tracking')
 
-# initial_processing_stage
+# inner_processing_stage - a single system simplified, then factored, then cnf2dnf into multiple output systems
 #
 # returns a tuple of all of the simplifications that have been applied and the systems;
 # the systems are a tuple of tuples of irreducible polynomials
 
-def initial_processing_stage(system, initial_simplifications, origin, verbose=False, stats=None):
+def inner_processing_stage(system, initial_simplifications, origin, verbose=False, stats=None):
     if verbose: print(time.ctime(), 'system', origin, ': simplifyIdeal')
     eqns,s = simplifyIdeal(list(system))
     if stats:
@@ -865,8 +865,8 @@ def dump_to_SQL(eqns, simplifications, origin, stats=None, verbose=False):
 # To avoid the situation where we're running short processing stages and spending most of our time
 # dumping the results to SQL, we recurse on our results if we've spent less than stage_processing_time
 # seconds on this processing stage.  Once a stage hits stage_processing_time seconds, then we wait for
-# the current stage to finish (i.e, we don't kill it), but then everything else gets dumped to SQL.
-# Of course, the remaining stages might run very quickly, but we don't know that, unless
+# the current inner processing stage to finish (i.e, we don't kill it), but then everything else gets dumped to SQL.
+# Of course, the remaining inner stages might run very quickly, but we don't know that, unless
 # we're willing to start them running and then kill them, which we currently don't do.
 
 def processing_stage(system, initial_simplifications, origin, start_time=None, verbose=False, stats=None):
@@ -874,11 +874,11 @@ def processing_stage(system, initial_simplifications, origin, start_time=None, v
         stats['stages'] += int(1)
     if not start_time:
         start_time = time.time()
-    simplifications, subsystems = initial_processing_stage(system, initial_simplifications, origin, verbose=verbose, stats=stats)
+    simplifications, subsystems = inner_processing_stage(system, initial_simplifications, origin, verbose=verbose, stats=stats)
     elapsed_time = time.time() - start_time
     if subsystems:
         for subsystem in subsystems:
-            # origin 0 is special because it won't polish in initial_processing_stage; instead, it'll loop forever
+            # origin 0 is special because it won't polish in inner_processing_stage; instead, it'll loop forever
             # If we've been processing this stage for more than stage_processing_time seconds, dump to SQL
             if origin == 0 or elapsed_time > stage_processing_time:
                 dump_to_SQL(subsystem, simplifications, origin, stats=stats, verbose=verbose)
