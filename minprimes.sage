@@ -700,21 +700,23 @@ class Statistics(dict):
 
     def insert_into_SQL(self, cursor):
         ts = time.time()
-        self['total_time'] = ts - self['START'] - self['suspended_time']
-        del self['START']
-        del self['LAST']
 
-        for k in self:
+        # Create a temporary dictionary for SQL insertion
+        sql_data = dict(self)
+        sql_data['total_time'] = ts - sql_data['START'] - sql_data['suspended_time']
+        del sql_data['START']
+        del sql_data['LAST']
+        if '_suspend_start' in sql_data:
+            del sql_data['_suspend_start']
+
+        for k in sql_data:
             if k.endswith('_time'):
-                self[k] = datetime.timedelta(seconds = float(self[k]))
+                sql_data[k] = datetime.timedelta(seconds = float(sql_data[k]))
                 cursor.execute(f"ALTER TABLE staging_stats ADD COLUMN IF NOT EXISTS {k} INTERVAL")
-            elif k not in ('identifier', 'node', 'pid', 'memory_utilization', '_suspend_start'):
+            elif k not in ('identifier', 'node', 'pid', 'memory_utilization'):
                 cursor.execute(f"ALTER TABLE staging_stats ADD COLUMN IF NOT EXISTS {k} INTEGER")
 
-        # Remove internal tracking variable before inserting
-        stats_to_insert = {k: v for k, v in self.items() if k != '_suspend_start'}
-
-        cursor.execute(f"INSERT INTO staging_stats ({','.join(stats_to_insert.keys())}) VALUES %s", (tuple(stats_to_insert.values()),))
+        cursor.execute(f"INSERT INTO staging_stats ({','.join(sql_data.keys())}) VALUES %s", (tuple(sql_data.values()),))
         # this next one will only print on the console; it won't appear in the SQL stats
         self['insert_into_staging_stats_time'] += time.time() - ts
 
