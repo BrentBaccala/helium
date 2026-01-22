@@ -77,6 +77,7 @@ import os
 import psutil
 import datetime
 
+import signal
 import time
 
 from sage.data_structures.bitset import FrozenBitset
@@ -653,6 +654,8 @@ def unpickle(p, verbose=False):
 #
 # Also has an insert_into_SQL method that adds time columns to the stats table if they don't already exist,
 # and converts the integers stored in '_time' keys into the INTERVAL stored in SQL.
+#
+# Now handles SIGTSTP (Ctrl-Z) to track suspended time separately.
 
 class Statistics(dict):
     def __init__(self, d=None):
@@ -661,24 +664,57 @@ class Statistics(dict):
             self.update(d)
         self['START'] = time.time()
         self['LAST'] = self['START']
+        self['suspended_time'] = 0
+        self._suspend_start = None
+
+        # Set up signal handlers
+        signal.signal(signal.SIGTSTP, self._handle_suspend)
+        signal.signal(signal.SIGCONT, self._handle_resume)
+
+    def _handle_suspend(self, signum, frame):
+        """Called when Ctrl-Z is pressed"""
+        self._suspend_start = time.time()
+        # Re-raise the signal to actually suspend the process
+        signal.signal(signal.SIGTSTP, signal.SIG_DFL)
+        signal.raise_signal(signal.SIGTSTP)
+
+    def _handle_resume(self, signum, frame):
+        """Called when process is resumed (fg command)"""
+        if self._suspend_start is not None:
+            suspend_duration = time.time() - self._suspend_start
+            self['suspended_time'] += suspend_duration
+            # Adjust LAST to exclude suspended time
+            self['LAST'] += suspend_duration
+            self._suspend_start = None
+
+        # Restore the suspend handler
+        signal.signal(signal.SIGTSTP, self._handle_suspend)
+
     def __getitem__(self, key):
         return self.setdefault(key, int(0))
+
     def timestamp(self, name):
         ts = time.time()
         self[name + '_time'] += ts - self['LAST']
         self['LAST'] = ts
+
     def insert_into_SQL(self, cursor):
         ts = time.time()
-        self['total_time'] = ts - self['START']
+        self['total_time'] = ts - self['START'] - self['suspended_time']
         del self['START']
         del self['LAST']
+
         for k in self:
             if k.endswith('_time'):
                 self[k] = datetime.timedelta(seconds = float(self[k]))
                 cursor.execute(f"ALTER TABLE staging_stats ADD COLUMN IF NOT EXISTS {k} INTERVAL")
-            elif k not in ('identifier', 'node', 'pid', 'memory_utilization'):
+            elif k not in ('identifier', 'node', 'pid', 'memory_utilization', '_suspend_start'):
                 cursor.execute(f"ALTER TABLE staging_stats ADD COLUMN IF NOT EXISTS {k} INTEGER")
-        cursor.execute(f"INSERT INTO staging_stats ({','.join(self.keys())}) VALUES %s", (tuple(self.values()),))
+
+        # Remove internal tracking variable before inserting
+        stats_to_insert = {k: v for k, v in self.items() if k != '_suspend_start'}
+
+        cursor.execute(f"INSERT INTO staging_stats ({','.join(stats_to_insert.keys())}) VALUES %s", (tuple(stats_to_insert.values()),))
         # this next one will only print on the console; it won't appear in the SQL stats
         self['insert_into_staging_stats_time'] += time.time() - ts
 
