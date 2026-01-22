@@ -65,6 +65,9 @@ class DynamicProcessManager:
         self.lock = Lock()
         self.shutdown_event = Event()
         self.signal_event = Event()
+
+        # Shared value to track how many workers should gracefully exit
+        self.workers_to_stop = mp.Value('i', 0)
         
         # Register signal handlers
         signal.signal(signal.SIGUSR1, self._handle_sigusr1)
@@ -80,9 +83,10 @@ class DynamicProcessManager:
             except Exception as e:
                 print(f"Worker {os.getpid()} initializer failed: {e}")
                 return
-        
+
         try:
-            self.worker_func()
+            # Pass the shared stop counter to the worker function
+            self.worker_func(workers_to_stop=self.workers_to_stop)
         except KeyboardInterrupt:
             pass
         except Exception as e:
@@ -106,19 +110,14 @@ class DynamicProcessManager:
         self.signal_event.set()
     
     def _handle_sigusr2(self, signum, frame):
-        """Remove a worker process when SIGUSR2 is received."""
+        """Signal one worker to exit gracefully after finishing current task."""
         if self.shutdown_event.is_set():
             return
-        
-        with self.lock:
-            if len(self.processes) > 0:
-                # Terminate the last worker
-                p = self.processes[-1]
-                p.terminate()
-                print(f"Terminating worker {p.pid}. Remaining: {len(self.processes)-1}")
-            else:
-                print("No workers to remove")
-        
+
+        with self.workers_to_stop.get_lock():
+            self.workers_to_stop.value += 1
+
+        print(f"Signaled worker to stop gracefully. Workers marked for exit: {self.workers_to_stop.value}")
         self.signal_event.set()
     
     def _handle_sigterm(self, signum, frame):
@@ -218,14 +217,21 @@ class DynamicProcessManager:
 import time
 import random
 
-def long_running_worker():
+def long_running_worker(workers_to_stop):
     """A long-running worker function that processes items indefinitely."""
     pid = os.getpid()
     print(f"Worker {pid} started")
-    
+
     try:
         counter = 0
         while True:
+            # Check if we should exit gracefully
+            with workers_to_stop.get_lock():
+                if workers_to_stop.value > 0:
+                    workers_to_stop.value -= 1
+                    print(f"Worker {pid} exiting gracefully after {counter} items")
+                    break
+
             # Simulate doing work
             time.sleep(random.uniform(0.5, 1.5))
             counter += 1

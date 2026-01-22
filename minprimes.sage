@@ -899,9 +899,16 @@ def SQL_stage1(eqns):
     conn.commit()
     print(stats)
 
-def SQL_stage2(requested_identifier=None, verbose=False):
+def SQL_stage2(workers_to_stop=None, requested_identifier=None, verbose=False):
     with conn.cursor() as cursor:
         while True:
+            # Check if we should exit gracefully
+            if workers_to_stop is not None:
+                with workers_to_stop.get_lock():
+                    if workers_to_stop.value > 0:
+                        workers_to_stop.value -= 1
+                        print(f"Worker {os.getpid()} exiting gracefully")
+                        break
             # This post explains the subquery and the use of "FOR UPDATE SKIP LOCKED"
             # https://dba.stackexchange.com/a/69497
             if requested_identifier:
