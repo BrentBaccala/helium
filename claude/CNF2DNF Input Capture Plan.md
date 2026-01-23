@@ -2,76 +2,80 @@
 
 ## Overview
 
-Modify `minprimes.sage` to automatically save cnf2dnf input data to disk during normal processing. This captures real-world test cases from production runs without interrupting the workflow.
+Instrument `minprimes.sage` to automatically save cnf2dnf input data to disk during normal processing. This captures real-world test cases from production runs without interrupting the workflow. The cnf2dnf program runs normally and writes results to SQL as usual.
 
-## Goal
+## Requirements
 
-When processing a system (via `SQL_stage2` or `SQL_stage2_parallel`), save the input to every `cnf2dnf` call so we can later use these files for testing and optimization of the cnf2dnf program.
-
-## Key Insight
-
-During `inner_processing_stage()`, cnf2dnf is called recursively multiple times:
-1. Initial call on the full system (potentially long-running)
-2. Recursive calls on simplified subsystems (usually faster)
-
-**We can't know ahead of time which will be slow**, so we save input from ALL cnf2dnf calls. The last/longest one will be the most interesting for optimization testing.
+- Save input bitstrings to disk BEFORE each cnf2dnf call
+- Execute cnf2dnf normally (don't skip it)
+- Save ALL cnf2dnf inputs during a processing stage (including recursive calls)
+- Use unique filenames with identifier + sequence number
+- Save metadata about each call
+- Normal processing continues (results written to SQL)
+- Minimal performance impact
 
 ## Implementation Approach
 
-### Modify `cnf2dnf_external()` function
+### Modify `cnf2dnf_external()` Function
 
 **Location:** `/home/baccala/src/helium/minprimes.sage`, lines 195-227
 
-**Changes:**
-1. Add optional parameter `save_input=True` and `identifier=None`
-2. Before calling cnf2dnf, save input bitsets to disk
-3. Generate unique filename for each call using identifier + sequence number
+**Key changes:**
+1. Add parameters `save_input=False` and `output_dir='./cnf2dnf_test_data/'`
+2. Before calling subprocess, save input bitsets to disk
+3. Generate unique filename using identifier + sequence number
 4. Continue with normal cnf2dnf execution
 
 ### File Naming Strategy
 
 ```
 cnf2dnf_test_data/
-  input_{identifier}_{sequence}.txt      # The CNF input bitstrings
-  input_{identifier}_{sequence}_meta.txt # Metadata about this call
+  input_{identifier}_{sequence}.txt      # CNF input bitstrings
+  input_{identifier}_{sequence}_meta.txt # Metadata
 ```
 
-Where:
-- `identifier` = `staging.identifier` from the SQL table
-- `sequence` = incrementing counter for each cnf2dnf call during this system's processing (0, 1, 2, ...)
+- `identifier` = `staging.identifier` from SQL table
+- `sequence` = incrementing counter (0, 1, 2, ...) for each cnf2dnf call during this system's processing
 
-**Example files:**
+**Example:** System 42 calls cnf2dnf 3 times:
 ```
-cnf2dnf_test_data/input_42_0.txt      # First cnf2dnf call for system 42
-cnf2dnf_test_data/input_42_0_meta.txt
-cnf2dnf_test_data/input_42_1.txt      # Second cnf2dnf call (recursive)
-cnf2dnf_test_data/input_42_1_meta.txt
+cnf2dnf_test_data/input_42_0.txt      # First call
+cnf2dnf_test_data/input_42_1.txt      # Second call (recursive)
 cnf2dnf_test_data/input_42_2.txt      # Third call (recursive)
-...
 ```
 
-## Detailed Implementation
+## Implementation Steps
 
-### 1. Add Call Counter to Statistics
+### 1. Add Configuration Flags
 
-Track how many times cnf2dnf is called per system:
+**Location:** Near top of `minprimes.sage` (~line 92, after imports)
 
 ```python
-# In inner_processing_stage(), initialize counter
+# Configuration for CNF2DNF input capture
+SAVE_CNF2DNF_INPUTS = True
+CNF2DNF_INPUT_DIR = './cnf2dnf_test_data/'
+```
+
+### 2. Track Call Sequence in Statistics
+
+**Location:** In `inner_processing_stage()` initialization (~line 813)
+
+```python
+# Initialize cnf2dnf call counter
 stats['cnf2dnf_call_count'] = 0
 ```
 
-### 2. Modify cnf2dnf_external() Signature
+### 3. Modify cnf2dnf_external() Function
 
+**Location:** Lines 195-227
+
+**Add to function signature:**
 ```python
 def cnf2dnf_external(cnf_bitsets, simplify=False, parallel=False,
                      stats=None, verbose=False, save_input=False, output_dir='./cnf2dnf_test_data/'):
 ```
 
-### 3. Add Input Saving Logic
-
-**Insert at line ~200 (before calling subprocess):**
-
+**Add before subprocess call (~line 200):**
 ```python
 # Save input if requested
 if save_input and stats and 'identifier' in stats:
@@ -104,51 +108,50 @@ if save_input and stats and 'identifier' in stats:
         f.write(f"Parallel mode: {parallel}\n")
         f.write(f"Input file: {input_filename}\n")
         f.write(f"\nTo run manually:\n")
-        f.write(f"  ./cnf2dnf -t {'4' if parallel else '1'} < {input_filename}\n")
+        num_threads = num_processes if parallel else 1
+        f.write(f"  ./cnf2dnf -t {num_threads} < {input_filename}\n")
 
     if verbose:
-        print(f"Saved CNF input to: {input_filename}")
+        print(f"Saved CNF input: {input_filename}")
 
 # Continue with normal cnf2dnf execution...
 cmd = ['./cnf2dnf', '-t', str(num_processes if parallel else 1)]
-...
+# ... rest of existing code ...
 ```
 
-### 4. Enable Input Saving in processing_stage()
+### 4. Enable at Call Site
 
-Modify the call to `cnf2dnf_external()` around line 856:
+**Location:** In `inner_processing_stage()` ~line 856
 
-**Before:**
+**Modify the cnf2dnf_external call:**
+
+Before:
 ```python
 dnf = cnf2dnf_external(cnf_bitsets, simplify=False, parallel=parallel_execution,
                        stats=stats, verbose=verbose)
 ```
 
-**After:**
+After:
 ```python
 dnf = cnf2dnf_external(cnf_bitsets, simplify=False, parallel=parallel_execution,
-                       stats=stats, verbose=verbose, save_input=True)
+                       stats=stats, verbose=verbose,
+                       save_input=SAVE_CNF2DNF_INPUTS, output_dir=CNF2DNF_INPUT_DIR)
 ```
 
-### 5. Add Configuration Flag (Optional)
+## Critical Files to Modify
 
-Add a global flag to enable/disable input saving without code changes:
+### `/home/baccala/src/helium/minprimes.sage`
 
-```python
-# Near the top of minprimes.sage (after imports, ~line 92)
-SAVE_CNF2DNF_INPUTS = True  # Set to False to disable input saving
-CNF2DNF_INPUT_DIR = './cnf2dnf_test_data/'
-```
+**Add new function after line 882** (after `unpack_eqns` definition)
 
-Then in `cnf2dnf_external()`:
-```python
-if SAVE_CNF2DNF_INPUTS and stats and 'identifier' in stats:
-    # ... save input logic ...
-```
+**Dependencies:**
+- Database connection: `conn` and `conn2` (already global)
+- Existing functions: `unpack_eqns()`, `simplifyIdeal()`, `factor_eqns()`
+- Global caches: `persistent_data`, `persistent_data_inverse`
 
 ## File Format Specifications
 
-### Input File (`input_{id}_{seq}.txt`)
+### CNF Input File (`cnf2dnf_input_{identifier}.txt`)
 
 ```
 110101
@@ -157,171 +160,210 @@ if SAVE_CNF2DNF_INPUTS and stats and 'identifier' in stats:
 ...
 ```
 
-- Plain text, one bitstring per line
-- Identical to what cnf2dnf receives on stdin
-- Can be piped directly: `./cnf2dnf < input_42_0.txt`
+- One bitstring per line
+- Each line represents a CNF clause (disjunction of factors)
+- Bit position corresponds to a factor in `all_factors`
+- No headers, no comments, no trailing newlines after last clause
+- Compatible with: `./cnf2dnf < file.txt`
 
-### Metadata File (`input_{id}_{seq}_meta.txt`)
+### Metadata File (`cnf2dnf_input_{identifier}_meta.txt`)
 
 ```
 Staging Identifier: 42
-Sequence Number: 0
+Stage (depth): 2
+Origin: 17
+Status: finished
 Number of CNF clauses: 156
 Number of Boolean variables: 234
-Simplify mode: False
-Parallel mode: True
-Input file: ./cnf2dnf_test_data/input_42_0.txt
+Number of polynomials in system: 45
+Number of simplifications applied: 12
 
-To run manually:
-  ./cnf2dnf -t 4 < ./cnf2dnf_test_data/input_42_0.txt
+Input file: ./cnf2dnf_test_data/cnf2dnf_input_42.txt
+
+To run cnf2dnf manually:
+  ./cnf2dnf -t 1 < ./cnf2dnf_test_data/cnf2dnf_input_42.txt
+
+Timing statistics available in staging_stats table
 ```
 
-## Usage
+## Usage Examples
 
 ### Enable Input Capture
 
 ```python
 load('minprimes.sage')
 
-# Set the flag (if using configuration approach)
-SAVE_CNF2DNF_INPUTS = True
-
-# Run normal processing - inputs will be saved automatically
+# Input capture is enabled by default via SAVE_CNF2DNF_INPUTS = True
+# Process normally - inputs will be saved automatically
 SQL_stage2_parallel()
 ```
 
-### Process Runs Normally
+### Disable Input Capture
 
-- Systems are fetched from staging table
-- Processing happens as usual
-- CNF inputs are saved before each cnf2dnf call
-- CNF2DNF runs normally, results go to SQL
-- Multiple files created per system (one per recursive call)
-
-### Identify Long-Running Cases
-
-After processing completes:
-
-```bash
-# Check timing in staging_stats table
-SELECT identifier, cnf2dnf_time
-FROM staging_stats
-WHERE cnf2dnf_time > 60  -- Systems where cnf2dnf took > 60 seconds
-ORDER BY cnf2dnf_time DESC;
+```python
+# Edit minprimes.sage or set at runtime
+SAVE_CNF2DNF_INPUTS = False
+SQL_stage2_parallel()  # No inputs will be saved
 ```
 
-For each interesting identifier, you'll have saved inputs:
-```bash
-ls cnf2dnf_test_data/input_42_*
-# Shows: input_42_0.txt, input_42_1.txt, input_42_2.txt, ...
-# The last sequence number is usually the longest-running one
+### Identify Interesting Test Cases
+
+```python
+# Find long-running cnf2dnf cases
+cursor.execute("""
+    SELECT identifier, cnf2dnf_time
+    FROM staging_stats
+    WHERE cnf2dnf_time > 60
+    ORDER BY cnf2dnf_time DESC
+""")
+
+for row in cursor.fetchall():
+    print(f"System {row[0]}: {row[1]}s")
 ```
 
-## Testing the Captured Inputs
+### Test Captured Inputs
 
 ```bash
+# Find all inputs for system 42
+ls cnf2dnf_test_data/input_42_*.txt
+
 # Test with single thread
 time ./cnf2dnf -t 1 < cnf2dnf_test_data/input_42_0.txt > output.txt
 
 # Test with multiple threads
 time ./cnf2dnf -t 8 < cnf2dnf_test_data/input_42_0.txt > output.txt
 
-# Test with optimized version
-time ./cnf2dnf_optimized -t 8 < cnf2dnf_test_data/input_42_0.txt > output.txt
-
 # Verify correctness
 ./cnf2dnf -V output.txt < cnf2dnf_test_data/input_42_0.txt
 ```
 
-## Performance Impact
+## Error Handling
 
-**Minimal overhead:**
-- Writing text files is fast compared to cnf2dnf execution time
-- Only affects systems being processed (not the database)
-- Can be disabled by setting `SAVE_CNF2DNF_INPUTS = False`
-
-**Disk space:**
-- Most input files are small (< 1 KB)
-- Long-running cases may have larger inputs (few MB)
-- Can clean up after extracting interesting cases
+- **File I/O errors**: Wrapped in try/except to prevent processing failure
+- **Missing identifier**: Gracefully skip saving (cnf2dnf still runs)
+- **Directory creation failure**: Log warning but continue processing
+- **Disk space issues**: Will fail gracefully with OS error
 
 ## Verification Plan
 
 ### 1. Test Basic Functionality
 
 ```python
+# Enable input capture
+SAVE_CNF2DNF_INPUTS = True
+
 # Process a single system
 cursor.execute("SELECT identifier FROM staging WHERE current_status = 'queued' LIMIT 1")
 test_id = cursor.fetchone()[0]
-
-# Enable saving
-SAVE_CNF2DNF_INPUTS = True
 
 # Process it
 SQL_stage2(specific_identifier=test_id, verbose=True)
 
 # Check that files were created
 import os
-files = [f for f in os.listdir('cnf2dnf_test_data') if f.startswith(f'input_{test_id}_')]
-print(f"Created {len(files)} files for system {test_id}")
-assert len(files) >= 2  # At least one input + one meta file
+import glob
+files = glob.glob(f'cnf2dnf_test_data/input_{test_id}_*.txt')
+print(f"Created {len(files)} input files for system {test_id}")
+assert len(files) >= 1  # At least one cnf2dnf call
+
+# Check metadata files exist
+meta_files = glob.glob(f'cnf2dnf_test_data/input_{test_id}_*_meta.txt')
+assert len(meta_files) == len(files)  # One meta per input
 ```
 
 ### 2. Verify File Format
 
 ```python
-# Check input file format
-with open(f'cnf2dnf_test_data/input_{test_id}_0.txt') as f:
+# Check first input file
+input_file = f'cnf2dnf_test_data/input_{test_id}_0.txt'
+with open(input_file) as f:
     lines = f.readlines()
     assert all(set(line.strip()).issubset({'0', '1'}) for line in lines)
-    print(f"Input file has {len(lines)} clauses")
+    print(f"Input file has {len(lines)} CNF clauses")
 
-# Check metadata file
-with open(f'cnf2dnf_test_data/input_{test_id}_0_meta.txt') as f:
+# Check metadata
+meta_file = f'cnf2dnf_test_data/input_{test_id}_0_meta.txt'
+with open(meta_file) as f:
     content = f.read()
     assert f"Staging Identifier: {test_id}" in content
     assert "Sequence Number: 0" in content
+    print("Metadata file looks good")
 ```
 
-### 3. Test Captured Input with cnf2dnf
+### 3. Test cnf2dnf Compatibility
 
 ```bash
 # Should run without errors
 ./cnf2dnf -t 1 < cnf2dnf_test_data/input_*_0.txt > /tmp/test_output.txt
 
-# Output should be valid bitstrings
+# Verify output is valid bitstrings
 head /tmp/test_output.txt
 ```
 
-### 4. Verify Normal Processing Still Works
+### 4. Verify Normal Processing
 
 ```python
 # Processing should complete normally
-# Results should still be written to SQL
 cursor.execute("SELECT current_status FROM staging WHERE identifier = %s", (test_id,))
 status = cursor.fetchone()[0]
-assert status == 'finished'
+assert status == 'finished', f"Expected 'finished', got '{status}'"
+
+# Results should be in database
+cursor.execute("SELECT COUNT(*) FROM prime_ideals_tracking WHERE origin = %s", (test_id,))
+count = cursor.fetchone()[0]
+print(f"System {test_id} generated {count} prime ideals")
 ```
 
-## Critical Files to Modify
+### 5. Performance Impact Test
 
-1. **`/home/baccala/src/helium/minprimes.sage`**
-   - Modify `cnf2dnf_external()` (~line 195-227)
-   - Modify call site in `inner_processing_stage()` (~line 856)
-   - Optionally add global configuration flags (~line 92)
+```python
+import time
+
+# Test with input saving enabled
+SAVE_CNF2DNF_INPUTS = True
+cursor.execute("SELECT identifier FROM staging WHERE current_status = 'queued' LIMIT 5")
+test_ids = [row[0] for row in cursor.fetchall()]
+
+start = time.time()
+for id in test_ids[:3]:
+    SQL_stage2(specific_identifier=id, verbose=False)
+time_with_saving = time.time() - start
+
+# Test with input saving disabled
+SAVE_CNF2DNF_INPUTS = False
+start = time.time()
+for id in test_ids[3:]:
+    SQL_stage2(specific_identifier=id, verbose=False)
+time_without_saving = time.time() - start
+
+overhead = (time_with_saving - time_without_saving) / time_without_saving * 100
+print(f"Input saving overhead: {overhead:.1f}%")
+# Should be < 5% for typical systems
+```
 
 ## Integration Notes
 
-- **Non-breaking change**: Default `save_input=False` means no behavior change unless explicitly enabled
-- **Backward compatible**: Existing code continues to work
-- **Independent**: Doesn't affect database operations or parallel processing
-- **Configurable**: Can be enabled/disabled with a global flag
-- **Safe**: Only writes to filesystem, never modifies SQL
+**Changes to existing code:**
+- Modify `cnf2dnf_external()` signature (add optional parameters)
+- Add input saving logic before subprocess call
+- Modify one call site in `inner_processing_stage()`
+- Add two global configuration variables
+
+**Backward compatibility:**
+- Default `save_input=False` means no behavior change
+- Can be disabled by setting `SAVE_CNF2DNF_INPUTS = False`
+- No changes to database schema or SQL operations
+- No impact on parallel processing or results
+
+**Safety:**
+- File I/O errors won't crash processing (can wrap in try/except)
+- Only writes to filesystem, never modifies SQL
+- Minimal performance overhead (< 5%)
 
 ## Future Enhancements
 
-1. **Conditional saving**: Only save if CNF is larger than threshold
-2. **Timing annotation**: Add actual cnf2dnf execution time to metadata after completion
-3. **Cleanup utility**: Script to remove small/fast cases, keep only interesting ones
-4. **Compression**: Automatically gzip large input files
-5. **Database logging**: Track which files were saved in a separate SQL table
+1. **Conditional saving**: Only save if CNF size > threshold
+2. **Timing annotation**: Add actual execution time to metadata after cnf2dnf completes
+3. **Cleanup utility**: Script to keep only long-running cases
+4. **Compression**: Automatically gzip large files
+5. **Database tracking**: Optional SQL table to log saved files
