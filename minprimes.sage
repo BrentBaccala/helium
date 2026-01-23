@@ -485,6 +485,7 @@ CREATE TABLE staging_stats (
       identifier INTEGER,
       node VARCHAR,
       pid INTEGER,
+      start_time TIMESTAMP,
       memory_utilization BIGINT
 );
 
@@ -704,15 +705,18 @@ class Statistics(dict):
         # Create a temporary dictionary for SQL insertion
         sql_data = dict(self)
         sql_data['total_time'] = ts - sql_data['START'] - sql_data['suspended_time']
+        sql_data['start_time'] = datetime.datetime.fromtimestamp(sql_data['START'])
         del sql_data['START']
         del sql_data['LAST']
         if '_suspend_start' in sql_data:
             del sql_data['_suspend_start']
 
         for k in sql_data:
-            if k.endswith('_time'):
+            if k.endswith('_time') and k != 'start_time':
                 sql_data[k] = datetime.timedelta(seconds = float(sql_data[k]))
                 cursor.execute(f"ALTER TABLE staging_stats ADD COLUMN IF NOT EXISTS {k} INTERVAL")
+            elif k == 'start_time':
+                cursor.execute(f"ALTER TABLE staging_stats ADD COLUMN IF NOT EXISTS {k} TIMESTAMP")
             elif k not in ('identifier', 'node', 'pid', 'memory_utilization'):
                 cursor.execute(f"ALTER TABLE staging_stats ADD COLUMN IF NOT EXISTS {k} INTEGER")
 
