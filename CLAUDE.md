@@ -75,6 +75,30 @@ The `cnf2dnf.cc` program converts factored polynomial systems from conjunctive n
 
 Database name follows pattern `helium-{ansatz}` (e.g., `helium-16.6`).
 
+### Connecting to the PostgreSQL database
+
+There are two primary computation environments in use, each with its own PostgreSQL installation.
+
+- 'samsung' is my development laptop.  I usually use it for a fast calculation called "hydrogen-5" for testing.
+- 'edge' is a Cisco C200 with 12 cores and 96 GB of RAM.  It's running a long difficult calculation called "helium-16.6".
+
+Both databases are called `helium-16.6`, even though the one on 'samsung' is actually used for "hydrogen-5".
+
+### Custom SageMath build
+
+A custom SageMath build is needed for two reasons:
+
+- faster simplifyIdeal function
+- a specialized pickle format
+
+If you get this message:
+
+```
+AttributeError: Can't get attribute 'unpickle_MPolynomial_libsingular_bytestring' on <module 'sage.rings.polynomial.multi_polynomial_libsingular' from '/home/baccala/miniforge3/lib/python3.12/site-packages/sage/rings/polynomial/multi_polynomial_libsingular.cpython-312-x86_64-linux-gnu.so'>
+```
+
+It's probably because you're not running a custom version of SageMath with a custom unpickling thing that I've written
+
 ## Dependencies
 
 - SageMath 9.x+
