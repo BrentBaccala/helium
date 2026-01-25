@@ -1,8 +1,32 @@
 # Plan: Capture CNF2DNF Input Data During Processing
 
+**Document Version:** 2.0 (Updated January 2026)
+**Implementation Status:** ✅ COMPLETED
+
+## Quick Reference
+
+**What this document covers:**
+1. **CNF2DNF Input Capture** - Automatically save cnf2dnf input bitstrings to disk for testing and performance analysis
+2. **Skip SQL Updates** - Re-run finished systems without modifying the database (useful for capturing inputs post-hoc)
+
+**Quick Start:**
+```python
+# Capture inputs from a specific system (auto-enabled)
+SQL_stage2(requested_identifier=42)
+
+# Re-run a finished system to capture inputs (safe, no database changes)
+SQL_stage2(requested_identifier=99)  # if system 99 is 'finished'
+
+# Enable globally for all processing
+SAVE_CNF2DNF_INPUTS = True
+SQL_stage2_parallel()
+```
+
 ## Overview
 
 Instrument `minprimes.sage` to automatically save cnf2dnf input data to disk during normal processing. This captures real-world test cases from production runs without interrupting the workflow. The cnf2dnf program runs normally and writes results to SQL as usual.
+
+Additionally, the implementation includes a "skip SQL updates" feature that allows re-running finished systems without modifying the database - particularly useful for capturing test data from already-completed production runs.
 
 ## Implementation Status: ✅ COMPLETED
 
@@ -13,6 +37,12 @@ Instrument `minprimes.sage` to automatically save cnf2dnf input data to disk dur
 - Flag is **passed through function call chain** (not stored in stats dictionary)
 - Saves to `./cnf2dnf_test_data/input_{identifier}_{sequence}.txt`
 - Sequence counter tracks multiple cnf2dnf calls during recursive processing
+
+**Bonus Feature: Re-run Finished Systems Without SQL Updates**
+- When `SQL_stage2(requested_identifier=X)` is called on a system with status 'finished', the system is re-run without any database modifications
+- Useful for capturing cnf2dnf inputs from already-completed systems
+- No changes to: staging status, prime_ideals, globals, staging_stats tables
+- Stats are still printed to console but not saved to database
 
 ## Requirements
 
@@ -129,7 +159,7 @@ cmd = ['./cnf2dnf', '-t', str(num_processes if parallel else 1)]
 # ... rest of existing code ...
 ```
 
-### 4. Pass Flag Through Function Call Chain
+### 4. Pass save_cnf2dnf_inputs Flag Through Function Call Chain
 
 **Location:** Multiple functions need to be updated to pass the `save_cnf2dnf_inputs` flag
 
@@ -156,23 +186,102 @@ simplifications, subsystems = inner_processing_stage(system, initial_simplificat
 processing_stage(subsystem, simplifications, origin, start_time=start_time, verbose=verbose, stats=stats, save_cnf2dnf_inputs=save_cnf2dnf_inputs)
 ```
 
-**e) Enable in `SQL_stage2()` when processing specific identifier (lines 1042-1044):**
+**e) Enable in `SQL_stage2()` when processing specific identifier (lines 1065-1067):**
 ```python
 # Enable CNF2DNF input capture when processing a specific identifier
 save_inputs = (requested_identifier is not None) or SAVE_CNF2DNF_INPUTS
-processing_stage(system, simplifications, identifier, verbose=verbose, stats=stats, save_cnf2dnf_inputs=save_inputs)
+processing_stage(system, simplifications, identifier, verbose=verbose, stats=stats, save_cnf2dnf_inputs=save_inputs, skip_sql_updates=skip_sql_updates)
 ```
 
-## Critical Files to Modify
+### 5. Pass skip_sql_updates Flag Through Function Call Chain
+
+**Location:** Multiple functions need to be updated to pass the `skip_sql_updates` flag
+
+**a) Detect finished systems in `SQL_stage2()` (lines 1008-1032):**
+```python
+skip_sql_updates = False
+if requested_identifier:
+    # First check if it's already finished
+    cursor.execute("""SELECT system, simplifications, identifier, current_status
+                      FROM staging
+                      WHERE identifier = %s""", (int(requested_identifier),))
+    if cursor.rowcount > 0:
+        result = cursor.fetchone()
+        if result[3] == 'finished':
+            # System is already finished - rerun without SQL updates
+            skip_sql_updates = True
+            packed_system, packed_simplifications, identifier = result[0], result[1], result[2]
+            print(f"System {identifier} already finished - rerunning without SQL updates")
+```
+
+**b) Modify `processing_stage()` signature and skip dump_to_SQL (line 960, 972):**
+```python
+def processing_stage(system, initial_simplifications, origin, start_time=None, verbose=False, stats=None, save_cnf2dnf_inputs=False, skip_sql_updates=False):
+...
+if not skip_sql_updates:
+    dump_to_SQL(subsystem, simplifications, origin, stats=stats, verbose=verbose)
+```
+
+**c) Modify `inner_processing_stage()` signature and pass to save_global/polish_system (line 857, 872, 876, 880):**
+```python
+def inner_processing_stage(system, initial_simplifications, origin, verbose=False, stats=None, save_cnf2dnf_inputs=False, skip_sql_updates=False):
+...
+polish_system(system, initial_simplifications, origin, stats=stats, skip_sql_updates=skip_sql_updates)
+...
+save_global(s, stats=stats, skip_sql_updates=skip_sql_updates)
+```
+
+**d) Modify `polish_system()` to skip all SQL operations (line 814, 824):**
+```python
+def polish_system(system, simplifications, origin, stats=None, skip_sql_updates=False):
+...
+if not skip_sql_updates:
+    with conn.cursor() as cursor:
+        # All SQL operations here
+```
+
+**e) Modify `save_global()` to return early (line 586-589):**
+```python
+def save_global(obj, stats=None, skip_sql_updates=False):
+    if skip_sql_updates:
+        # When skipping SQL updates, just return the object without saving to globals table
+        return GlobalWithTag(obj, 0)
+```
+
+**f) Skip stats and status updates in `SQL_stage2()` (lines 1068-1076, 1078-1087):**
+```python
+if not skip_sql_updates:
+    cursor.execute("""UPDATE staging SET current_status = 'finished' WHERE identifier = %s""", (identifier,))
+    stats.insert_into_SQL(cursor)
+    print(stats)
+    conn.commit()
+else:
+    print(stats)  # Just print, don't save
+...
+# Error handlers also check skip_sql_updates before doing SQL operations
+```
+
+## Critical Files Modified
 
 ### `/home/baccala/src/helium/minprimes.sage`
 
-**Add new function after line 882** (after `unpack_eqns` definition)
+**All modifications are in this single file.**
+
+**Modified functions (with line numbers):**
+- Configuration flags (lines 94-96)
+- `cnf2dnf_external()` (lines 198-237) - added save_input logic
+- `cnf2dnf_checking()` (lines 282-290) - added save_input parameter
+- `save_global()` (lines 586-603) - added skip_sql_updates logic
+- `polish_system()` (lines 814-850) - added skip_sql_updates logic
+- `inner_processing_stage()` (lines 857-920) - added both flags
+- `processing_stage()` (lines 960-978) - added both flags
+- `SQL_stage2()` (lines 996-1095) - detection logic and flag passing
 
 **Dependencies:**
-- Database connection: `conn` and `conn2` (already global)
-- Existing functions: `unpack_eqns()`, `simplifyIdeal()`, `factor_eqns()`
+- Database connections: `conn` and `conn2` (already global)
+- Existing functions: `unpack_eqns()`, `simplifyIdeal()`, `factor_eqns()`, `cnf2dnf()`
 - Global caches: `persistent_data`, `persistent_data_inverse`
+- Configuration: `SAVE_CNF2DNF_INPUTS`, `CNF2DNF_INPUT_DIR`
 
 ## File Format Specifications
 
@@ -219,7 +328,24 @@ Timing statistics available in staging_stats table
 load('minprimes.sage')
 
 # Input capture is automatically enabled when processing a specific identifier
+# If system 42 has status 'queued' or 'interrupted': normal processing with SQL updates
+# If system 42 has status 'finished': re-run without SQL updates (safe)
 SQL_stage2(requested_identifier=42)  # Inputs automatically saved to ./cnf2dnf_test_data/
+```
+
+### Capture Inputs from Already-Finished System
+
+```python
+load('minprimes.sage')
+
+# Re-run system 99 (which is finished) to capture cnf2dnf inputs without modifying database
+SQL_stage2(requested_identifier=99)
+
+# Output will show:
+# System 99 already finished - rerunning without SQL updates
+# <processing happens>
+# Saved CNF input: ./cnf2dnf_test_data/input_99_0.txt
+# <stats printed but not saved>
 ```
 
 ### Normal Parallel Processing (No Input Capture)
@@ -239,6 +365,27 @@ load('minprimes.sage')
 # Manually enable input capture for all processing
 SAVE_CNF2DNF_INPUTS = True
 SQL_stage2_parallel()  # All inputs will be saved
+```
+
+### Batch Capture Inputs from Multiple Finished Systems
+
+```python
+load('minprimes.sage')
+
+# Find long-running finished systems
+cursor.execute("""
+    SELECT s.identifier
+    FROM staging s
+    JOIN staging_stats st ON s.identifier = st.identifier
+    WHERE s.current_status = 'finished' AND st.cnf2dnf_time > 60
+    ORDER BY st.cnf2dnf_time DESC
+    LIMIT 10
+""")
+
+# Re-run each to capture inputs (no database modifications)
+for row in cursor.fetchall():
+    print(f"Capturing inputs from system {row[0]}")
+    SQL_stage2(requested_identifier=row[0])
 ```
 
 ### Identify Interesting Test Cases
@@ -376,6 +523,8 @@ print(f"Input saving overhead: {overhead:.1f}%")
 ## Integration Notes
 
 **Changes to existing code:**
+
+*CNF2DNF Input Capture:*
 - Modified `cnf2dnf_external()` signature to add `save_input` and `output_dir` parameters
 - Modified `cnf2dnf_checking()` signature to add `save_input` and `output_dir` parameters
 - Added input saving logic in `cnf2dnf_external()` before subprocess call
@@ -384,22 +533,129 @@ print(f"Input saving overhead: {overhead:.1f}%")
 - Updated `SQL_stage2()` to enable input capture when processing specific identifier
 - Added two global configuration variables (`SAVE_CNF2DNF_INPUTS`, `CNF2DNF_INPUT_DIR`)
 
+*Skip SQL Updates Feature:*
+- Modified `SQL_stage2()` to detect finished systems and set `skip_sql_updates=True`
+- Modified `processing_stage()` signature to add `skip_sql_updates` parameter
+- Modified `inner_processing_stage()` signature to add `skip_sql_updates` parameter
+- Modified `polish_system()` signature to add `skip_sql_updates` parameter
+- Modified `save_global()` signature to add `skip_sql_updates` parameter
+- Wrapped SQL operations in conditional checks throughout the call chain
+- Updated error handlers to skip SQL operations when flag is True
+
 **Backward compatibility:**
 - `SAVE_CNF2DNF_INPUTS = False` by default means no behavior change for normal processing
 - Automatically enabled when using `SQL_stage2(requested_identifier=...)`
 - Can be manually enabled by setting `SAVE_CNF2DNF_INPUTS = True`
+- Systems with status 'queued' or 'interrupted' process normally with SQL updates
+- Systems with status 'finished' are re-run without SQL updates (safe, read-only)
 - No changes to database schema or SQL operations
 - No impact on parallel processing or results
 
 **Design decisions:**
-- Flag passed through function call chain rather than stored in stats dictionary
+- Both flags (`save_cnf2dnf_inputs`, `skip_sql_updates`) passed through function call chain rather than stored in stats dictionary
 - Keeps stats clean and makes data flow explicit
 - Counter for sequence numbers stored in stats (temporary, per-system data)
+- Skip SQL feature is automatic based on system status, not a user-controlled flag
 
 **Safety:**
 - File I/O errors won't crash processing (can wrap in try/except if needed)
-- Only writes to filesystem, never modifies SQL
-- Minimal performance overhead (< 5%)
+- Only writes to filesystem, never modifies SQL when skip_sql_updates=True
+- Re-running finished systems is completely safe (read-only database access)
+- Minimal performance overhead (< 5%) for input capture
+
+## Re-running Finished Systems (Skip SQL Updates Feature)
+
+### Purpose
+
+When processing a system with `requested_identifier` that has status 'finished', the system automatically re-runs the processing without making any database modifications. This is particularly useful for:
+
+1. **Capturing cnf2dnf inputs** from already-completed systems without re-computing database results
+2. **Testing and debugging** processing on known systems without affecting the database
+3. **Performance profiling** without database overhead
+
+### Implementation Details
+
+**Detection (SQL_stage2, lines 1008-1032):**
+```python
+skip_sql_updates = False
+if requested_identifier:
+    cursor.execute("""SELECT system, simplifications, identifier, current_status
+                      FROM staging WHERE identifier = %s""", (int(requested_identifier),))
+    if cursor.rowcount > 0:
+        result = cursor.fetchone()
+        if result[3] == 'finished':
+            skip_sql_updates = True
+            print(f"System {identifier} already finished - rerunning without SQL updates")
+        else:
+            # Normal processing with status update
+```
+
+**Flag propagation through call chain:**
+- `SQL_stage2()` → `processing_stage()` → `inner_processing_stage()` → `polish_system()`, `save_global()`
+
+**Modified functions:**
+- `processing_stage(skip_sql_updates=False)` - skips `dump_to_SQL()` when True
+- `inner_processing_stage(skip_sql_updates=False)` - passes flag to `save_global()` and `polish_system()`
+- `polish_system(skip_sql_updates=False)` - wraps all SQL operations with `if not skip_sql_updates:`
+- `save_global(skip_sql_updates=False)` - returns early without inserting to globals table
+
+**Skipped SQL operations when flag is True:**
+- Status updates in staging table
+- Inserts to globals table (`save_global()`)
+- Inserts to prime_ideals table (`polish_system()`)
+- Inserts to prime_ideals_tracking table (`polish_system()`)
+- Inserts to staging table (`dump_to_SQL()`)
+- Inserts to staging_stats table (`stats.insert_into_SQL()`)
+
+**Error handling (lines 1067-1087):**
+- SQL rollback and status updates are also skipped when `skip_sql_updates=True`
+
+### Usage Example
+
+```python
+# Re-run system 42 (which is already finished) to capture cnf2dnf inputs
+# without modifying the database
+SQL_stage2(requested_identifier=42)
+
+# Output:
+# System 42 already finished - rerunning without SQL updates
+# <normal processing output>
+# Saved CNF input: ./cnf2dnf_test_data/input_42_0.txt
+# Saved CNF input: ./cnf2dnf_test_data/input_42_1.txt
+# <stats printed but not saved to SQL>
+```
+
+**What happens:**
+1. Detects system 42 has status 'finished'
+2. Loads system data without changing status
+3. Runs full processing (simplify, factor, cnf2dnf, GTZ)
+4. Captures cnf2dnf inputs to disk (if enabled)
+5. Prints stats to console
+6. Does NOT update any database tables
+7. Does NOT change system status
+
+**Benefits:**
+- Safe to run on production databases
+- No interference with existing results
+- Can capture test data from completed runs
+- Useful for performance analysis and debugging
+
+## Summary: How Both Features Work Together
+
+The two features (CNF2DNF input capture and skip SQL updates) work synergistically:
+
+| System Status | SQL Updates? | Input Capture? | Use Case |
+|---------------|--------------|----------------|----------|
+| queued/interrupted | ✅ Yes | ✅ Yes (auto) | Normal first-time processing |
+| finished | ❌ No | ✅ Yes (auto) | Re-run to capture inputs from completed system |
+| any (parallel) | ✅ Yes | ❌ No (default) | Bulk processing without input capture |
+| any (parallel) | ✅ Yes | ✅ Yes (manual) | Bulk processing with global input capture enabled |
+
+**Key insight:** When you call `SQL_stage2(requested_identifier=X)`:
+- If system X is not finished → processes normally, saves to SQL, captures inputs
+- If system X is finished → re-runs without SQL changes, still captures inputs
+
+This allows you to safely capture cnf2dnf test data from production runs after they complete, without any risk of corrupting the database.
 
 ## Future Enhancements
 
@@ -408,3 +664,5 @@ print(f"Input saving overhead: {overhead:.1f}%")
 3. **Cleanup utility**: Script to keep only long-running cases
 4. **Compression**: Automatically gzip large files
 5. **Database tracking**: Optional SQL table to log saved files
+6. **Skip SQL mode by flag**: Add explicit parameter to enable skip_sql_updates independently of system status
+7. **Batch processing helper**: Convenience function to capture inputs from multiple systems at once
