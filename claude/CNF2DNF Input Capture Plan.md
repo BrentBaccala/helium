@@ -4,6 +4,16 @@
 
 Instrument `minprimes.sage` to automatically save cnf2dnf input data to disk during normal processing. This captures real-world test cases from production runs without interrupting the workflow. The cnf2dnf program runs normally and writes results to SQL as usual.
 
+## Implementation Status: ✅ COMPLETED
+
+**Key Implementation Details:**
+- Input capture is **disabled by default** (`SAVE_CNF2DNF_INPUTS = False`)
+- **Automatically enabled** when processing a specific identifier: `SQL_stage2(requested_identifier=42)`
+- Can be **manually enabled globally** by setting `SAVE_CNF2DNF_INPUTS = True`
+- Flag is **passed through function call chain** (not stored in stats dictionary)
+- Saves to `./cnf2dnf_test_data/input_{identifier}_{sequence}.txt`
+- Sequence counter tracks multiple cnf2dnf calls during recursive processing
+
 ## Requirements
 
 - Save input bitstrings to disk BEFORE each cnf2dnf call
@@ -48,31 +58,31 @@ cnf2dnf_test_data/input_42_2.txt      # Third call (recursive)
 
 ### 1. Add Configuration Flags
 
-**Location:** Near top of `minprimes.sage` (~line 92, after imports)
+**Location:** Near top of `minprimes.sage` (lines 94-96, after imports)
 
 ```python
 # Configuration for CNF2DNF input capture
-SAVE_CNF2DNF_INPUTS = True
+SAVE_CNF2DNF_INPUTS = False  # Disabled by default; auto-enabled when processing specific identifier
 CNF2DNF_INPUT_DIR = './cnf2dnf_test_data/'
 ```
 
-### 2. Track Call Sequence in Statistics
+**Note:** Input capture is disabled by default and automatically enabled when processing a specific identifier via `SQL_stage2(requested_identifier=...)`.
 
-**Location:** In `inner_processing_stage()` initialization (~line 813)
+### 2. Track Call Sequence in cnf2dnf_external()
 
-```python
-# Initialize cnf2dnf call counter
-stats['cnf2dnf_call_count'] = 0
-```
+The call sequence counter is tracked in the stats dictionary within `cnf2dnf_external()` itself, initialized on first use.
 
-### 3. Modify cnf2dnf_external() Function
+### 3. Modify cnf2dnf_external() and cnf2dnf_checking() Functions
 
-**Location:** Lines 195-227
+**Location:** Lines 198-237 (cnf2dnf_external), Lines 282-287 (cnf2dnf_checking)
 
-**Add to function signature:**
+**Add to function signatures:**
 ```python
 def cnf2dnf_external(cnf_bitsets, simplify=False, parallel=False,
                      stats=None, verbose=False, save_input=False, output_dir='./cnf2dnf_test_data/'):
+
+def cnf2dnf_checking(cnf_bitsets, parallel=False, stats=None, verbose=False,
+                     save_input=False, output_dir='./cnf2dnf_test_data/'):
 ```
 
 **Add before subprocess call (~line 200):**
@@ -119,23 +129,38 @@ cmd = ['./cnf2dnf', '-t', str(num_processes if parallel else 1)]
 # ... rest of existing code ...
 ```
 
-### 4. Enable at Call Site
+### 4. Pass Flag Through Function Call Chain
 
-**Location:** In `inner_processing_stage()` ~line 856
+**Location:** Multiple functions need to be updated to pass the `save_cnf2dnf_inputs` flag
 
-**Modify the cnf2dnf_external call:**
-
-Before:
+**a) Modify `inner_processing_stage()` signature (line 857):**
 ```python
-dnf = cnf2dnf_external(cnf_bitsets, simplify=False, parallel=parallel_execution,
-                       stats=stats, verbose=verbose)
+def inner_processing_stage(system, initial_simplifications, origin, verbose=False, stats=None, save_cnf2dnf_inputs=False):
 ```
 
-After:
+**b) Pass flag to cnf2dnf in `inner_processing_stage()` (lines 897-899):**
 ```python
-dnf = cnf2dnf_external(cnf_bitsets, simplify=False, parallel=parallel_execution,
-                       stats=stats, verbose=verbose,
-                       save_input=SAVE_CNF2DNF_INPUTS, output_dir=CNF2DNF_INPUT_DIR)
+dnf_bitsets = cnf2dnf(cnf_bitsets, stats=stats, verbose=verbose,
+                      save_input=save_cnf2dnf_inputs, output_dir=CNF2DNF_INPUT_DIR)
+```
+
+**c) Modify `processing_stage()` signature (line 960):**
+```python
+def processing_stage(system, initial_simplifications, origin, start_time=None, verbose=False, stats=None, save_cnf2dnf_inputs=False):
+```
+
+**d) Pass flag to `inner_processing_stage()` and recursive calls in `processing_stage()` (lines 965, 976):**
+```python
+simplifications, subsystems = inner_processing_stage(system, initial_simplifications, origin, verbose=verbose, stats=stats, save_cnf2dnf_inputs=save_cnf2dnf_inputs)
+...
+processing_stage(subsystem, simplifications, origin, start_time=start_time, verbose=verbose, stats=stats, save_cnf2dnf_inputs=save_cnf2dnf_inputs)
+```
+
+**e) Enable in `SQL_stage2()` when processing specific identifier (lines 1042-1044):**
+```python
+# Enable CNF2DNF input capture when processing a specific identifier
+save_inputs = (requested_identifier is not None) or SAVE_CNF2DNF_INPUTS
+processing_stage(system, simplifications, identifier, verbose=verbose, stats=stats, save_cnf2dnf_inputs=save_inputs)
 ```
 
 ## Critical Files to Modify
@@ -188,22 +213,32 @@ Timing statistics available in staging_stats table
 
 ## Usage Examples
 
-### Enable Input Capture
+### Process Specific Identifier with Automatic Input Capture
 
 ```python
 load('minprimes.sage')
 
-# Input capture is enabled by default via SAVE_CNF2DNF_INPUTS = True
-# Process normally - inputs will be saved automatically
-SQL_stage2_parallel()
+# Input capture is automatically enabled when processing a specific identifier
+SQL_stage2(requested_identifier=42)  # Inputs automatically saved to ./cnf2dnf_test_data/
 ```
 
-### Disable Input Capture
+### Normal Parallel Processing (No Input Capture)
 
 ```python
-# Edit minprimes.sage or set at runtime
-SAVE_CNF2DNF_INPUTS = False
-SQL_stage2_parallel()  # No inputs will be saved
+load('minprimes.sage')
+
+# By default, no inputs are saved during parallel processing
+SQL_stage2_parallel()  # No inputs saved
+```
+
+### Enable Input Capture Globally
+
+```python
+load('minprimes.sage')
+
+# Manually enable input capture for all processing
+SAVE_CNF2DNF_INPUTS = True
+SQL_stage2_parallel()  # All inputs will be saved
 ```
 
 ### Identify Interesting Test Cases
@@ -249,15 +284,12 @@ time ./cnf2dnf -t 8 < cnf2dnf_test_data/input_42_0.txt > output.txt
 ### 1. Test Basic Functionality
 
 ```python
-# Enable input capture
-SAVE_CNF2DNF_INPUTS = True
-
-# Process a single system
+# Process a single system (input capture is automatically enabled)
 cursor.execute("SELECT identifier FROM staging WHERE current_status = 'queued' LIMIT 1")
 test_id = cursor.fetchone()[0]
 
-# Process it
-SQL_stage2(specific_identifier=test_id, verbose=True)
+# Process it - input capture is automatically enabled when requested_identifier is specified
+SQL_stage2(requested_identifier=test_id, verbose=True)
 
 # Check that files were created
 import os
@@ -319,22 +351,22 @@ print(f"System {test_id} generated {count} prime ideals")
 ```python
 import time
 
-# Test with input saving enabled
-SAVE_CNF2DNF_INPUTS = True
 cursor.execute("SELECT identifier FROM staging WHERE current_status = 'queued' LIMIT 5")
 test_ids = [row[0] for row in cursor.fetchall()]
 
+# Test with input saving enabled (using requested_identifier automatically enables it)
 start = time.time()
 for id in test_ids[:3]:
-    SQL_stage2(specific_identifier=id, verbose=False)
+    SQL_stage2(requested_identifier=id, verbose=False)
 time_with_saving = time.time() - start
 
-# Test with input saving disabled
+# Test with input saving disabled (process without specifying identifier, or set flag to False)
 SAVE_CNF2DNF_INPUTS = False
 start = time.time()
 for id in test_ids[3:]:
-    SQL_stage2(specific_identifier=id, verbose=False)
+    SQL_stage2(requested_identifier=id, verbose=False)
 time_without_saving = time.time() - start
+SAVE_CNF2DNF_INPUTS = False  # Reset to default
 
 overhead = (time_with_saving - time_without_saving) / time_without_saving * 100
 print(f"Input saving overhead: {overhead:.1f}%")
@@ -344,19 +376,28 @@ print(f"Input saving overhead: {overhead:.1f}%")
 ## Integration Notes
 
 **Changes to existing code:**
-- Modify `cnf2dnf_external()` signature (add optional parameters)
-- Add input saving logic before subprocess call
-- Modify one call site in `inner_processing_stage()`
-- Add two global configuration variables
+- Modified `cnf2dnf_external()` signature to add `save_input` and `output_dir` parameters
+- Modified `cnf2dnf_checking()` signature to add `save_input` and `output_dir` parameters
+- Added input saving logic in `cnf2dnf_external()` before subprocess call
+- Modified `inner_processing_stage()` signature to add `save_cnf2dnf_inputs` parameter
+- Modified `processing_stage()` signature to add `save_cnf2dnf_inputs` parameter
+- Updated `SQL_stage2()` to enable input capture when processing specific identifier
+- Added two global configuration variables (`SAVE_CNF2DNF_INPUTS`, `CNF2DNF_INPUT_DIR`)
 
 **Backward compatibility:**
-- Default `save_input=False` means no behavior change
-- Can be disabled by setting `SAVE_CNF2DNF_INPUTS = False`
+- `SAVE_CNF2DNF_INPUTS = False` by default means no behavior change for normal processing
+- Automatically enabled when using `SQL_stage2(requested_identifier=...)`
+- Can be manually enabled by setting `SAVE_CNF2DNF_INPUTS = True`
 - No changes to database schema or SQL operations
 - No impact on parallel processing or results
 
+**Design decisions:**
+- Flag passed through function call chain rather than stored in stats dictionary
+- Keeps stats clean and makes data flow explicit
+- Counter for sequence numbers stored in stats (temporary, per-system data)
+
 **Safety:**
-- File I/O errors won't crash processing (can wrap in try/except)
+- File I/O errors won't crash processing (can wrap in try/except if needed)
 - Only writes to filesystem, never modifies SQL
 - Minimal performance overhead (< 5%)
 

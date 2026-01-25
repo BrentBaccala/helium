@@ -91,6 +91,10 @@ import traceback
 # so completely occupy the cores while leaving the other threads available.
 num_processes = os.cpu_count() / 2
 
+# Configuration for CNF2DNF input capture
+SAVE_CNF2DNF_INPUTS = False  # Disabled by default; auto-enabled when processing specific identifier
+CNF2DNF_INPUT_DIR = './cnf2dnf_test_data/'
+
 try:
     from clint.textui.progress import Bar
     # like Bar, but don't display ProgressBar at all if the whole event takes less than a second
@@ -192,8 +196,47 @@ def factor_eqn(eqn):
 # I've tried several ways to do this, starting with native Python code and later using
 # the program "espresso".  Most recently, I've been using a custom C++ program.
 
-def cnf2dnf_external(cnf_bitsets, simplify=False, parallel=False, stats=None, verbose=False):
+def cnf2dnf_external(cnf_bitsets, simplify=False, parallel=False, stats=None, verbose=False,
+                     save_input=False, output_dir='./cnf2dnf_test_data/'):
 
+    # Save input if requested
+    if save_input and stats and 'identifier' in stats:
+        identifier = stats['identifier']
+
+        # Track call sequence
+        if 'cnf2dnf_call_count' not in stats:
+            stats['cnf2dnf_call_count'] = 0
+        sequence = stats['cnf2dnf_call_count']
+        stats['cnf2dnf_call_count'] += 1
+
+        # Create output directory
+        os.makedirs(output_dir, exist_ok=True)
+
+        # Save input file
+        input_filename = os.path.join(output_dir, f'input_{identifier}_{sequence}.txt')
+        with open(input_filename, 'w') as f:
+            for bs in cnf_bitsets:
+                f.write(str(bs))
+                f.write('\n')
+
+        # Save metadata
+        meta_filename = os.path.join(output_dir, f'input_{identifier}_{sequence}_meta.txt')
+        with open(meta_filename, 'w') as f:
+            f.write(f"Staging Identifier: {identifier}\n")
+            f.write(f"Sequence Number: {sequence}\n")
+            f.write(f"Number of CNF clauses: {len(cnf_bitsets)}\n")
+            f.write(f"Number of Boolean variables: {cnf_bitsets[0].capacity() if cnf_bitsets else 0}\n")
+            f.write(f"Simplify mode: {simplify}\n")
+            f.write(f"Parallel mode: {parallel}\n")
+            f.write(f"Input file: {input_filename}\n")
+            f.write(f"\nTo run manually:\n")
+            num_threads = num_processes if parallel else 1
+            f.write(f"  ./cnf2dnf -t {num_threads} < {input_filename}\n")
+
+        if verbose:
+            print(f"Saved CNF input: {input_filename}")
+
+    # Continue with normal cnf2dnf execution
     cmd = ['./cnf2dnf', '-t', str(num_processes if parallel else 1)]
     if simplify:
         cmd.append('-s')
@@ -236,10 +279,12 @@ def cnf2dnf_external(cnf_bitsets, simplify=False, parallel=False, stats=None, ve
 # The C++ cnf2dnf program has exhibited enough bugs that I now perform dualization
 # verification on every cnf2dnf calculation.
 
-def cnf2dnf_checking(cnf_bitsets, parallel=False, stats=None, verbose=False):
+def cnf2dnf_checking(cnf_bitsets, parallel=False, stats=None, verbose=False,
+                     save_input=False, output_dir='./cnf2dnf_test_data/'):
     # it might be a generator, so convert it to a list since we're going to loop over it twice
     cnf_bitsets = list(cnf_bitsets)
-    retval = cnf2dnf_external(cnf_bitsets, parallel=parallel, stats=stats, verbose=verbose)
+    retval = cnf2dnf_external(cnf_bitsets, parallel=parallel, stats=stats, verbose=verbose,
+                              save_input=save_input, output_dir=output_dir)
     if verbose:
         print(time.ctime(), f"system {stats['identifier']} : cnf2dnf verifying")
     simplified = cnf2dnf_external(cnf_bitsets, simplify=True, parallel=parallel, stats=None, verbose=False)
@@ -809,7 +854,7 @@ def polish_system(system, simplifications, origin, stats=None):
 # returns a tuple of all of the simplifications that have been applied and the systems;
 # the systems are a tuple of tuples of irreducible polynomials
 
-def inner_processing_stage(system, initial_simplifications, origin, verbose=False, stats=None):
+def inner_processing_stage(system, initial_simplifications, origin, verbose=False, stats=None, save_cnf2dnf_inputs=False):
     if verbose: print(time.ctime(), 'system', origin, ': simplifyIdeal')
     eqns,s = simplifyIdeal(list(system))
     if stats:
@@ -849,7 +894,8 @@ def inner_processing_stage(system, initial_simplifications, origin, verbose=Fals
     # cnf2dnf records its own timing statistics and prints its own status messages
     all_factors = tuple(f for l in eqns_factors for f in l)
     cnf_bitsets = [FrozenBitset(tuple(all_factors.index(f) for f in l), capacity=len(all_factors)) for l in eqns_factors]
-    dnf_bitsets = cnf2dnf(cnf_bitsets, stats=stats, verbose=verbose)
+    dnf_bitsets = cnf2dnf(cnf_bitsets, stats=stats, verbose=verbose,
+                          save_input=save_cnf2dnf_inputs, output_dir=CNF2DNF_INPUT_DIR)
 
     # now we've got set of systems of polynomials, all polynomials irreducible
     # discard systems if there is no energy dependency in either the simplifications or the systems (considered individually)
@@ -911,12 +957,12 @@ def dump_to_SQL(eqns, simplifications, origin, stats=None, verbose=False):
 # Of course, the remaining inner stages might run very quickly, but we don't know that, unless
 # we're willing to start them running and then kill them, which we currently don't do.
 
-def processing_stage(system, initial_simplifications, origin, start_time=None, verbose=False, stats=None):
+def processing_stage(system, initial_simplifications, origin, start_time=None, verbose=False, stats=None, save_cnf2dnf_inputs=False):
     if stats:
         stats['stages'] += int(1)
     if not start_time:
         start_time = time.time()
-    simplifications, subsystems = inner_processing_stage(system, initial_simplifications, origin, verbose=verbose, stats=stats)
+    simplifications, subsystems = inner_processing_stage(system, initial_simplifications, origin, verbose=verbose, stats=stats, save_cnf2dnf_inputs=save_cnf2dnf_inputs)
     elapsed_time = time.time() - start_time
     if subsystems:
         for subsystem in subsystems:
@@ -927,7 +973,7 @@ def processing_stage(system, initial_simplifications, origin, start_time=None, v
                 if stats:
                     stats['dumped_to_SQL'] += int(1)
             else:
-                processing_stage(subsystem, simplifications, origin, start_time=start_time, verbose=verbose, stats=stats)
+                processing_stage(subsystem, simplifications, origin, start_time=start_time, verbose=verbose, stats=stats, save_cnf2dnf_inputs=save_cnf2dnf_inputs)
                 if stats:
                     stats['recursed_subsystems'] += int(1)
 
@@ -993,7 +1039,9 @@ def SQL_stage2(workers_to_stop=None, requested_identifier=None, verbose=False):
                 simplifications = unpack_eqns(packed_simplifications)
                 stats.timestamp('unpickle')
 
-                processing_stage(system, simplifications, identifier, verbose=verbose, stats=stats)
+                # Enable CNF2DNF input capture when processing a specific identifier
+                save_inputs = (requested_identifier is not None) or SAVE_CNF2DNF_INPUTS
+                processing_stage(system, simplifications, identifier, verbose=verbose, stats=stats, save_cnf2dnf_inputs=save_inputs)
 
                 cursor.execute("""UPDATE staging
                                   SET current_status = 'finished'
