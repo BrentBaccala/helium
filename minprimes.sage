@@ -583,7 +583,11 @@ class GlobalWithTag:
 
 # Saves the object (a polynomial) to the SQL `globals` table and returns it wrapped in a GlobalWithTag
 
-def save_global(obj, stats=None):
+def save_global(obj, stats=None, skip_sql_updates=False):
+    if skip_sql_updates:
+        # When skipping SQL updates, just return the object without saving to globals table
+        # Use a dummy tag for consistency
+        return GlobalWithTag(obj, 0)
     if obj in persistent_data_inverse:
         return GlobalWithTag(obj, persistent_data_inverse[obj])
     p = persistent_pickle(obj)
@@ -811,7 +815,7 @@ def eliminateZeros(I):
                 simplifications.append(v)
     return simplifications + [p for p in I if p != 0]
 
-def polish_system(system, simplifications, origin, stats=None):
+def polish_system(system, simplifications, origin, stats=None, skip_sql_updates=False):
     # should we add simplifications to the system before running GTZ on it?
     if stats:
         stats['polished_systems'] += int(1)
@@ -821,40 +825,41 @@ def polish_system(system, simplifications, origin, stats=None):
         stats.timestamp('GTZ')
     ring = I.ring()
     E = ring('E')
-    with conn.cursor() as cursor:
-        for I in minimal_primes:
-            ss = I.gens()
-            if discard_systems_without_energy and not any(E in p.variables() for p in ss):
-                continue
-            for p in ss:
-                save_global(p, stats=stats)
-            degree = max(p.degree() for p in ss)
-            p = persistent_pickle(sorted(ss))
-            # This version creates deadlocks after I introduced the code that runs
-            # a bunch of processing stages until stage_processing_time is reached
-            #
-            #cursor.execute("""INSERT INTO prime_ideals (ideal, degree, num) VALUES (%s, %s, 1)
-            #                  ON CONFLICT (md5(ideal)) DO UPDATE SET num = prime_ideals.num + 1
-            #                  RETURNING identifier""",
-            #               (p, int(degree)))
-            cursor.execute("""INSERT INTO prime_ideals (ideal, degree, num) VALUES (%s, %s, 1)
-                              ON CONFLICT (md5(ideal)) DO NOTHING""",
-                           (p, int(degree)))
-            if stats:
-                stats.timestamp('insert_into_prime_ideals')
-            cursor.execute("SELECT identifier FROM prime_ideals WHERE ideal = %s", (p,))
-            id = cursor.fetchone()[0]
-            cursor.execute("""INSERT INTO prime_ideals_tracking (origin, destination) VALUES (%s, %s)""",
-                           (origin, id))
-            if stats:
-                stats.timestamp('insert_into_prime_ideals_tracking')
+    if not skip_sql_updates:
+        with conn.cursor() as cursor:
+            for I in minimal_primes:
+                ss = I.gens()
+                if discard_systems_without_energy and not any(E in p.variables() for p in ss):
+                    continue
+                for p in ss:
+                    save_global(p, stats=stats, skip_sql_updates=skip_sql_updates)
+                degree = max(p.degree() for p in ss)
+                p = persistent_pickle(sorted(ss))
+                # This version creates deadlocks after I introduced the code that runs
+                # a bunch of processing stages until stage_processing_time is reached
+                #
+                #cursor.execute("""INSERT INTO prime_ideals (ideal, degree, num) VALUES (%s, %s, 1)
+                #                  ON CONFLICT (md5(ideal)) DO UPDATE SET num = prime_ideals.num + 1
+                #                  RETURNING identifier""",
+                #               (p, int(degree)))
+                cursor.execute("""INSERT INTO prime_ideals (ideal, degree, num) VALUES (%s, %s, 1)
+                                  ON CONFLICT (md5(ideal)) DO NOTHING""",
+                               (p, int(degree)))
+                if stats:
+                    stats.timestamp('insert_into_prime_ideals')
+                cursor.execute("SELECT identifier FROM prime_ideals WHERE ideal = %s", (p,))
+                id = cursor.fetchone()[0]
+                cursor.execute("""INSERT INTO prime_ideals_tracking (origin, destination) VALUES (%s, %s)""",
+                               (origin, id))
+                if stats:
+                    stats.timestamp('insert_into_prime_ideals_tracking')
 
 # inner_processing_stage - a single system simplified, then factored, then cnf2dnf into multiple output systems
 #
 # returns a tuple of all of the simplifications that have been applied and the systems;
 # the systems are a tuple of tuples of irreducible polynomials
 
-def inner_processing_stage(system, initial_simplifications, origin, verbose=False, stats=None, save_cnf2dnf_inputs=False):
+def inner_processing_stage(system, initial_simplifications, origin, verbose=False, stats=None, save_cnf2dnf_inputs=False, skip_sql_updates=False):
     if verbose: print(time.ctime(), 'system', origin, ': simplifyIdeal')
     eqns,s = simplifyIdeal(list(system))
     if stats:
@@ -866,17 +871,17 @@ def inner_processing_stage(system, initial_simplifications, origin, verbose=Fals
         # If origin == 0, then fall through and factor it.  Worst thing that can happen is that
         #    it gets reinserted as system #1 and we come back here with origin == 1
         if verbose: print(time.ctime(), 'system', origin, ': polishing')
-        polish_system(system, initial_simplifications, origin, stats=stats)
+        polish_system(system, initial_simplifications, origin, stats=stats, skip_sql_updates=skip_sql_updates)
         if verbose: print(time.ctime(), 'system', origin, ': done')
         return (None, None)
     simplifications = initial_simplifications + normalize(s)
     # We can't save simplifications itself, since persistent_id() only works on rings and polynomials, not tuples
     for s in simplifications:
-        save_global(s, stats=stats)
+        save_global(s, stats=stats, skip_sql_updates=skip_sql_updates)
     eqns = normalize(dropZeros(eqns))
     if len(eqns) == 0:
         if verbose: print(time.ctime(), 'system', origin, ': polishing')
-        polish_system(eqns, simplifications, origin, stats=stats)
+        polish_system(eqns, simplifications, origin, stats=stats, skip_sql_updates=skip_sql_updates)
         if verbose: print(time.ctime(), 'system', origin, ': done')
         return (None, None)
     if any(eqn == 1 for eqn in eqns):
@@ -957,23 +962,24 @@ def dump_to_SQL(eqns, simplifications, origin, stats=None, verbose=False):
 # Of course, the remaining inner stages might run very quickly, but we don't know that, unless
 # we're willing to start them running and then kill them, which we currently don't do.
 
-def processing_stage(system, initial_simplifications, origin, start_time=None, verbose=False, stats=None, save_cnf2dnf_inputs=False):
+def processing_stage(system, initial_simplifications, origin, start_time=None, verbose=False, stats=None, save_cnf2dnf_inputs=False, skip_sql_updates=False):
     if stats:
         stats['stages'] += int(1)
     if not start_time:
         start_time = time.time()
-    simplifications, subsystems = inner_processing_stage(system, initial_simplifications, origin, verbose=verbose, stats=stats, save_cnf2dnf_inputs=save_cnf2dnf_inputs)
+    simplifications, subsystems = inner_processing_stage(system, initial_simplifications, origin, verbose=verbose, stats=stats, save_cnf2dnf_inputs=save_cnf2dnf_inputs, skip_sql_updates=skip_sql_updates)
     elapsed_time = time.time() - start_time
     if subsystems:
         for subsystem in subsystems:
             # origin 0 is special because it won't polish in inner_processing_stage; instead, it'll loop forever
             # If we've been processing this stage for more than stage_processing_time seconds, dump to SQL
             if origin == 0 or elapsed_time > stage_processing_time:
-                dump_to_SQL(subsystem, simplifications, origin, stats=stats, verbose=verbose)
-                if stats:
-                    stats['dumped_to_SQL'] += int(1)
+                if not skip_sql_updates:
+                    dump_to_SQL(subsystem, simplifications, origin, stats=stats, verbose=verbose)
+                    if stats:
+                        stats['dumped_to_SQL'] += int(1)
             else:
-                processing_stage(subsystem, simplifications, origin, start_time=start_time, verbose=verbose, stats=stats, save_cnf2dnf_inputs=save_cnf2dnf_inputs)
+                processing_stage(subsystem, simplifications, origin, start_time=start_time, verbose=verbose, stats=stats, save_cnf2dnf_inputs=save_cnf2dnf_inputs, skip_sql_updates=skip_sql_updates)
                 if stats:
                     stats['recursed_subsystems'] += int(1)
 
@@ -999,12 +1005,31 @@ def SQL_stage2(workers_to_stop=None, requested_identifier=None, verbose=False):
                         break
             # This post explains the subquery and the use of "FOR UPDATE SKIP LOCKED"
             # https://dba.stackexchange.com/a/69497
+            skip_sql_updates = False
             if requested_identifier:
-                cursor.execute("""UPDATE staging
-                                  SET current_status = 'running', pid = %s, node = %s
-                                  WHERE identifier = %s AND ( current_status = 'queued' OR current_status = 'interrupted' )
-                                  RETURNING system, simplifications, identifier""", (os.getpid(), os.uname()[1], int(requested_identifier)) )
-                conn.commit()
+                # First check if it's already finished
+                cursor.execute("""SELECT system, simplifications, identifier, current_status
+                                  FROM staging
+                                  WHERE identifier = %s""", (int(requested_identifier),))
+                if cursor.rowcount > 0:
+                    result = cursor.fetchone()
+                    if result[3] == 'finished':
+                        # System is already finished - rerun without SQL updates
+                        skip_sql_updates = True
+                        packed_system, packed_simplifications, identifier = result[0], result[1], result[2]
+                        print(f"System {identifier} already finished - rerunning without SQL updates")
+                    else:
+                        # System not finished - normal processing with status update
+                        cursor.execute("""UPDATE staging
+                                          SET current_status = 'running', pid = %s, node = %s
+                                          WHERE identifier = %s AND ( current_status = 'queued' OR current_status = 'interrupted' )
+                                          RETURNING system, simplifications, identifier""", (os.getpid(), os.uname()[1], int(requested_identifier)) )
+                        conn.commit()
+                        if cursor.rowcount == 0:
+                            break
+                        packed_system, packed_simplifications, identifier = cursor.fetchone()
+                else:
+                    break
             else:
                 if depth_first_processing:
                     order='DESC'
@@ -1022,9 +1047,9 @@ def SQL_stage2(workers_to_stop=None, requested_identifier=None, verbose=False):
                                        )
                                    RETURNING system, simplifications, identifier""", (os.getpid(), os.uname()[1]) )
                 conn.commit()
-            if cursor.rowcount == 0:
-                break
-            packed_system, packed_simplifications, identifier = cursor.fetchone()
+                if cursor.rowcount == 0:
+                    break
+                packed_system, packed_simplifications, identifier = cursor.fetchone()
             try:
                 # The keys in stats (a fancy dictionary) must match column names in the 'staging_stats' SQL table,
                 # except that we track timing and add keys ending in '_time'.
@@ -1041,33 +1066,40 @@ def SQL_stage2(workers_to_stop=None, requested_identifier=None, verbose=False):
 
                 # Enable CNF2DNF input capture when processing a specific identifier
                 save_inputs = (requested_identifier is not None) or SAVE_CNF2DNF_INPUTS
-                processing_stage(system, simplifications, identifier, verbose=verbose, stats=stats, save_cnf2dnf_inputs=save_inputs)
+                processing_stage(system, simplifications, identifier, verbose=verbose, stats=stats,
+                               save_cnf2dnf_inputs=save_inputs, skip_sql_updates=skip_sql_updates)
 
-                cursor.execute("""UPDATE staging
-                                  SET current_status = 'finished'
-                                  WHERE identifier = %s""", (identifier, ))
+                if not skip_sql_updates:
+                    cursor.execute("""UPDATE staging
+                                      SET current_status = 'finished'
+                                      WHERE identifier = %s""", (identifier, ))
 
-                # stats.insert_into_SQL() actually changes stats a bit before it gets printed
-                stats.insert_into_SQL(cursor)
-                print(stats)
+                    # stats.insert_into_SQL() actually changes stats a bit before it gets printed
+                    stats.insert_into_SQL(cursor)
+                    print(stats)
 
-                conn.commit()
+                    conn.commit()
+                else:
+                    # Just print stats without saving to SQL
+                    print(stats)
 
             except KeyboardInterrupt:
-                conn.rollback()
-                cursor.execute("""UPDATE staging
-                                  SET current_status = 'interrupted'
-                                  WHERE identifier = %s""", (identifier,))
-                cursor.execute("""DELETE FROM staging WHERE origin = %s""", (identifier,))
-                conn.commit()
+                if not skip_sql_updates:
+                    conn.rollback()
+                    cursor.execute("""UPDATE staging
+                                      SET current_status = 'interrupted'
+                                      WHERE identifier = %s""", (identifier,))
+                    cursor.execute("""DELETE FROM staging WHERE origin = %s""", (identifier,))
+                    conn.commit()
                 raise
             except:
-                conn.rollback()
-                cursor.execute("""UPDATE staging
-                                  SET current_status = 'failed'
-                                  WHERE identifier = %s""", (identifier,))
-                cursor.execute("""DELETE FROM staging WHERE origin = %s""", (identifier,))
-                conn.commit()
+                if not skip_sql_updates:
+                    conn.rollback()
+                    cursor.execute("""UPDATE staging
+                                      SET current_status = 'failed'
+                                      WHERE identifier = %s""", (identifier,))
+                    cursor.execute("""DELETE FROM staging WHERE origin = %s""", (identifier,))
+                    conn.commit()
                 raise
 
             # keep our memory down by clearing our cached polynomials
