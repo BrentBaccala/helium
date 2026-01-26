@@ -1187,7 +1187,7 @@ def simplify_ideals():
             with conn.cursor() as cursor:
                 cursor.execute("UPDATE prime_ideals SET simplified = TRUE WHERE ideal = %s", (p,))
                 rows_updated = rows_updated + 1
-    conn.commit()
+            conn.commit()
     pb.done()
     if rows_updated: print(f"{rows_updated} rows updated")
 
