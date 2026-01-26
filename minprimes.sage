@@ -1175,8 +1175,10 @@ def check_prime_ideals():
 
 def simplify_ideals():
     ideals = load_prime_ideals()
-    for I in ideals:
+    pb = ProgressBar(label='simplify ideals', expected_size=len(ideals))
+    for i,I in enumerate(ideals):
         # I > any_ideal  ===>  V(I) < V(any_ideal)
+        pb.show(i)
         if any(I > any_ideal for any_ideal in ideals):
             # flag I as simplified
             # I.gens() returns a PolynomialSequence_generic, but what got pickled was a list, so we have to convert
@@ -1184,24 +1186,7 @@ def simplify_ideals():
             with conn.cursor() as cursor:
                 cursor.execute("UPDATE prime_ideals SET simplified = TRUE WHERE ideal = %s", (p,))
                 print(f"{cursor.rowcount} rows updated")
-
-def simplify_ideals_2():
-    ideals = []
-    with conn.cursor() as cursor:
-        cursor.execute("SELECT identifier, ideal FROM prime_ideals WHERE simplified IS NOT TRUE")
-        for sys in cursor:
-            ideals.append((sys[0], sys[1], ideal(unpickle(sys[1]))))
-    for identifier,pickle,I in ideals:
-        # I > any_ideal  ===>  V(I) < V(any_ideal)
-        if any(I > any_ideal for _,_,any_ideal in ideals):
-            # flag I as simplified
-            #p = persistent_pickle(sorted(I.gens()))
-            #print(p)
-            #print(bytes(pickle))
-            with conn.cursor() as cursor:
-                #cursor.execute("UPDATE prime_ideals SET simplified = TRUE WHERE ideal = %s", (p,))
-                cursor.execute("UPDATE prime_ideals SET simplified = TRUE WHERE identifier = %s", (identifier,))
-                print(f"{cursor.rowcount} rows updated")
+    pb.done()
     conn.commit()
 
 # Various utility functions for debugging the SQL database from the command line
