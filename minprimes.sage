@@ -1176,6 +1176,7 @@ def check_prime_ideals():
 def simplify_ideals():
     ideals = load_prime_ideals()
     pb = ProgressBar(label='simplify ideals', expected_size=len(ideals))
+    rows_updated = 0
     for i,I in enumerate(ideals):
         # I > any_ideal  ===>  V(I) < V(any_ideal)
         pb.show(i)
@@ -1185,9 +1186,10 @@ def simplify_ideals():
             p = persistent_pickle(list(I.gens()))
             with conn.cursor() as cursor:
                 cursor.execute("UPDATE prime_ideals SET simplified = TRUE WHERE ideal = %s", (p,))
-                print(f"{cursor.rowcount} rows updated")
-    pb.done()
+                rows_updated = rows_updated + 1
     conn.commit()
+    pb.done()
+    if rows_updated: print(f"{rows_updated} rows updated")
 
 # Various utility functions for debugging the SQL database from the command line
 
