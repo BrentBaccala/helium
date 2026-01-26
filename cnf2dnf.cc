@@ -1124,7 +1124,13 @@ void task(void)
       current_work.next_polynomial ++;
       current_work.next_index = 0;
     }
-    /* We've now got a bitstring that's in the DNF.  See if any of its subsets are also in the DNF,
+    /* We've now got a bitstring that's in the DNF.  See if it maches any already known
+     * solutions.
+     */
+    if (current_work.cover->finished_bitstrings.contain_a_subset_of(current_work.bitstring)) {
+      continue;
+    }
+    /* We've now got a bitstring that's new in the DNF.  See if any of its subsets are also in the DNF,
      * by clearing each one bit and checking to see if the bitstring still works.  Does the order
      * of the bits affect the result?  Yes, but we don't expect the final result of the entire
      * program to depend on exactly which subset is selected at this point, since we'll eventually
