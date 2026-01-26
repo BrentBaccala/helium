@@ -23,11 +23,11 @@ g++ -std=c++20 -march=native -O3 -o cnf2dnf cnf2dnf.cc -lpthread
 
 ## Interactive Usage
 
-**Basic hydrogen calculation:**
+**Basic hydrogen calculation (most common test case):**
 ```sage
 sage
 load('helium.sage')
-prep_hydrogen(5)
+prep_hydrogen(5)  # Not spherically symmetric - we want to test the full system
 init()
 ideal(eqns_RQQ).minimal_associated_primes()
 ```
@@ -51,10 +51,11 @@ merge_worker_logs()  # Creates sql_stage2_combined.log and removes individual wo
 merge_worker_logs('my_output.log', cleanup=False)  # Custom output file, keep worker logs
 ```
 
-**Helium solution (spherically symmetric):**
+**Helium solution (main calculation - spherically symmetric):**
 ```sage
 load('helium.sage')
-prep_helium(-7)  # Negative number for spherically symmetric (faster)
+prep_helium(-16.6)  # Negative number for spherically symmetric (much faster)
+                     # This is the primary helium calculation currently in progress
 init()
 ideal(eqns_RQQ).minimal_associated_primes()
 ```
@@ -96,6 +97,10 @@ load('joca.sage')     # or joca2.sage
 ### Key Concepts
 
 **Ansatz System**: Each numbered ansatz (1, 5, 5.1, 16, 16.31, etc.) defines a different form for the trial solution. Higher numbers generally represent more complex forms. Negative ansatz numbers use spherically symmetric coordinates for faster computation.
+
+**Common Cases**:
+- `prep_hydrogen(5)` - Standard hydrogen test case (not spherically symmetric; used to test the full system)
+- `prep_helium(-16.6)` - Main helium calculation (spherically symmetric for speed; currently the primary computation)
 
 **Variables Classification**:
 - `coordinates`: Independent spatial variables (x,y,z or r1,r2,r12)
@@ -147,10 +152,10 @@ The `cnf2dnf.cc` program converts factored polynomial systems from conjunctive n
 
 There are two primary computation environments in use, each with its own PostgreSQL installation.
 
-- 'samsung' is my development laptop.  I usually use it for a fast calculation called "hydrogen-5" for testing.
-- 'edge' is a Cisco C200 with 12 cores and 96 GB of RAM.  It's running a long difficult calculation called "helium-16.6".
+- **'samsung'** - Development laptop. Runs `prep_hydrogen(5)` for fast testing.
+- **'edge'** - Cisco C200 with 12 cores and 96 GB of RAM. Runs the main `prep_helium(-16.6)` calculation.
 
-Both databases are called `helium-16.6`, even though the one on 'samsung' is actually used for "hydrogen-5".
+Both databases are named `helium-16.6`, even though the one on 'samsung' is actually used for hydrogen-5 testing.
 
 ### Custom SageMath build
 
@@ -214,7 +219,9 @@ test_cnf2dnf(parallel=True)  # multi-threaded
 - FLINT rings are faster than Singular for some operations but don't support Groebner bases
 - Ring selection affects performance significantly; code tries to use FLINT when possible
 - The `.polynomial(ring=convertField)` method is much faster than constructing via Symbolic Ring
-- Negative ansatz numbers avoid roots/Groebner basis calculations and run much faster
+- Negative ansatz numbers use spherically symmetric coordinates, avoiding roots/Groebner basis calculations and running much faster
+  - Hydrogen uses positive ansatz (e.g., `prep_hydrogen(5)`) because it's simple enough to test the full system
+  - Helium uses negative ansatz (e.g., `prep_helium(-16.6)`) because the full calculation is too expensive
 - `num_processes` defaults to `cpu_count() / 2` to account for hyperthreading
 
 ## Key File Types
