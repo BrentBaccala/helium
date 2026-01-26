@@ -1,5 +1,19 @@
 # CNF2DNF Performance Analysis & Optimization Guide
 
+**Last Updated**: January 2026
+**Status**: 1 optimization implemented, 4 major optimizations recommended
+
+## Optimization Status Summary
+
+| Priority | Optimization | Status | Expected Impact |
+|----------|--------------|--------|-----------------|
+| ✅ 0 | Early Duplicate Detection | **IMPLEMENTED** (Jan 2026) | Reduces redundant work |
+| 🔲 1 | Incremental Polynomial Checking | Not implemented | 2-5x speedup |
+| 🔲 2 | Optimize BitString::operator&& | Not implemented | 10-20% speedup |
+| 🔲 3 | Track Satisfaction Incrementally | Not implemented | Major speedup |
+| 🔲 4 | Memory Layout Optimization | Not implemented | Better cache utilization |
+| 🔲 5 | Profile-Guided Optimization | Not implemented | 5-10% overall |
+
 ## Project Overview
 
 **Project**: `cnf2dnf` - Conjunctive Normal Form to Disjunctive Normal Form converter  
@@ -177,7 +191,39 @@ ce8:   mov     0x0(%rbp,%rax,8),%rcx  # 17.39% - load polynomial bitstring chunk
 
 ## Optimization Recommendations
 
+### ✅ Implemented: Early Duplicate Detection (Commit 63a40d2)
+
+**Status**: COMPLETED - January 2026
+
+**Problem**: The expensive prime implicant reduction operation was being performed even on bitstrings that match already-known solutions.
+
+**Solution**: Add an early check before the reduction operation:
+
+```cpp
+/* We've now got a bitstring that's in the DNF.  See if it matches any already known
+ * solutions.
+ */
+if (current_work.cover->finished_bitstrings.contain_a_subset_of(current_work.bitstring)) {
+  continue;
+}
+/* We've now got a bitstring that's new in the DNF.  See if any of its subsets are also in the DNF,
+ * by clearing each one bit and checking to see if the bitstring still works...
+```
+
+**Impact**: Profiling showed this was a hot spot - expanding the matched bitstring to make it prime was expensive. This check minimizes the need for that calculation by skipping bitstrings that are already covered by known solutions.
+
+**Location**: Added at line ~1127 in `cnf2dnf.cc`, just before the prime implicant reduction loop (the expensive operation at lines 780-782 in the old code).
+
+**Trade-offs**:
+- Very low overhead (O(log n) subset check)
+- High benefit when many similar solutions exist
+- Simple, localized change with no risk to correctness
+
+---
+
 ### Priority 1: Incremental Polynomial Checking (Expected 2-5x speedup)
+
+**Status**: Not yet implemented - recommended as next optimization
 
 **Problem**: Currently rechecks ALL polynomials after clearing each bit, even though most polynomials don't depend on that bit.
 
@@ -462,14 +508,22 @@ Output shows:
 
 ## Next Steps for Optimization Work
 
+### Completed ✅
+
+- **Early Duplicate Detection** (January 2026, commit 63a40d2)
+  - Added check before prime implicant reduction
+  - Skips processing of bitstrings already covered by known solutions
+  - Low overhead, high benefit for problems with many similar solutions
+
 ### Immediate (Highest ROI)
 
-1. **Implement Priority 1**: Add `polys_containing_bit` index and modify lines 780-782
-   - Expected impact: 2-5x speedup on hot loop
+1. **Implement Priority 1**: Add `polys_containing_bit` index and modify the prime implicant reduction loop
+   - Expected impact: 2-5x speedup on the remaining hot loop
    - Low risk, localized change
+   - This is still the #1 bottleneck (even after early duplicate detection)
    - Measure with perf before/after
 
-2. **Measure improvement**: 
+2. **Measure improvement**:
    ```bash
    perf stat -e cycles,instructions,cache-misses ./cnf2dnf -t 4 < input.txt
    ```
@@ -523,10 +577,20 @@ Output shows:
 
 ## Performance Baseline
 
-Before optimization, the program spends:
-- **~60%** in polynomial satisfaction checking (lines 780-782)
+### Before Any Optimizations (2025)
+
+The program spent:
+- **~60%** in polynomial satisfaction checking (lines 780-782 of the prime implicant reduction loop)
 - **~15%** in BitString operations (copying, OR operations)
 - **~10%** in thread synchronization
 - **~15%** other (I/O, initialization, etc.)
 
-Any optimization that reduces the 60% hotspot will have dramatic impact on overall runtime.
+### After Early Duplicate Detection (January 2026)
+
+With the early duplicate check implemented (commit 63a40d2):
+- The expensive prime implicant reduction is now skipped for bitstrings that match already-known solutions
+- Impact varies by problem: highest benefit when many similar solutions exist
+- The polynomial satisfaction checking loop remains the primary bottleneck for new (non-duplicate) bitstrings
+- **Priority 1 optimization** (incremental polynomial checking) remains the most impactful next step
+
+Any optimization that reduces the remaining polynomial checking hotspot will have dramatic impact on overall runtime.
