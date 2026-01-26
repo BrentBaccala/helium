@@ -799,6 +799,9 @@ stage_processing_time = 60
 # don't involve energy.  This can lead to faulty results, though.  For example, if (v0,v1,v2,v3)
 # is a solution, it will get discarded because it doesn't involve E, but (E,v0,v1,v2,v3) will
 # stay.  My current belief is that pruning the tree is more important for performance.
+#
+# I've now enhanced it to discard (E,v0,v1,v2,v3), too.  Its dependency on E can't be just
+# the polynomial E (the ground state energy is not zero).
 
 discard_systems_without_energy = True
 
@@ -829,7 +832,7 @@ def polish_system(system, simplifications, origin, stats=None, skip_sql_updates=
         with conn.cursor() as cursor:
             for I in minimal_primes:
                 ss = I.gens()
-                if discard_systems_without_energy and not any(E in p.variables() for p in ss):
+                if discard_systems_without_energy and not any(E in p.variables() and p != E for p in ss):
                     continue
                 for p in ss:
                     save_global(p, stats=stats, skip_sql_updates=skip_sql_updates)
