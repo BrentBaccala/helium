@@ -42,6 +42,13 @@ consolidate_ideals(load_prime_ideals())
 
 Use `SQL_stage2()` for single-threaded processing.
 
+**Parallel worker output:**
+When running `SQL_stage2_parallel()`, each worker process writes its output (including stats) to a separate log file named `sql_stage2_worker_<pid>.log`. After parallel processing completes, merge the logs:
+```sage
+merge_worker_logs()  # Creates sql_stage2_combined.log and removes individual worker logs
+merge_worker_logs('my_output.log', cleanup=False)  # Custom output file, keep worker logs
+```
+
 ## Key Architecture
 
 ### Mathematical Pipeline

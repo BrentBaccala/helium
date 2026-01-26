@@ -1118,6 +1118,13 @@ def process_pool_initializer():
     conn = psycopg2.connect(**postgres_connection_parameters)
     conn2 = psycopg2.connect(**postgres_connection_parameters)
 
+    # Redirect stdout to per-worker log file
+    import sys
+    pid = os.getpid()
+    output_file = open(f'sql_stage2_worker_{pid}.log', 'w', buffering=1)  # line buffering
+    sys.stdout = output_file
+    print(f"=== Worker {pid} started at {time.ctime()} ===")
+
 def SQL_stage2_parallel(num_workers = num_processes):
     try:
         manager = DynamicProcessManager(worker_func=SQL_stage2, num_workers=num_workers, initializer=process_pool_initializer)
@@ -1134,6 +1141,44 @@ def SQL_stage2_parallel(num_workers = num_processes):
                               WHERE current_status = 'running' AND node = %s""", (os.uname()[1],))
         conn.commit()
         raise
+
+def merge_worker_logs(output_file='sql_stage2_combined.log', cleanup=True):
+    """
+    Merge all SQL_stage2 worker log files into a single file.
+
+    Args:
+        output_file: Name of the combined output file
+        cleanup: If True, delete individual worker log files after merging
+
+    Returns:
+        Number of worker log files merged
+    """
+    import glob
+
+    worker_logs = sorted(glob.glob('sql_stage2_worker_*.log'))
+
+    if not worker_logs:
+        print("No worker log files found")
+        return 0
+
+    print(f"Merging {len(worker_logs)} worker log files into {output_file}")
+
+    with open(output_file, 'w') as outf:
+        for log_file in worker_logs:
+            outf.write(f"\n{'='*80}\n")
+            outf.write(f"Contents of {log_file}\n")
+            outf.write(f"{'='*80}\n\n")
+
+            with open(log_file, 'r') as inf:
+                outf.write(inf.read())
+
+    if cleanup:
+        for log_file in worker_logs:
+            os.remove(log_file)
+        print(f"Removed {len(worker_logs)} worker log files")
+
+    print(f"Combined log written to {output_file}")
+    return len(worker_logs)
 
 # Here's how I manually loaded an ideal into prime_ideals:
 #
