@@ -4,7 +4,7 @@
 # Author: qwen3-coder
 # Usage: ./analyze_workers.sh [log_file]
 
-LOG_FILE="${1:-screenlog.0.Jan26}"
+LOG_FILE="${1:-screenlog.0}"
 
 if [[ ! -f "$LOG_FILE" ]]; then
     echo "Error: Log file '$LOG_FILE' not found."
@@ -71,7 +71,7 @@ zombie_pids=()
 vanished_pids=()
 for pid in "${non_exited_pids[@]}"; do
     # Check if process exists and its state
-    if ps -p "$pid" -o stat= 2>/dev/null; then
+    if ps -p "$pid" -o stat= 2>/dev/null 1>&2; then
         state=$(ps -p "$pid" -o stat= 2>/dev/null)
         # Remove leading/trailing whitespace
         state=$(echo "$state" | xargs)
