@@ -67,6 +67,7 @@ import subprocess
 import threading
 
 import pickle
+import hashlib
 import struct
 import io
 
@@ -515,12 +516,13 @@ CREATE INDEX ON staging(identifier) where current_status = 'queued' or current_s
 
 CREATE TABLE globals (
       identifier INTEGER GENERATED ALWAYS AS IDENTITY,
-      pickle BYTEA
+      pickle BYTEA,
+      md5 BYTEA
 );
 
 -- Making "pickle" unique causes the resulting index to exceed a PostgreSQL limit, so we make the md5 hash unique instead.
 
-CREATE UNIQUE INDEX ON globals(md5(pickle));
+CREATE UNIQUE INDEX ON globals(md5);
 
 CREATE INDEX ON globals(identifier);
 
@@ -595,10 +597,11 @@ def save_global(obj, stats=None, skip_sql_updates=False):
         stats.timestamp('save_global_pickle')
     # See this stackoverflow post: https://stackoverflow.com/questions/34708509/how-to-use-returning-with-on-conflict-in-postgresql
     # for issues with the simple "ON CONFLICT DO NOTHING RETURNING identifier"
+    md5 = hashlib.md5(p)
     with conn2:
         with conn2.cursor() as cursor:
-            cursor.execute("INSERT INTO globals (pickle) VALUES (%s) ON CONFLICT DO NOTHING", (p,))
-            cursor.execute("SELECT identifier FROM globals WHERE pickle = %s", (p,))
+            cursor.execute("INSERT INTO globals (pickle, md5) VALUES (%s, %s) ON CONFLICT DO NOTHING", (p, md5.digest()))
+            cursor.execute("SELECT identifier FROM globals WHERE md5 = %s", (md5.digest(),))
             id = cursor.fetchone()[0]
             persistent_data[int(id)] = obj
             persistent_data_inverse[obj] = int(id)
