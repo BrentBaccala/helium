@@ -610,8 +610,10 @@ def save_global(obj, stats=None, skip_sql_updates=False):
             cursor.execute("SELECT identifier FROM globals WHERE md5 = %s", (md5.digest(),))
             if cursor.rowcount == 1:
                 stats['duplicate_saves'] += int(1)
-            while cursor.rowcount == 0:
+            else:
                 cursor.execute("INSERT INTO globals (pickle, md5) VALUES (%s, %s) ON CONFLICT DO NOTHING RETURNING identifier", (p, md5.digest()))
+                if cursor.rowcount == 0:
+                    cursor.execute("SELECT identifier FROM globals WHERE md5 = %s", (md5.digest(),))
             id = cursor.fetchone()[0]
             persistent_data[int(id)] = obj
             persistent_data_inverse[obj] = int(id)
