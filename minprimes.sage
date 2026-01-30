@@ -608,7 +608,7 @@ def save_global(obj, stats=None, skip_sql_updates=False):
                 # two possibilities: either we've already saved this polynomial, or we have an md5 hash collision
                 cursor.execute("SELECT identifier, pickle FROM globals WHERE md5 = %s", (md5.digest(),))
                 id, p2 = cursor.fetchone()
-                if p == p2:
+                if p == bytes(p2):
                     # we've already saved this polynomial
                     if stats:
                         stats['duplicate_saves'] += int(1)
