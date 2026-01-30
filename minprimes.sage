@@ -595,16 +595,42 @@ def save_global(obj, stats=None, skip_sql_updates=False):
     p = persistent_pickle(obj)
     if stats:
         stats.timestamp('save_global_pickle')
+        stats['save_globals'] += int(1)
+    md5 = hashlib.md5(p)
+    if stats:
+        stats.timestamp('save_global_hash')
     # See this stackoverflow post: https://stackoverflow.com/questions/34708509/how-to-use-returning-with-on-conflict-in-postgresql
     # for issues with the simple "ON CONFLICT DO NOTHING RETURNING identifier"
-    md5 = hashlib.md5(p)
     with conn2:
         with conn2.cursor() as cursor:
-            cursor.execute("INSERT INTO globals (pickle, md5) VALUES (%s, %s) ON CONFLICT DO NOTHING", (p, md5.digest()))
-            cursor.execute("SELECT identifier FROM globals WHERE md5 = %s", (md5.digest(),))
-            id = cursor.fetchone()[0]
+            cursor.execute("INSERT INTO globals (pickle, md5) VALUES (%s, %s) ON CONFLICT DO NOTHING RETURNING identifier", (p, md5.digest()))
+            if cursor.rowcount == 0:
+                # two possibilities: either we've already saved this polynomial, or we have an md5 hash collision
+                cursor.execute("SELECT identifier, pickle FROM globals WHERE md5 = %s", (md5.digest(),))
+                id, p2 = cursor.fetchone()
+                if p == p2:
+                    # we've already saved this polynomial
+                    if stats:
+                        stats['duplicate_saves'] += int(1)
+                else:
+                    print(time.ctime(), "save_global: md5 hash collision!")
+                    if stats:
+                        stats['hash_collisions'] += int(1)
+                    # what do we do?  just try to change the hash around by duplicating the data
+                    # we never query by hash except in this function (its just used to detect uniqueness)
+                    # XXX this code doesn't detect if we have a collided and duplicated polynomial; it inserts it again
+                    while True:
+                        md5.update(p)
+                        cursor.execute("INSERT INTO globals (pickle, md5) VALUES (%s, %s) ON CONFLICT DO NOTHING RETURNING identifier",
+                                       (p, md5.digest()))
+                        if cursor.rowcount == 1:
+                            break
+                    id = cursor.fetchone()[0]
+            else:
+                id = cursor.fetchone()[0]
             persistent_data[int(id)] = obj
             persistent_data_inverse[obj] = int(id)
+        conn2.commit()
     if stats:
         stats.timestamp('save_global_sql')
     return GlobalWithTag(obj, int(id))
