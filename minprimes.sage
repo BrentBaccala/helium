@@ -847,6 +847,8 @@ def polish_system(system, simplifications, origin, stats=None, skip_sql_updates=
             for I in minimal_primes:
                 ss = I.gens()
                 if discard_systems_without_energy and not any(E in p.variables() and p != E for p in ss):
+                    if stats:
+                        stats['discarded_without_energy_polished'] += int(1)
                     continue
                 for p in ss:
                     save_global(p, stats=stats, skip_sql_updates=skip_sql_updates)
@@ -928,12 +930,10 @@ def inner_processing_stage(system, initial_simplifications, origin, verbose=Fals
 
     do_discard = discard_systems_without_energy and not any(E in poly.variables() for poly in simplifications)
     if do_discard:
-        stats['do_discard'] += int(1)
-    if do_discard:
         systems = tuple(tuple(all_factors[j] for j in bs) for bs in dnf_bitsets if any(E in all_factors[j].variables() for j in bs))
         num_discards = len(systems) - len(dnf_bitsets)
         if stats and num_discards > 0:
-            stats['discarded_without_energy'] += int(1)
+            stats['discarded_without_energy'] += int(num_discards)
     else:
         systems = tuple(tuple(all_factors[j] for j in bs) for bs in dnf_bitsets)
 
