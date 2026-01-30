@@ -603,31 +603,16 @@ def save_global(obj, stats=None, skip_sql_updates=False):
     # for issues with the simple "ON CONFLICT DO NOTHING RETURNING identifier"
     with conn2:
         with conn2.cursor() as cursor:
-            cursor.execute("INSERT INTO globals (pickle, md5) VALUES (%s, %s) ON CONFLICT DO NOTHING RETURNING identifier", (p, md5.digest()))
-            if cursor.rowcount == 0:
-                # two possibilities: either we've already saved this polynomial, or we have an md5 hash collision
-                cursor.execute("SELECT identifier, pickle FROM globals WHERE md5 = %s", (md5.digest(),))
-                id, p2 = cursor.fetchone()
-                if p == bytes(p2):
-                    # we've already saved this polynomial
-                    if stats:
-                        stats['duplicate_saves'] += int(1)
-                else:
-                    print(time.ctime(), "save_global: md5 hash collision!")
-                    if stats:
-                        stats['hash_collisions'] += int(1)
-                    # what do we do?  just try to change the hash around by duplicating the data
-                    # we never query by hash except in this function (its just used to detect uniqueness)
-                    # XXX this code doesn't detect if we have a collided and duplicated polynomial; it inserts it again
-                    while True:
-                        md5.update(p)
-                        cursor.execute("INSERT INTO globals (pickle, md5) VALUES (%s, %s) ON CONFLICT DO NOTHING RETURNING identifier",
-                                       (p, md5.digest()))
-                        if cursor.rowcount == 1:
-                            break
-                    id = cursor.fetchone()[0]
-            else:
-                id = cursor.fetchone()[0]
+            # two possibilities: either we've already saved this polynomial, or we have an md5 hash collision
+            # we get lots of duplicate saves
+            # for speed, I assume that there are no hash collisions, and it's all duplicate saves
+            # the calculation gets to a point where almost all of the saves are duplicates, so we optimize for that case
+            cursor.execute("SELECT identifier FROM globals WHERE md5 = %s", (md5.digest(),))
+            if cursor.rowcount == 1:
+                stats['duplicate_saves'] += int(1)
+            while cursor.rowcount == 0:
+                cursor.execute("INSERT INTO globals (pickle, md5) VALUES (%s, %s) ON CONFLICT DO NOTHING RETURNING identifier", (p, md5.digest()))
+            id = cursor.fetchone()[0]
             persistent_data[int(id)] = obj
             persistent_data_inverse[obj] = int(id)
         conn2.commit()
