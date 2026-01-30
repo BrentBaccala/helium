@@ -832,6 +832,13 @@ def eliminateZeros(I):
                 simplifications.append(v)
     return simplifications + [p for p in I if p != 0]
 
+def is_discardable(system):
+    if len(system) == 0:
+        return discard_systems_without_energy
+    ring = system[0].parent()
+    E = ring('E')
+    return discard_systems_without_energy and not any(E in poly.variables() and poly != E for poly in system)
+
 def polish_system(system, simplifications, origin, stats=None, skip_sql_updates=False):
     # should we add simplifications to the system before running GTZ on it?
     if stats:
@@ -840,13 +847,11 @@ def polish_system(system, simplifications, origin, stats=None, skip_sql_updates=
     minimal_primes = I.minimal_associated_primes()
     if stats:
         stats.timestamp('GTZ')
-    ring = I.ring()
-    E = ring('E')
     if not skip_sql_updates:
         with conn.cursor() as cursor:
             for I in minimal_primes:
                 ss = I.gens()
-                if discard_systems_without_energy and not any(E in p.variables() and p != E for p in ss):
+                if is_discardable(ss):
                     if stats:
                         stats['discarded_without_energy_polished'] += int(1)
                     continue
@@ -923,19 +928,15 @@ def inner_processing_stage(system, initial_simplifications, origin, verbose=Fals
 
     # now we've got set of systems of polynomials, all polynomials irreducible
     # discard systems if there is no energy dependency in either the simplifications or the systems (considered individually)
-    # what about if E is in simplifications?  then leave everything alone
+    # what about if there's energy dependency in simplifications?  then leave everything alone
 
-    ring = all_factors[0].parent()
-    E = ring('E')
-
-    do_discard = discard_systems_without_energy and not any(E in poly.variables() for poly in simplifications)
-    if do_discard:
-        systems = tuple(tuple(all_factors[j] for j in bs) for bs in dnf_bitsets if any(E in all_factors[j].variables() for j in bs))
-        num_discards = len(systems) - len(dnf_bitsets)
+    systems = tuple(tuple(all_factors[j] for j in bs) for bs in dnf_bitsets)
+    if is_discardable(simplifications):
+        original_systems = systems
+        systems = tuple(ss for ss in original_systems if not is_discardable(ss))
+        num_discards = len(systems) - len(original_systems)
         if stats and num_discards > 0:
             stats['discarded_without_energy'] += int(num_discards)
-    else:
-        systems = tuple(tuple(all_factors[j] for j in bs) for bs in dnf_bitsets)
 
     return (simplifications, systems)
 
