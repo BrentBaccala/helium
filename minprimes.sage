@@ -1130,7 +1130,14 @@ def SQL_stage2_parallel(num_workers = num_processes):
         manager = DynamicProcessManager(worker_func=SQL_stage2, num_workers=num_workers, initializer=process_pool_initializer)
         manager.start()
         while manager.is_running():
-            manager.wait_for_events()
+            exited = manager.wait_for_events()
+            if exited:
+                with conn.cursor() as cursor:
+                    cursor.execute("""UPDATE staging
+                                      SET current_status = 'failed'
+                                      WHERE node = %s AND current_status = 'running' AND pid IN %s""", (os.uname()[1], tuple(exited)))
+            conn.commit()
+
     except:
         # The only exception I've actually seen here is a BrokenProcessPool when my attempt to raise CalledProcessError
         # in one of the futures failed due to a TypeError because I didn't call the BrokenProcessPool constructor correctly.

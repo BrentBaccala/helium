@@ -151,24 +151,46 @@ class DynamicProcessManager:
         self.signal_event.clear()
         
         # Check for terminated processes
+        oom_killed = []
+        killed = []
         exited = []
+        dmesg = None
         with self.lock:
             alive = []
             for p in self.processes:
                 if not p.is_alive():
                     p.join()  # Clean up zombie
-                    exited.append(p.pid)
+                    if p.exitcode == -9:  # SIGKILL (including OOM kills)
+                        if not dmesg:
+                            dmesg = subprocess.run(['dmesg'], capture_output=True, text=True)
+                        oom_pattern = rf"Out of memory: Killed process {p.pid}"
+                        if re.search(oom_pattern, dmesg.stdout):
+                            oom_killed.append(p.pid)
+                        else:
+                            killed.append(p.pid)
+                    else:
+                        exited.append(p.pid)
                 else:
                     alive.append(p)
             self.processes = alive
 
             # Print exit message with all PIDs
+            if oom_killed:
+                pids = ', '.join(map(str, oom_killed))
+                plural = "Workers" if len(oom_killed) > 1 else "Worker"
+                print(f"{plural} {pids} OOM killed. ", end='')
+            if killed:
+                pids = ', '.join(map(str, killed))
+                plural = "Workers" if len(killed) > 1 else "Worker"
+                print(f"{plural} {pids} killed. ", end='')
             if exited:
                 pids = ', '.join(map(str, exited))
                 plural = "Workers" if len(exited) > 1 else "Worker"
-                print(f"{plural} {pids} exited. Remaining: {len(self.processes)}")
+                print(f"{plural} {pids} exited. ", end='')
+            if oom_killed or killed or exited:
+                print(f"Remaining: {len(self.processes)}")
         
-        return exited
+        return oom_killed + killed + exited
     
     def is_running(self):
         """Check if the manager should continue running."""
