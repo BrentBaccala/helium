@@ -1143,9 +1143,10 @@ def process_pool_initializer():
     print(f"=== Worker {pid} started at {time.ctime()} ===")
 
 def SQL_stage2_parallel(num_workers = num_processes):
+    manager = DynamicProcessManager(worker_func=SQL_stage2, num_workers=num_workers, initializer=process_pool_initializer)
+    manager.start()
+
     try:
-        manager = DynamicProcessManager(worker_func=SQL_stage2, num_workers=num_workers, initializer=process_pool_initializer)
-        manager.start()
         while manager.is_running():
             exited = manager.wait_for_events()
             if exited:
@@ -1165,6 +1166,15 @@ def SQL_stage2_parallel(num_workers = num_processes):
                               WHERE current_status = 'running' AND node = %s""", (os.uname()[1],))
         conn.commit()
         raise
+
+    # Claude wants to put a finally block here:
+    #
+    # finally:
+    #     manager.shutdown(wait=True)
+    #
+    # The problem this creates is that when the user hits CNTL-C, we call manager.shutdown here,
+    # which kills the worker processes with SIGTERM, and they don't update the SQL database
+    # to flag the systems as 'interrupted'.
 
 def merge_worker_logs(output_file='sql_stage2_combined.log', cleanup=True):
     """

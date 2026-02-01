@@ -79,6 +79,13 @@ class DynamicProcessManager:
     
     def _worker_wrapper(self):
         """Wrapper that calls initializer then worker_func."""
+
+        # Reset SIGTERM to default Python behavior (terminate immediately)
+        # Reset SIGINT to default Python behavior (raises KeyboardInterrupt)
+        # They were inherited from the parent, which had them set to self._handle_sigterm
+        signal.signal(signal.SIGTERM, signal.SIG_DFL)
+        signal.signal(signal.SIGINT, signal.default_int_handler)
+
         if self.initializer is not None:
             try:
                 self.initializer(*self.initargs)
