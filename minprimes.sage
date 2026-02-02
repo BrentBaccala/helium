@@ -989,9 +989,6 @@ def inner_processing_stage(system, initial_simplifications, origin, verbose=Fals
         if verbose: print(time.ctime(), 'system', origin, ': done')
         return (None, None)
     simplifications = initial_simplifications + normalize(s)
-    # We can't save simplifications itself, since persistent_id() only works on rings and polynomials, not tuples
-    for s in simplifications:
-        save_global(s, stats=stats, skip_sql_updates=skip_sql_updates)
     eqns = normalize(dropZeros(eqns))
     if len(eqns) == 0:
         if verbose: print(time.ctime(), 'system', origin, ': polishing')
