@@ -206,9 +206,9 @@ def cnf2dnf_external(cnf_bitsets, simplify=False, parallel=False, stats=None, ve
 
         # Track call sequence
         if 'cnf2dnf_call_count' not in stats:
-            stats['cnf2dnf_call_count'] = 0
+            stats['cnf2dnf_call_count'] = int(0)
         sequence = stats['cnf2dnf_call_count']
-        stats['cnf2dnf_call_count'] += 1
+        stats['cnf2dnf_call_count'] += int(1)
 
         # Create output directory
         os.makedirs(output_dir, exist_ok=True)
