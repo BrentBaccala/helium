@@ -1099,7 +1099,7 @@ def SQL_stage1(eqns):
     conn.commit()
     print(stats)
 
-def SQL_stage2(workers_to_stop=None, requested_identifier=None, verbose=False):
+def SQL_stage2(requested_identifier=None, workers_to_stop=None, verbose=False):
     with conn.cursor() as cursor:
         while True:
             # Check if we should exit gracefully
@@ -1211,6 +1211,9 @@ def SQL_stage2(workers_to_stop=None, requested_identifier=None, verbose=False):
             # keep our memory down by clearing our cached polynomials
             persistent_data.clear()
             persistent_data_inverse.clear()
+
+            if requested_identifier:
+                break
 
 # SQL_stage2_parallel uses a process pool for parallelization and needs an initializer to setup its database connections
 
