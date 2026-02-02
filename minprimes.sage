@@ -622,6 +622,94 @@ def save_global(obj, stats=None, skip_sql_updates=False):
         stats.timestamp('save_global_sql')
     return GlobalWithTag(obj, int(id))
 
+def save_globals(objs, stats=None, skip_sql_updates=False):
+    """Save multiple objects to globals table in a single batch operation.
+
+    Args:
+        objs: List of objects (polynomials) to save
+        stats: Optional statistics object to track timing
+        skip_sql_updates: If True, skip all SQL operations and return dummy-tagged objects
+
+    Returns:
+        List of GlobalWithTag objects in the same order as input
+    """
+    if skip_sql_updates:
+        # Return objects with dummy tags, no SQL operations
+        return [GlobalWithTag(obj, 0) for obj in objs]
+
+    if not objs:
+        return []
+
+    # Separate already-cached objects from new ones
+    result = [None] * len(objs)  # Pre-allocate result list to maintain order
+    new_objs_info = []  # List of (index, obj) for objects that need processing
+
+    for i, obj in enumerate(objs):
+        if obj in persistent_data_inverse:
+            result[i] = GlobalWithTag(obj, persistent_data_inverse[obj])
+        else:
+            new_objs_info.append((i, obj))
+
+    if not new_objs_info:
+        return result
+
+    # Pickle and hash all new objects
+    pickles_and_hashes = []
+    for idx, obj in new_objs_info:
+        p = persistent_pickle(obj)
+        h = hashlib.md5(p).digest()
+        pickles_and_hashes.append((idx, obj, p, h))
+
+    if stats:
+        stats['save_globals'] += len(pickles_and_hashes)
+        stats.timestamp('save_global_pickle_and_hash')
+
+    # Batch check for existing MD5s and batch insert new ones
+    with conn2:
+        with conn2.cursor() as cursor:
+            # Get all hashes to check
+            hashes_to_check = [h for _, _, _, h in pickles_and_hashes]
+
+            if hashes_to_check:
+                # Single query to check which MD5s already exist
+                cursor.execute("SELECT identifier, md5 FROM globals WHERE md5 = ANY(%s)",
+                             (hashes_to_check,))
+                existing = {bytes(md5): int(id) for id, md5 in cursor}
+
+                if stats:
+                    stats['duplicate_saves'] += len(existing)
+
+                # Prepare batch insert for new ones
+                to_insert = [(p, h) for idx, obj, p, h in pickles_and_hashes if h not in existing]
+
+                if to_insert:
+                    # Use executemany for batch insert
+                    cursor.executemany(
+                        "INSERT INTO globals (pickle, md5) VALUES (%s, %s) ON CONFLICT DO NOTHING",
+                        to_insert
+                    )
+
+                    # Get the identifiers for newly inserted items
+                    new_hashes = [h for _, h in to_insert]
+                    cursor.execute("SELECT identifier, md5 FROM globals WHERE md5 = ANY(%s)",
+                                 (new_hashes,))
+                    for id, md5 in cursor:
+                        existing[bytes(md5)] = int(id)
+
+                # Update caches and build result
+                for idx, obj, p, h in pickles_and_hashes:
+                    id = existing[h]
+                    persistent_data[id] = obj
+                    persistent_data_inverse[obj] = id
+                    result[idx] = GlobalWithTag(obj, id)
+
+        conn2.commit()
+
+    if stats:
+        stats.timestamp('save_global_sql')
+
+    return result
+
 # This routine isn't called anywhere (it's just for debugging) because the globals table is large
 # and we don't want to load the whole thing into memory.  But this is the idea.
 
@@ -953,18 +1041,13 @@ def unpack_eqns(eqns_encoded):
     return tuple(persistent_data[identifier] for identifier in identifiers)
 
 def dump_to_SQL(eqns, simplifications, origin, stats=None, verbose=False):
-    # This is a list that matches all_factors, but the polynomials are tagged. The tags
-    # (short strings that map to the polynomials) will be used to form the pickled objects
-    # that are saved to SQL.
-    eqns_tagged = []
-    simplifications_tagged = []
+    # Batch save all polynomials at once instead of one-by-one
+    all_polys = list(eqns) + list(simplifications)
+    tagged_polys = save_globals(all_polys, stats=stats)
 
-    for eqn in eqns:
-        tagged_eqn = save_global(eqn, stats=stats)
-        eqns_tagged.append(tagged_eqn)
-    for eqn in simplifications:
-        tagged_eqn = save_global(eqn, stats=stats)
-        simplifications_tagged.append(tagged_eqn)
+    # Split back into eqns and simplifications
+    eqns_tagged = tagged_polys[:len(eqns)]
+    simplifications_tagged = tagged_polys[len(eqns):]
 
     if verbose: print(time.ctime(), 'system', origin, ': insert into SQL')
     with conn.cursor() as cursor:
