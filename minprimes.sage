@@ -1065,9 +1065,10 @@ def dump_to_SQL(eqns, simplifications, origin, stats=None, verbose=False):
 # Of course, the remaining inner stages might run very quickly, but we don't know that, unless
 # we're willing to start them running and then kill them, which we currently don't do.
 
-def processing_stage(system, initial_simplifications, origin, start_time=None, verbose=False, stats=None, save_cnf2dnf_inputs=False, skip_sql_updates=False):
+def processing_stage(system, initial_simplifications, origin, start_time=None, depth=0, verbose=False, stats=None, save_cnf2dnf_inputs=False, skip_sql_updates=False):
     if stats:
         stats['stages'] += int(1)
+        stats[f'depth_{depth}_processed'] += int(1)
     if not start_time:
         start_time = time.time()
     simplifications, subsystems = inner_processing_stage(system, initial_simplifications, origin, verbose=verbose, stats=stats, save_cnf2dnf_inputs=save_cnf2dnf_inputs, skip_sql_updates=skip_sql_updates)
@@ -1081,8 +1082,13 @@ def processing_stage(system, initial_simplifications, origin, start_time=None, v
                     dump_to_SQL(subsystem, simplifications, origin, stats=stats, verbose=verbose)
                     if stats:
                         stats['dumped_to_SQL'] += int(1)
+                        stats[f'depth_{depth+1}_dumped'] += int(1)
+                        # Track where we first started dumping due to time limit
+                        if 'dump_trigger_depth' not in stats and elapsed_time > stage_processing_time:
+                            stats['dump_trigger_depth'] = depth
+                            stats['dump_trigger_elapsed_time'] = elapsed_time
             else:
-                processing_stage(subsystem, simplifications, origin, start_time=start_time, verbose=verbose, stats=stats, save_cnf2dnf_inputs=save_cnf2dnf_inputs, skip_sql_updates=skip_sql_updates)
+                processing_stage(subsystem, simplifications, origin, start_time=start_time, depth=depth+1, verbose=verbose, stats=stats, save_cnf2dnf_inputs=save_cnf2dnf_inputs, skip_sql_updates=skip_sql_updates)
                 if stats:
                     stats['recursed_subsystems'] += int(1)
 
