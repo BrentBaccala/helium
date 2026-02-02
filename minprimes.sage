@@ -1382,3 +1382,66 @@ def SQL_stage2_reset():
             cursor.execute("DELETE FROM staging WHERE origin != 0")
             cursor.execute("DELETE FROM staging_stats")
             cursor.execute("UPDATE staging SET current_status = 'queued', pid = NULL, node = NULL")
+
+def get_staging_stats(since_timestamp='1970-01-01 00:00:00'):
+    """Get aggregated statistics from staging_stats table.
+
+    Args:
+        since_timestamp: Only include stats from rows with start_time > this value.
+                        Can be a string timestamp or datetime object.
+
+    Returns:
+        Dictionary mapping stat labels to their values
+    """
+    with conn.cursor() as cursor:
+        # Get all column names from staging_stats except the ones we don't want to sum
+        cursor.execute("""
+            SELECT column_name
+            FROM information_schema.columns
+            WHERE table_schema = 'public'
+              AND table_name = 'staging_stats'
+              AND column_name NOT IN ('identifier', 'node', 'pid', 'start_time', 'memory_utilization')
+            ORDER BY column_name
+        """)
+        columns = [row[0] for row in cursor.fetchall()]
+
+        if not columns:
+            return {}
+
+        # Build the sum clauses
+        sum_clauses = ',\n        '.join(f'sum({col}) as {col}' for col in columns)
+
+        # Build the VALUES clauses for unpivoting
+        values_clauses = ',\n        '.join(f"('{col}', {col}::text)" for col in columns)
+
+        # Execute the dynamic query
+        query = f"""
+            WITH stats AS (
+                SELECT
+                    count(*) as cnt,
+                    {sum_clauses}
+                FROM staging_stats
+                WHERE start_time > %s
+            )
+            SELECT label, value
+            FROM stats
+            CROSS JOIN LATERAL (
+                VALUES
+                    ('count', cnt::text),
+                    {values_clauses}
+            ) AS t(label, value)
+        """
+
+        cursor.execute(query, (since_timestamp,))
+
+        # Return as dictionary
+        return dict(cursor.fetchall())
+
+def print_staging_stats(since_timestamp='1970-01-01 00:00:00'):
+  stats = get_staging_stats(since_timestamp)
+  for label, value in stats.items():
+      if '_time' not in label:
+          print(f"{label}: {value}")
+  for label, value in stats.items():
+      if '_time' in label:
+          print(f"{label}: {value}")
