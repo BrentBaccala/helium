@@ -872,6 +872,8 @@ class Statistics(dict):
                 cursor.execute(f"ALTER TABLE staging_stats ADD COLUMN IF NOT EXISTS {k} TIMESTAMP")
             elif k not in ('identifier', 'node', 'pid', 'memory_utilization'):
                 cursor.execute(f"ALTER TABLE staging_stats ADD COLUMN IF NOT EXISTS {k} INTEGER")
+                if type(sql_data[k]) == sage.rings.integer.Integer:
+                    sql_data[k] = int(sql_data[k])
 
         cursor.execute(f"INSERT INTO staging_stats ({','.join(sql_data.keys())}) VALUES %s", (tuple(sql_data.values()),))
         # this next one will only print on the console; it won't appear in the SQL stats
