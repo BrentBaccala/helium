@@ -1437,10 +1437,12 @@ def get_staging_stats(since_timestamp='1970-01-01 00:00:00'):
         cursor.execute(query, (since_timestamp,))
 
         # Return as dictionary
-        return dict(cursor.fetchall())
+        result = dict(cursor.fetchall())
 
     # I don't understand why this is needed, but running print_staging_stats() without it deadlocks PostgreSQL
     conn.rollback()
+
+    return result
 
 def print_staging_stats(since_timestamp='1970-01-01 00:00:00'):
   stats = get_staging_stats(since_timestamp)
