@@ -1071,9 +1071,9 @@ def processing_stage(system, initial_simplifications, origin, start_time=None, v
     if not start_time:
         start_time = time.time()
     simplifications, subsystems = inner_processing_stage(system, initial_simplifications, origin, verbose=verbose, stats=stats, save_cnf2dnf_inputs=save_cnf2dnf_inputs, skip_sql_updates=skip_sql_updates)
-    elapsed_time = time.time() - start_time
     if subsystems:
         for subsystem in subsystems:
+            elapsed_time = time.time() - start_time
             # origin 0 is special because it won't polish in inner_processing_stage; instead, it'll loop forever
             # If we've been processing this stage for more than stage_processing_time seconds, dump to SQL
             if origin == 0 or elapsed_time > stage_processing_time:
